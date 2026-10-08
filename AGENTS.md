@@ -22,7 +22,7 @@ See `docs/agents/domain.md`.
 
 ## 설치·실행·검사 명령
 
-현재는 문서만 있으며 패키지·CLI·테스트 설정은 미구현이다. 아래 명령은 설정/구현 후 사용한다.
+현재 doctor·smoke-episode·pytest·mypy와 Python/Node 패키지 설정을 구현했다. 아래 후속 실험 명령은 각 기능 구현 후 사용한다.
 설치·실행 계약은 `PLAN.md` §14, 검사 도구는 아래 개발 명령을 설정할 때 의존성을 명시한다.
 모든 명령은 저장소 루트에서 실행한다.
 
@@ -30,6 +30,7 @@ See `docs/agents/domain.md`.
 uv sync
 npm --prefix bridge ci
 uv run mc-diamond doctor --config configs/pilot.yaml
+uv run mc-diamond smoke-episode --config configs/pilot.yaml
 uv run mc-diamond verify-clock --config configs/pilot.yaml
 uv run mc-diamond audit-information --config configs/pilot.yaml
 uv run mc-diamond smoke-macros --config configs/pilot.yaml
@@ -50,11 +51,11 @@ uv run pytest
 uv run mypy .
 ```
 
-`pytest`/`mypy`는 현재 미설정이다. 실행 불가·미실행은 그대로 보고한다.
+`pytest`/`mypy` 의존성은 pyproject.toml의 dev 그룹이다. 실행 불가·미실행은 그대로 보고한다.
 
 ## 폴더 구조
 
-- 현재: `PLAN.md`, `PRD.md`, `DECISIONS.md`, `GLOSSARY.md`, `docs/agents/`.
+- 현재: 기준 문서, `PROGRESS.md`, `src/mc_diamond/`, `configs/pilot.yaml`, `fixtures/`, `tests/`, `bridge/` 패키지 설정.
 - `CONTEXT.md`가 있으면 작업 맥락을 읽고, 관련 `docs/adr/`가 있으면 결정을 따른다.
 - 예정 `configs/`: base/pilot/experiment/goals/curriculum 설정 및 `experiment_lock.json`.
 - 예정 `bridge/`: JSONL RPC, world/reset, clock/pause, 제한 관측, 매크로.

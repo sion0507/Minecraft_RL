@@ -6,8 +6,8 @@
 
 ## 현재 상태
 
-연구 방향과 스펙은 확정되었으며, 현재 저장소에는 문서만 있습니다.
-구현 코드·패키지 설정·테스트·CLI는 아직 없고, 설치·API 접근·학습 효과·실험 결과는 미검증입니다.
+연구 방향과 스펙은 확정되었으며, 이슈 #2의 환경 진단·공통 자료형·JSONL RPC·모의 에피소드·pytest/mypy를 구현했습니다.
+실제 Minecraft 연결·정지·모델/API·PPO·학습 효과·실험 결과는 미검증입니다. 실행 결과와 남은 작업은 [PROGRESS.md](PROGRESS.md)에 기록합니다.
 
 ## 실험 범위
 
@@ -29,16 +29,32 @@
 - `Qwen/Qwen2.5-7B-Instruct` 고정 계획기, `C-Tianyu/NanoJev` Choice 및 local/full 가치 헤드 학습.
 - 기본 장비: RTX 5070 Ti 16GB, RAM 32GB.
 
-아래는 패키지와 CLI 구현 후 사용할 명령입니다. 현재 바로 실행 가능한 설치 안내는 아닙니다.
+Python 3.12 이상과 Node 22 이상이 필요합니다. `uv`를 설치하고 아래 명령을 저장소 루트에서 실행합니다.
+이번 작업공간에는 `uv`를 `.tools/uv`에 설치했으므로 `export PATH="$PWD/.tools:$PATH"`로 사용할 수 있습니다.
 
 ```bash
 uv sync
 npm --prefix bridge ci
 uv run mc-diamond doctor --config configs/pilot.yaml
+uv run mc-diamond smoke-episode --config configs/pilot.yaml
+uv run pytest
+uv run mypy .
 ```
 
+`doctor`는 실제 도구·연산 결과를 stdout JSONL로, 부재·오류 설명을 stderr로 내보냅니다. 검사가 모두 사용 가능하면 0, 부재·오류가 있으면 1을 반환합니다.
+GPU 검사는 CUDA 드라이버 API로 직접 작은 산술 커널을 실행합니다. `nvcc` 부재와 GPU 연산 실패를 별도로 표시합니다. 제한된 샌드박스에서는 GPU 접근 실패가 실제 장비 상태와 다를 수 있습니다.
+
+`smoke-episode`는 제공된 모의 fixture를 subprocess backend로 실행하고 reset→관측→고정 목표→후보→선택→실행→진단 보상→요약을 출력합니다.
+모의 보상은 획득 사건 수이고, 실제 local/full 보상·PPO·다이아 성공 판정의 검증이 아닙니다. 정상 종료/유효 절단은 0, backend 오류/무효 경험은 1, 설정 오류는 2입니다.
+실제 backend는 설정의 `backend: rpc`와 `command`로 같은 실행 경로에 연결할 수 있으며 `fixture`는 제거합니다. 현재 실제 게임 backend는 제공하지 않습니다.
+
+RPC backend는 `--admin-fd <fd>`로 전달받은 파이프에서 reset만, stdin에서 observe/step만 받아야 합니다. 두 채널의 응답은 request_id에 맞춰 stdout JSONL로 반환하고 진단은 stderr에 기록합니다.
+요청은 `request_id/method/payload`, 응답은 `request_id`와 정확히 하나의 `result/error`를 가지며 현재 호출은 직렬입니다.
+자료형과 허용 필드는 [schema.py](src/mc_diamond/schema.py)에 있습니다. 결과·후보 ID·원본 관측·mask와 episode/attempt ID를 로그에 보존합니다.
+알 수 없는 관측 필드와 RPC 결과는 오류로 종료하고 원본 오류 입력을 로그에 출력하지 않습니다.
+
 시계·정보 경계·모델·학습 연결 진단 및 예산 확인 후 실험 설정을 고정합니다.
-전체 실행 계약은 [PLAN.md §14](PLAN.md#14-구현-후-사용할-명령), pytest·타입체크 예정 명령은 [AGENTS.md](AGENTS.md)에 있습니다.
+후속 명령은 아직 구현되지 않았습니다. 전체 실행 계약은 [PLAN.md §14](PLAN.md#14-구현-후-사용할-명령), 개발 지침은 [AGENTS.md](AGENTS.md)에 있습니다.
 
 ## 문서
 

@@ -7,6 +7,8 @@
 
 # Python environments, caches, and build output
 .venv/
+.bootstrap/
+.tools/
 venv/
 __pycache__/
 *.py[cod]

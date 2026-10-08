@@ -1,0 +1,8 @@
+{
+  "name": "mc-diamond-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pinned Mineflayer dependency; live Minecraft backend is not implemented yet",
+  "engines": {"node": ">=22"},
+  "dependencies": {"mineflayer": "4.39.0"}
+}

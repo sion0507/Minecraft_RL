@@ -47,3 +47,13 @@ Q1–Q10과 조건부 게임 지식 조회 보완을 사용자 답변대로 확�
 
 - [OpenRouter 응답 명세](https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request)와 [TypeSafe Choice 문서](https://docs.typesafe.ai/primitives/choice)에 모든 후보의 확률 분포가 명시되어 있다. 실제 계정·프로젝트 입력의 응답 검증은 미실행이며, 9.3절의 분포 검증과 평가 모드 고정 규칙을 유지한다.
 - [Jev 1.13 모델 페이지](https://openrouter.ai/typesafe/jev-1.13/)의 확인일 기준 요율은 입력 100만 토큰당 $0.042, 출력 $0이다. 이는 모델 사용료이며 충전·플랫폼 수수료와 구분한다. 허용 모델 API 사용료 상한은 2차 검토에서 총 US$5로 확정했으며 실제 계정 접근·사용량·과금 검증은 미실행이다.
+
+## 2026-10-09 — 이슈 #2 실행 기반
+
+- Python 패키지는 `src/mc_diamond`에 둔다. argparse·subprocess·selectors·ctypes를 사용하고 Pydantic은 RPC 자료형 검증, PyYAML은 확정 YAML 설정 계약, pytest/mypy는 개발 검사에 사용한다. 배포 의존성은 uv.lock과 bridge/package-lock.json에 고정한다.
+- 모의 backend도 subprocess JSONL RPC와 공통 에피소드 실행기를 통과한다. 관리자는 별도 상속 FD로 reset하고 정책 stdin은 observe/step만 허용한다. 향후 Node backend도 같은 계약과 공개 실행 경로를 사용한다.
+- 리뷰 보완: JSON 형식으로 전달된 유효 request_id는 나머지 요청 schema가 잘못돼도 같은 ID로 오류를 반환한다. 실제 사건 출처 minecraft를 공통 wire에 허용하고, 제공 mock backend는 mock 출처와 mock 시계만 허용한다.
+- 고정 collect 목표와 노출 원목 후보만 진단용으로 연결한다. 진단 보상은 획득 사건 수이며 local/full 보상·모델 선택·actor 경험·다이아 성공을 구현했다고 표시하지 않는다. 후속 티켓에서 연구 계약을 확장한다.
+- CUDA toolkit 없이도 실제 GPU 연산을 확인하도록 자체 PTX 산술 커널과 드라이버 API를 사용한다. nvcc 도구 부재·NVIDIA 접근 오류·GPU 연산 결과를 구분한다. 샌드박스 결과와 장비 접근이 허용된 실행 결과를 구분해 기록한다.
+- 시스템 ROS PYTHONPATH가 외부 pytest plugin을 자동 로드해 lark 부재로 실행을 막았다. 프로젝트 pytest는 자동 plugin 로드를 끄며 잠금된 검사 도구만 사용한다.
+- npm audit의 여섯 moderate 경고는 uuid 버퍼 검사 권고에서 전파됐다. 현재 확인한 로그인 의존성은 v4를 호출하지만 실제 인증 경로는 미검증이다. Mineflayer를 1.4.0으로 낮추라는 자동 수정이나 미검증 major override는 적용하지 않고 후속 실제 연결 작업의 위험으로 기록한다.
