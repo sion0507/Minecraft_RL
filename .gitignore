@@ -1,0 +1,47 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python environments, caches, and build output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Node.js dependencies
+node_modules/
+
+# Downloaded models and Minecraft binaries
+*.safetensors
+*.gguf
+*.pt
+*.pth
+*.jar
+.minecraft/
+
+# Local experiment output (keep configs and dependency lockfiles tracked)
+/runs/
+/artifacts/
+/checkpoints/
+/worlds/
+.cache/
+*.log
+
+# Editor and operating system files
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
