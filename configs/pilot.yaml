@@ -1,0 +1,9 @@
+backend: mock
+fixture: ../fixtures/mock_episode.json
+max_decisions: 8
+rpc_timeout_seconds: 5.0
+goal:
+  goal_id: smoke-log
+  kind: collect
+  target: oak_log
+  quantity: 1

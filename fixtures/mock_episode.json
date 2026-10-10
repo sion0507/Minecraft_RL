@@ -1,0 +1,23 @@
+{
+  "initial": {
+    "episode_id": "fixture", "attempt_id": "fixture", "obs_id": "obs-0",
+    "active_ticks": 0, "objective_kind": "local", "remaining_ticks": 100,
+    "position": [0.0, 64.0, 0.0], "velocity": [0.0, 0.0, 0.0],
+    "health": 20.0, "oxygen": 300, "on_fire": false, "on_ground": true,
+    "in_liquid": false, "inventory": {}, "tool": null, "tool_durability": null,
+    "observed_map": [{"block": "oak_log", "position": [1.0, 64.0, 0.0]}], "history": []
+  },
+  "steps": [{
+    "observation": {
+      "episode_id": "fixture", "attempt_id": "fixture", "obs_id": "obs-1",
+      "active_ticks": 20, "objective_kind": "local", "remaining_ticks": 80,
+      "position": [0.0, 64.0, 0.0], "velocity": [0.0, 0.0, 0.0],
+      "health": 20.0, "oxygen": 300, "on_fire": false, "on_ground": true,
+      "in_liquid": false, "inventory": {"oak_log": 1}, "tool": null, "tool_durability": null,
+      "observed_map": [], "history": ["mock acquisition"]
+    },
+    "actual_ticks": 20, "events": [{"kind": "acquired", "item": "oak_log", "quantity": 1, "source": "mock"}],
+    "terminated": true, "truncated": false, "invalid": false, "reason": "mock_goal_completed",
+    "clock_mode": "mock", "pause_verified": false, "stable_boundary": true, "wall_seconds": 0.0
+  }]
+}

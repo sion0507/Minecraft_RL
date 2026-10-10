@@ -1,0 +1,26 @@
+[project]
+name = "mc-diamond"
+version = "0.1.0"
+description = "Minecraft action-selection experiment diagnostics"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.12,<3", "PyYAML>=6,<7"]
+
+[project.scripts]
+mc-diamond = "mc_diamond.cli:main"
+
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest>=9,<10", "mypy>=1.18,<2", "types-PyYAML>=6,<7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--disable-plugin-autoload"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+exclude = ["^\\.bootstrap/", "^\\.tools/"]
+plugins = ["pydantic.mypy"]
