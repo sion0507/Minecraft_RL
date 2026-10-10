@@ -15,9 +15,10 @@ See `docs/agents/domain.md`.
 - Python + uv: 모델 추론, PPO 학습, 평가, `mc-diamond` CLI.
 - Node.js + Mineflayer: Minecraft 연결, 제한 관측, 후보·매크로 실행.
 - Minecraft Java Edition 1.16.5, Survival/Peaceful; 서버·클라이언트 정지는 실제 검증한다.
-- 계획기: `Qwen/Qwen2.5-7B-Instruct`, 초기 4비트 추론, 가중치 고정.
+- A/B/J 계획기: 동일한 최종 `Qwen/Qwen2.5-7B-Instruct` 가중치·설정, 초기 4비트 추론. 기본은 공개 가중치 고정; 조건부 학습은 `PLAN.md` §5.6을 따른다.
 - 행동 모델: `C-Tianyu/NanoJev` (`unified-games-v1`); Choice 및 local/full 가치 헤드만 학습.
 - J: OpenRouter alpha decisions API의 기존 Jev; 실제 ID·응답·과금을 확인해 고정.
+- F: 고정 Astra 계획기 + J와 동일한 Jev/설정의 핵심 참조 시스템; 접근·추가 시간·비용을 본 학습 전에 우선 확인한다.
 - 기본 장비: RTX 5070 Ti 16GB, RAM 32GB. Python/Node/Java/CUDA 버전은 설치 때 확인한다.
 
 ## 로컬 환경 설치 및 사용자 승인
@@ -50,7 +51,7 @@ uv run mc-diamond budget --config configs/experiment.yaml
 uv run mc-diamond freeze-experiment --config configs/experiment.yaml
 uv run mc-diamond train --group B --train-seed 11 --lock configs/experiment_lock.json
 uv run mc-diamond compare-checkpoints --lock configs/experiment_lock.json
-uv run mc-diamond evaluate --groups A,B,J --task C4 --lock configs/experiment_lock.json
+uv run mc-diamond evaluate --groups A,B,J,F --task C4 --lock configs/experiment_lock.json
 uv run mc-diamond evaluate --groups A,B --task G4 --lock configs/experiment_lock.json
 uv run mc-diamond analyze --runs runs --output artifacts --lock configs/experiment_lock.json
 uv run pytest
@@ -79,7 +80,9 @@ uv run mypy .
 - 기존 사용자 파일·Git 이력을 보존하고 기존 도구·표준 라이브러리·허용된 의존성을 우선한다.
 - 테스트는 공개 CLI의 reset→관측→목표→후보→선택→실행→보상→학습/평가→요약 흐름을 검증한다.
 - 최소 모의 backend와 짧은 수치 예제를 사용하고, 실제 물리·모델·과금은 실제 진단으로 확인한다.
-- A/B/J는 공통 관측·후보·실행·복구·시간 규칙을 사용한다. BC와 F/Astra는 이번 범위에서 제외한다.
+- A/B/J/F는 공통 관측·지식 조회·목표·후보·실행·검증·복구·시간 규칙을 사용한다. BC는 제외한다. A↔B는 행동 PPO 효과, B↔J는 동일 7B에서 모델 비교, J↔F는 동일 Jev에서 계획기 비교, B↔F는 전체 시스템 비교다.
+- 핵심 최종 평가는 기존 C4 17+F 5+G4 6=28회다. 사전 축소 시 A/B/J/F 주 평가 모두 각 3회로 총 20회이며 G4 6회를 유지한다. F 불가이면 예정 슬롯 미실행과 연구 질문 미검증을 명시한다.
+- 계획기 문제는 진단→지식·입력·검증·재계획 보완→공통 6상태 Astra 비교→§5.6의 여섯 조건 검토 순으로 대응한다. 7B 학습은 최후의 별도 제안이며 분석·비용 보고와 사용자 명시적 승인 후에만 실행한다. 실행 시 행동 PPO 전에 완료·검증하고 A/B/J 최종 7B를 동일하게 고정한다.
 - 본 학습은 B 1회, local/full 각 15,000결정이다. 필수 G4를 유지하고 추가 실험은 자동 실행하지 않는다.
 - 본 학습 전 모델 revision/hash, snapshot, 난수, 설정, 시계·평가 방식과 예산을 lock에 고정한다.
 - 정책·계획기·후보·경로·중단 판단은 같은 제한 관측을 사용한다. 숨은 광석/위험·시드·전체 청크·관리자 정보는 차단한다.
@@ -90,6 +93,6 @@ uv run mypy .
 - 정지 실패는 먼저 수정한다. 실시간 대안은 본 학습 전 공통 검증·예산 확인 후 적용한다.
 - 복구는 원자 저장한 에피소드 경계로 되돌린다. reset 게임과 중간 ledger를 섞지 않고 폐기 경험·시간·비용을 기록한다.
 - 평가는 예정 슬롯 분모를 유지한다. 서버 오류만 같은 snapshot/RNG로 최대 1회 재시도하고 모든 시도를 기록한다.
-- Jev 총 모델 API 비용은 실패·재시도 포함 US$5 이내다. 비밀키는 Git·문서·로그·lock에서 제외한다.
+- Jev 총 모델 API 비용은 J/F·진단·실패·재시도 포함 US$5 이내다. Astra 비용·F 추가 시간/GPU/PC 점유는 별도 산정하고 지출 상한을 승인받는다. 기존 180시간 충분성은 실측으로 확인하며 임의 증액하지 않는다. 비밀키는 Git·문서·로그·lock에서 제외한다.
 - 외부 코드·프롬프트는 명시적 허용 범위에서만 재사용하고 출처를 기록한다.
 - 미실행·mock 결과를 실제 검증으로 표시하지 않는다. 고정 환경 적응과 새로운 월드 일반화를 구분한다.
