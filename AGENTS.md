@@ -20,6 +20,12 @@ See `docs/agents/domain.md`.
 - J: OpenRouter alpha decisions API의 기존 Jev; 실제 ID·응답·과금을 확인해 고정.
 - 기본 장비: RTX 5070 Ti 16GB, RAM 32GB. Python/Node/Java/CUDA 버전은 설치 때 확인한다.
 
+## 로컬 환경 설치 및 사용자 승인
+
+- 구현에 필요한 시스템 패키지, Minecraft 서버, AI 모델 가중치, Python/Node.js/CUDA 의존성은 가능한 범위에서 에이전트가 직접 설치·설정하고 실제 작동까지 검증한다.
+- sudo 권한, 라이선스 동의, API 키, 계정 인증, 유료 결제 등 사용자 개입이나 승인이 필요한 경우 임의로 진행하지 않고 사용자에게 요청한다.
+- 설치·실행·검증 실패를 완료로 표시하지 않으며, 원인과 필요한 사용자 조치를 기록한다.
+
 ## 설치·실행·검사 명령
 
 현재 doctor·smoke-episode·pytest·mypy와 Python/Node 패키지 설정을 구현했다. 아래 후속 실험 명령은 각 기능 구현 후 사용한다.
