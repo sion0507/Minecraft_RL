@@ -15,3 +15,9 @@ RpcPolicy delegation serves the documented administrator/policy boundary. Deferr
 2. Issue #2 requires replacing the backend while retaining the public execution flow and distinguishing actual/mock results. Event.source previously accepted only mock. Fixed by allowing minecraft provenance and retaining a strict mock-only fixture backend. `test_rpc_wire_can_carry_actual_backend_provenance` confirms the same CLI flow with scripted external replies. RED→GREEN confirmed; this test establishes wire compatibility, not physical-game behavior.
 
 Final verification: full pytest 17 passed, strict mypy passed for 9 files. No unresolved review finding. Reviewers did not repeat network/GPU checks; author verification and the residual moderate npm audit warnings are recorded in PROGRESS.md.
+
+## Final integration review — 2026-10-10
+
+Compared current Issue #1/#2 (no comments) and `3183b52...5c26f95`, including the separately authorized research/installation documents. Independent Standards and Spec reviewers each found 0 material findings. No implementation changes were needed. Issue #2 delivers environment diagnostics and the reusable mock/public RPC flow; live game/model/PPO work remains in the existing follow-up tickets.
+
+Fresh verification: `UV_CACHE_DIR=.cache/uv .tools/uv run --locked pytest` passed all 17 tests; the corresponding `mypy .` passed all 9 files. Public smoke emitted reset→observation→goal→candidates→selection→step→reward→summary, completed in 1 decision/20 ticks with null probabilities, diagnostic reward 1.0, actor transitions 0 and diamond success false. Actual doctor verified Python/Node/Java/GPU sums of 10 and Mineflayer 4.39.0 import on RTX 5070 Ti. Sandbox GPU access failed and was retried with actual-device access. `nvcc` is still missing, so doctor correctly exits 1 with ready=false; Minecraft/model verification remains false. The documented authentication dependency audit warnings were not re-audited or declared resolved.
