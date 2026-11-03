@@ -1,5 +1,64 @@
 # 실행 기록
 
+## 2026-11-03 — PR #29 수정본 실제 재검증 완료
+
+수정 코드 `ad2790b`를 `origin/ticket-4`에 푸시했다. Standards의 P2 두 건을 재현·수정했고 수정본 독립 재검토는 남은 중대한 문제 없음, Spec도 남은 차단 지적 없음이다. GitHub 계정의 approve 리뷰로 표시하지 않는다.
+
+- 수정본 공개 verify-clock은 **exit 0, 63/63 통과**다. backend/terrain 변경으로 무효화된 과거 인증을 사용하지 않고 새 코드 fingerprint로 실제 다시 검사했다.
+- 공개 audit-information은 **exit 0, information_verified=true, 46.63초**다. 숨은 두 경우의 공개 셀 1,161개·후보 8개·입력 hash `7c35ab78e49d07ccd3a42abb987471f493db1acb65147cddb88f554e4e4dc38d`와 실행/중단 결과가 같다. 두 이동 모두 **18틱·2.1548446042413616블록·path_completed·정지 인증/안정 경계 true**다. 벽을 연 두 양성 대조에서 해당 광석/용암을 관측했다.
+- 자연 지형 smoke-movement는 **exit 0, movement_completed=true, 2결정·47 활성 틱·6.37928897648239블록·17.63초**다. 두 step 모두 path_completed·pause_verified=true·stable_boundary=true. actor 0·보상 0·다이아 성공 false이며 decision_limit 절단이다.
+- 마지막 C4 기준 reset 후 active_ticks=0·빈 인벤토리·체력 20·reset/observe 일치를 확인하고 서버를 종료했다. 수정본 검사 코드와 raw artifact는 기존 파일을 덮지 않고 `artifacts/issue-4/pr29/`의 `final-check-pr29.py`, `verify-clock.jsonl`, `audit-information.jsonl`, `smoke-movement.jsonl`, `restore.json`, `final-checks.json`에 저장했다.
+
+최종 코드의 전체 pytest **38 passed(9.96초)**, strict mypy **16개 파일 통과**, Node 3개 파일 구문·공백 검사 통과다. 임시 검증 스크립트를 같은 이름으로 복사해 mypy의 Duplicate module 오류가 발생한 것은 검증 파일명을 `final-check-pr29.py`로 구분해 해결했고 재실행이 통과했다. 제품 설정/의존성은 바꾸지 않았다.
+
+기존 보고서를 보존하고 검토·수정·새 실제 재검증과 Git 상태를 `reports/issue-004-T03-2026-11-03-v2.{html,pdf}`에 기록했다. A4 2쪽의 한글/수치 추출·모든 글꼴 포함/subset/Unicode mapping과 두 페이지 이미지를 직접 확인했으며 잘림·깨진 글자·표 분리·문장만 남은 페이지가 없다. 최종 기록을 같은 PR에 반영한다. PR #29는 Open이며 main 머지·이슈 #4 종료는 수행하지 않는다. 얼음류 보행은 실제 제동 교정 전까지 제외하며 채굴·제작·계단·터널·모델/API·학습은 미실행이다.
+
+## 2026-11-03 — 이슈 #4 PR #29 생성·독립 검토 수정
+
+구현·문서·원본 보고서 18개 파일을 `0b928808b6f5855b754219a23ca0a920d66dfc58`로 커밋하고 `origin/ticket-4`에 푸시했다. [PR #29](https://github.com/sion0507/Minecraft_RL/pull/29)를 생성했으며 원격 head 일치·base main `624b9c6`·MERGEABLE·Open, 원격 statusCheckRollup 비어 있음을 확인했다. PR 본문에 실제와 mock/scripted 검증을 구분하고 #4를 연결했다. main 머지·이슈 종료는 수행하지 않는다.
+
+두 독립 검토자의 Standards/Spec 검토를 수행했다. Standards에서 P2 두 건을 재현했다. (1) 얼음 관성으로 이동 상한 16블록을 넘는 경우: ice/packed/frosted 16.8120, blue_ice 17.0373블록. 네 종류는 관측하되 제동 교정 전까지 support=false로 제외한다. (2) 무효 경로의 필수 1틱에서 실제 0.1블록 움직였지만 거리 0·stopped로 기록하는 경우: 중복 tick 처리를 합쳐 실제 변위를 기록한다.
+
+설치된 Physics/PlayerState와 실제 Terrain 관측을 쓰는 scripted fixture에서 첫 상한 초과 RED, 수정 후 실패 tick 거리 RED를 차례로 확인한 뒤 전체 pytest **38 passed(9.96초)**·strict mypy **15개 파일**·Node 3개 파일 구문·diff 공백 검사를 통과했다. 이 fixture는 실제 서버 검증이 아니다. 돌/슬라임은 각각 15.3222/15.8764블록으로 상한 안이며 얼음 네 종류는 경로를 거부하고 실패 1틱의 변위는 실제 0.1블록과 일치한다.
+
+수정본 재검토에서 Standards 두 건 해결·남은 중대한 문제 없음, Spec 남은 차단 지적 없음이다. 사용자 요청에 따라 수정 commit을 같은 PR에 푸시하고 실제 정지 인증·정보 감사·이동을 새 코드로 재검증한다. 이 문단 작성 시 실제 재검증은 진행 중이며 완료를 주장하지 않는다. 과거 보고서와 raw artifact는 보존한다.
+
+## 2026-11-03 — 이슈 #4 커밋·푸시·PR 검토 준비
+
+사용자가 이슈 #4의 커밋·푸시·PR 생성과 검토를 요청했다. `ticket-4`와 최신 `origin/main`의 공통 기준은 `624b9c6`이다. 이슈 #4는 Open이며 기존 ticket-4 PR은 없고 최신 #1/#4 본문·댓글을 재조회했다. 실제 코드·보고서·문서만 커밋하며 월드/원시 artifact/캐시를 제외한다. 기존 PDF/HTML의 작성 당시 미커밋 상태는 보존한다.
+
+직전 전체 pytest **37 passed(9.65초)**, strict mypy **15개 파일 통과**, Node 두 파일 구문·diff 공백 검사 통과. 코드/게임 환경을 바꾸지 않았으므로 기존 실제 정지 63/63·이동·정보 감사를 이 단계에서 불필요하게 재실행하지 않는다. PR 검토에서 런타임을 바꾸면 정지 인증과 실제 검증을 다시 확인한다. main 머지·이슈 종료는 이번 요청에 포함하지 않는다.
+
+## 2026-11-03 — 이슈 #4 / T03 제한 관측·이동·정보 감사 완료
+
+사용자 요청으로 다음 티켓을 확인했다. #2/T01과 #3/T02는 Closed이며 #3은 PR #28로 main에 머지됐다. main `624b9c6`에서 `ticket-4`를 생성했다. 샌드박스의 Git ref 쓰기 제한 후 승인된 재실행으로 브랜치를 만들었다. GitHub #1/#4 본문·댓글(댓글 없음), PLAN §§4.1–4.3/5.2/12–14와 기존 실행기를 기준으로 구현했다. 현재 변경은 미커밋·미푸시이며 PR 생성·main 머지·이슈 #4 종료는 수행하지 않았다.
+
+### 구현
+
+- `bridge/terrain.js`는 눈 위치에서 반경 8블록 셀 중심으로 광선을 보내 처음 충돌 표면/위험에서 중단한다. 통과한 공기·비충돌 식물과 직접 보인 표면·관측 지도·방문/최근 결과만 저장하고 reset마다 비운다. 미로딩 셀을 통행 지도로 넣지 않고 시드·관리자 상태·전체 청크·숨은 블록을 후보/경로/중단에 제공하지 않는다.
+- 공개 지도 BFS로 같은 높이의 바닥·발/머리 공간을 연결해 최대 8개·16블록/400틱의 보행 후보를 만든다. Node도 원본 obs/map과 경로 연속성·공개 전제조건을 검증하며 각 기본 이동 뒤 관측을 갱신한다. 공개 위험·피해·길 변경·정체에서 중단하고 정상 종료는 입력 해제 후 공개 지면·수평 정지를 확인한다. 보행 중 클라이언트 물리도 서버 실제 틱 수만큼만 실행한다.
+- 기존 공개 episode 흐름에 `smoke-movement`를 추가했다. moved/stopped 사건, source obs·map 버전·경로·중단 근거·틱·거리·경과 시간을 기록하고 안정된 경로 완료가 없으면 exit 1이다. RPC 시작 오류를 실제 mock 시계로 표시하지 않고 unverified로 구분한다.
+- `audit-information`은 관리자 전용으로 진단용 벽 뒤 광석/용암 장면을 준비하고 일반 정책 observe/step으로 비교한다. run ID·벽시계만 제외해 관측·후보·경로·실행/중단 근거의 일치를 요구하고, 벽을 연 양성 대조에서 노출도 확인한다. 관리자 준비 데이터를 정책 관측에 섞지 않는다. 실제 정지 인증·최대 틱·거리·사건 출처·관측/지도/경로 근거도 검사한다. 자연 snapshot은 보존한다.
+
+### 실제 Minecraft 검증 (2026-11-03)
+
+- 공개 `verify-clock`: **exit 0, 63/63 통과**, 위치 허용 오차 0.001블록. 평지·제련·드롭·용암·낙하·침수·화염의 0/5/10초 각 3회다. 변경된 backend/terrain을 포함한 새 fingerprint로 인증했고 과거 인증을 재사용하지 않았다. 원시 근거 `artifacts/issue-4/verify-clock.jsonl`.
+- 공개 `audit-information`: **exit 0, information_verified=true**, 46.71초. 숨은 두 장면은 노출 전 각각 공개 셀 1,161개·후보 8개이고 입력 SHA-256 `7c35ab78e49d07ccd3a42abb987471f493db1acb65147cddb88f554e4e4dc38d`가 같다. 두 실행 모두 **18틱·2.1548446042413616블록·path_completed·안정 경계**, 지도 버전 6이며 관측·경로·사건·중단 근거가 정확히 같았다(벽시계 제외). 벽을 연 광석/용암 장면은 각각 공개 셀 1,175개에서 해당 대상을 직접 관측했다. `hidden_hazard_peek=false`; 실제 관리자 진단 장면이며 자연 광석 성공이 아니다. 원시 근거 `artifacts/issue-4/audit-information.jsonl`.
+- 최종 공개 `smoke-movement`: **exit 0, movement_completed=true**, 2결정·47 활성 틱·총 6.37928897648239블록·17.56초. 두 step 모두 path_completed·pause_verified=true·stable_boundary=true. 각각 15/32틱, 지도 버전 12/42다. actor 전이 0·보상 0·다이아 성공 false이며 유효 decision_limit 절단이다. 원시 근거 `artifacts/issue-4/smoke-movement.jsonl`.
+- 진단 뒤 C4 기준 snapshot으로 다시 reset했다. 활성 틱 0·빈 인벤토리·체력 20과 reset/observe 일치를 확인하고 서버를 정상 종료했다. 진단 장면을 현재 월드로 남기지 않았다. 검사 코드/근거: `artifacts/issue-4/final-check.py`, `restore.json`, `final-checks.json`.
+
+### 실패·수정·독립 검토
+
+최초 sandbox 실행은 서버 소유권 확보 실패였고 승인된 실제 장비 실행으로 재검증했다. 첫 실제 이동은 풀을 불투과 셀로 분류해 발밑 지면이 누락되어 중단됐다. 공개 관측으로 원인을 확인하고 비충돌 식물은 통과하도록 고쳤다. 다음 시도는 접지 중의 정상 `vy=-0.0784000015258789`를 이동으로 오인해 안정화가 끝나지 않고 RPC timeout이 발생했다. 실제 T02 기록·설치 물리 코드를 대조하고 접지·수평 정지 판정을 RED→GREEN으로 고쳤다. timeout 시도는 완료된 step이 없어 부분 활성 틱을 확정값으로 주장하지 않으며 actor 경험은 없다. 실패/중간 결과 `movement-attempt-1.jsonl`, `movement-attempt-2.jsonl`, `movement-before-final-check.jsonl`을 보존했다.
+
+별도 읽기 전용 코드 검토에서 3축 광선 동률의 뒤 모서리 조회 결함을 재현했다. 첫 차단에서 즉시 반복을 중단해 숨은 셀 조회 7회→0회로 고쳤다. smoke가 대기/불안정만으로 성공하는 문제와 죽은 플레이어의 physicsTick 대기도 보완했다. 수정본 독립 재검토는 남은 중대한 문제 없음이다. 후속 자가 검토로 감사의 동일한 401틱 응답 허용을 RED→GREEN으로 수정했다. 검토 상세 `docs/reviews/issue-4.md`.
+
+전체 pytest **37 passed(9.66초)**, strict mypy **14개 파일 통과**, Node 두 파일 구문·diff 공백 검사 통과. 모의/transport 검사는 실제 물리 근거와 구분한다. 검토 PDF·HTML을 `reports/issue-004-T03-2026-11-03.{pdf,html}`에 저장했다. PDF는 A4 2쪽이며 한글/핵심 수치 추출·모든 글꼴 포함/subset/Unicode mapping을 확인했다. 두 페이지를 PNG로 렌더링해 직접 읽었고 잘림·표 분리·깨진 글자·문장만 남은 페이지가 없다. WeasyPrint의 fontTools fallback 경고는 있었으나 출력/가독성 검사는 통과했다. 기존 보고서는 보존했다.
+
+### 제한과 다음 작업
+
+현재 보행은 같은 높이의 확인된 온전한 지면만 다루며 유리/부분 충돌 표면은 보수적으로 시야를 가린다. 일반 높이 차·점프·채굴·제작·계단·터널, 모델/API·PPO·전체 C4/G4 평가·온라인 인증은 미실행이다. 후속 제작/하강/터널 감사는 담당 티켓과 최종 lock 전에 추가한다. 새로운 월드 일반화·자연 다이아 성공·행동 모델 성능을 주장하지 않는다. 새 의존성·모델 다운로드·학습·유료 호출·결제는 없다. 다음은 #5/T04 관측 원목 직접 수집이다.
+
 ## 2026-11-03 — PR #28 수정본 검토·실제 재검증 완료, 통합 준비
 
 리뷰 수정 코드 `21a63593992eb0b51630a1110c535ed83f85de51`을 `origin/ticket-3`에 푸시했다. 두 독립 검토자는 수정 diff를 재검토해 Standards 남은 차단 문제 0건, Spec 추가 차단 문제 0건으로 판정했다. Spec의 실제 재검증 조건도 아래 실행으로 충족했다. GitHub 계정의 승인 리뷰로 표시하지 않는다.

@@ -16,6 +16,9 @@ class Contract(BaseModel):
 class Surface(Contract):
     block: Identifier
     position: list[float] = Field(min_length=3, max_length=3)
+    passable: bool = False
+    support: bool = False
+    hazard: bool = False
 
 
 class Observation(Contract):
@@ -37,6 +40,11 @@ class Observation(Contract):
     tool_durability: Count | None
     observed_map: list[Surface]
     history: list[str]
+    yaw: float = 0.0
+    pitch: float = 0.0
+    map_version: Count = 0
+    visited: list[list[float]] = Field(default_factory=list)
+    hidden_hazard_peek: Literal[False] = False
 
 
 class Goal(Contract):
@@ -95,7 +103,7 @@ class SelectionResult(Contract):
 
 
 class Event(Contract):
-    kind: Literal["acquired", "wait"]
+    kind: Literal["acquired", "wait", "moved", "stopped"]
     item: str | None = None
     quantity: Count = 0
     source: Literal["mock", "minecraft"]
@@ -113,6 +121,11 @@ class StepResult(Contract):
     pause_verified: bool
     stable_boundary: bool
     wall_seconds: float = Field(ge=0)
+    source_obs_id: Identifier | None = None
+    map_version: Count = 0
+    path: list[list[float]] = Field(default_factory=list)
+    stop_evidence: list[str] = Field(default_factory=list)
+    distance_moved: float = Field(default=0.0, ge=0)
 
     @model_validator(mode="after")
     def validate_outcome(self) -> Self:
@@ -127,8 +140,10 @@ class EpisodeSummary(Contract):
     episode_id: Identifier
     attempt_id: Identifier
     backend: Literal["mock", "rpc"]
-    task: Literal["smoke"] = "smoke"
-    clock_mode: Literal["mock", "paused", "realtime"]
+    task: Literal["smoke", "movement_smoke"] = "smoke"
+    clock_mode: Literal["mock", "paused", "realtime", "unverified"]
+    movement_completed: bool = False
+    distance_moved: float = Field(default=0.0, ge=0)
     goal_completed: bool
     diamond_success: Literal[False] = False
     terminated: bool
@@ -146,7 +161,7 @@ class EpisodeSummary(Contract):
 
 class RpcRequest(Contract):
     request_id: Identifier
-    method: Literal["reset", "observe", "step", "prepare_world", "clock_trial", "certify_clock"]
+    method: Literal["reset", "observe", "step", "prepare_world", "clock_trial", "certify_clock", "information_fixture"]
     payload: dict[str, JsonValue]
 
 
