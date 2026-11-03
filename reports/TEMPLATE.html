@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>이슈 #번호 · T코드 검토 보고서 — 제목</title>
+  <link rel="stylesheet" href="report.css">
+</head>
+<body>
+<div class="kicker">MINECRAFT RL / ISSUE #번호 / T코드 / 작성 YYYY-MM-DD · 검증 기준 YYYY-MM-DD</div>
+<h1>검토할 이슈 제목</h1>
+<p class="lead">해결한 문제와 현재 가능한 동작을 한 문단으로 설명한다.</p>
+<div class="status pending"><strong>작성 시점 상태:</strong> 구현/검증, commit/push, PR merge, GitHub 종료 여부를 실제 근거대로 각각 적는다.</div>
+<table class="meta">
+  <tr><th>이슈</th><td>번호와 링크</td><th>브랜치</th><td>작업 브랜치</td></tr>
+  <tr><th>코드 기준</th><td>commit 또는 미커밋</td><th>기록 시점</th><td>실제 실행일/보고서 기준일</td></tr>
+</table>
+<h2>1. 목적과 구현</h2>
+<p>변경 전 문제, 구현한 동작, 주요 변경 파일과 기존 구조의 연결을 쓴다.</p>
+<h2>2. 수락 기준별 확인</h2>
+<table>
+  <tr><th>수락 기준</th><th>구현·검증 근거</th><th>판정</th></tr>
+  <tr><td>실제 이슈의 기준</td><td>파일·명령·관측한 결과</td><td>완료 / 부분 / 미실행</td></tr>
+</table>
+<h2>3. 검증 결과</h2>
+<p>실제 환경 실행, mock/scripted 검사, 미실행을 구분한다. 명령·일자·성공/실패 수·종료 코드·시간·비용을 근거 범위 안에서 적는다.</p>
+<h2>4. 실패·수정·남은 제한</h2>
+<p>처음의 실패도 남기고 수정 이유와 재검증을 적는다. 검증하지 않은 기능·환경, 잔여 문제와 다음 작업을 명시한다.</p>
+<h2>5. 검토 근거</h2>
+<p>PROGRESS.md, 검토 문서, raw artifact, 관련 코드와 GitHub 이슈/PR 경로를 기록한다.</p>
+<p class="small">필요하면 새 section에 class="page"를 지정한다. 템플릿 문구를 실제 내용으로 교체한 뒤 PDF로 출력한다.</p>
+</body>
+</html>
