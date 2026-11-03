@@ -1,5 +1,18 @@
 # 실행 기록
 
+## 2026-11-03 — PR #29 수정본 실제 재검증 완료
+
+수정 코드 `ad2790b`를 `origin/ticket-4`에 푸시했다. Standards의 P2 두 건을 재현·수정했고 수정본 독립 재검토는 남은 중대한 문제 없음, Spec도 남은 차단 지적 없음이다. GitHub 계정의 approve 리뷰로 표시하지 않는다.
+
+- 수정본 공개 verify-clock은 **exit 0, 63/63 통과**다. backend/terrain 변경으로 무효화된 과거 인증을 사용하지 않고 새 코드 fingerprint로 실제 다시 검사했다.
+- 공개 audit-information은 **exit 0, information_verified=true, 46.63초**다. 숨은 두 경우의 공개 셀 1,161개·후보 8개·입력 hash `7c35ab78e49d07ccd3a42abb987471f493db1acb65147cddb88f554e4e4dc38d`와 실행/중단 결과가 같다. 두 이동 모두 **18틱·2.1548446042413616블록·path_completed·정지 인증/안정 경계 true**다. 벽을 연 두 양성 대조에서 해당 광석/용암을 관측했다.
+- 자연 지형 smoke-movement는 **exit 0, movement_completed=true, 2결정·47 활성 틱·6.37928897648239블록·17.63초**다. 두 step 모두 path_completed·pause_verified=true·stable_boundary=true. actor 0·보상 0·다이아 성공 false이며 decision_limit 절단이다.
+- 마지막 C4 기준 reset 후 active_ticks=0·빈 인벤토리·체력 20·reset/observe 일치를 확인하고 서버를 종료했다. 수정본 검사 코드와 raw artifact는 기존 파일을 덮지 않고 `artifacts/issue-4/pr29/`의 `final-check-pr29.py`, `verify-clock.jsonl`, `audit-information.jsonl`, `smoke-movement.jsonl`, `restore.json`, `final-checks.json`에 저장했다.
+
+최종 코드의 전체 pytest **38 passed(9.96초)**, strict mypy **16개 파일 통과**, Node 3개 파일 구문·공백 검사 통과다. 임시 검증 스크립트를 같은 이름으로 복사해 mypy의 Duplicate module 오류가 발생한 것은 검증 파일명을 `final-check-pr29.py`로 구분해 해결했고 재실행이 통과했다. 제품 설정/의존성은 바꾸지 않았다.
+
+기존 보고서를 보존하고 검토·수정·새 실제 재검증과 Git 상태를 `reports/issue-004-T03-2026-11-03-v2.{html,pdf}`에 기록했다. A4 2쪽의 한글/수치 추출·모든 글꼴 포함/subset/Unicode mapping과 두 페이지 이미지를 직접 확인했으며 잘림·깨진 글자·표 분리·문장만 남은 페이지가 없다. 최종 기록을 같은 PR에 반영한다. PR #29는 Open이며 main 머지·이슈 #4 종료는 수행하지 않는다. 얼음류 보행은 실제 제동 교정 전까지 제외하며 채굴·제작·계단·터널·모델/API·학습은 미실행이다.
+
 ## 2026-11-03 — 이슈 #4 PR #29 생성·독립 검토 수정
 
 구현·문서·원본 보고서 18개 파일을 `0b928808b6f5855b754219a23ca0a920d66dfc58`로 커밋하고 `origin/ticket-4`에 푸시했다. [PR #29](https://github.com/sion0507/Minecraft_RL/pull/29)를 생성했으며 원격 head 일치·base main `624b9c6`·MERGEABLE·Open, 원격 statusCheckRollup 비어 있음을 확인했다. PR 본문에 실제와 mock/scripted 검증을 구분하고 #4를 연결했다. main 머지·이슈 종료는 수행하지 않는다.
