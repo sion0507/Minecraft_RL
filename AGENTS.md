@@ -10,6 +10,10 @@ See `docs/agents/issue-tracker.md`.
 Single-context layout: root `GLOSSARY.md` and `docs/adr/`.
 See `docs/agents/domain.md`.
 
+### 이슈 완료 보고서
+
+이슈 구현 완료를 보고할 때마다 검토용 PDF와 HTML 원본을 `reports/`에 저장하고 링크를 제공한다. [reports/README.md](reports/README.md)의 작성·출력·가독성 검사 규칙을 따른다. 구현/실제·mock 검증/미실행과 commit·push·merge·이슈 종료 상태를 구분하고 기존 완료 보고서를 보존한다.
+
 ## 스택
 
 - Python + uv: 모델 추론, PPO 학습, 평가, `mc-diamond` CLI.
@@ -30,7 +34,7 @@ See `docs/agents/domain.md`.
 
 ## 설치·실행·검사 명령
 
-현재 doctor·smoke-episode·pytest·mypy와 Python/Node 패키지 설정을 구현했다. 아래 후속 실험 명령은 각 기능 구현 후 사용한다.
+현재 doctor·smoke-episode·prepare-world·verify-clock·pytest·mypy와 Python/Node 패키지 설정을 구현했다. 모의 검사는 configs/pilot.yaml, 실제 Minecraft 검사는 configs/minecraft.yaml을 사용한다. 서버 설치·snapshot 준비는 README.md의 실제 Minecraft 실행 절을 따른다. 아래 나머지 후속 실험 명령은 각 기능 구현 후 사용한다.
 설치·실행 계약은 `PLAN.md` §14, 검사 도구는 아래 개발 명령을 설정할 때 의존성을 명시한다.
 모든 명령은 저장소 루트에서 실행한다.
 
@@ -39,7 +43,7 @@ uv sync
 npm --prefix bridge ci
 uv run mc-diamond doctor --config configs/pilot.yaml
 uv run mc-diamond smoke-episode --config configs/pilot.yaml
-uv run mc-diamond verify-clock --config configs/pilot.yaml
+uv run mc-diamond verify-clock --config configs/minecraft.yaml
 uv run mc-diamond audit-information --config configs/pilot.yaml
 uv run mc-diamond smoke-macros --config configs/pilot.yaml
 uv run mc-diamond smoke-planner --config configs/pilot.yaml

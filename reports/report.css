@@ -1,0 +1,53 @@
+@page {
+  size: A4;
+  margin: 17mm 17mm 18mm;
+  @bottom-left {
+    content: "Minecraft RL · 이슈 검토 보고서";
+    font-family: "Noto Sans CJK KR", sans-serif;
+    font-size: 8pt;
+    color: #64748b;
+  }
+  @bottom-right {
+    content: counter(page) " / " counter(pages);
+    font-family: "Noto Sans CJK KR", sans-serif;
+    font-size: 8pt;
+    color: #64748b;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: #243449;
+  font-family: "Noto Sans CJK KR", sans-serif;
+  font-size: 9.4pt;
+  line-height: 1.48;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+h1 { margin: 9pt 0 11pt; color: #132b43; font-size: 20pt; line-height: 1.35; }
+h2 { margin: 12pt 0 7pt; color: #075e67; font-size: 12pt; break-after: avoid; }
+h3 { margin: 10pt 0 5pt; color: #132b43; font-size: 10pt; break-after: avoid; }
+p { margin: 0 0 8pt; orphans: 3; widows: 3; }
+ul, ol { margin: 5pt 0 10pt; padding-left: 17pt; }
+li { margin: 0 0 5pt; orphans: 2; widows: 2; }
+a { color: #16588a; text-decoration: none; }
+code { font-family: "Noto Sans Mono CJK KR", monospace; font-size: 8.2pt; }
+.kicker { padding-bottom: 7pt; border-bottom: 2pt solid #0c7b83; color: #577083; font-size: 8pt; letter-spacing: .5pt; }
+.lead { font-size: 10.3pt; line-height: 1.65; }
+.status { margin: 8pt 0 11pt; padding: 8pt 11pt; border-left: 3pt solid #0c7b83; background: #edf6f5; }
+.pending { border-left-color: #b77719; background: #fcf6e9; }
+.note { padding: 8pt 10pt; background: #f2f5f8; font-size: 8.6pt; color: #4b5c70; }
+.small { color: #5e6d7d; font-size: 8.2pt; }
+.page { break-before: page; }
+.metrics { width: 100%; margin: 9pt 0 12pt; border-collapse: separate; border-spacing: 5pt 0; }
+.metrics td { padding: 9pt; background: #edf6f5; border: 0; text-align: center; }
+.metrics strong { display: block; color: #075e67; font-size: 21pt; line-height: 1.25; }
+.metrics span { display: block; margin-top: 4pt; font-size: 8pt; }
+table { width: 100%; margin: 6pt 0 11pt; border-collapse: collapse; table-layout: fixed; font-size: 8.5pt; }
+th { padding: 6pt 7pt; background: #edf2f7; text-align: left; color: #213d56; font-weight: 700; }
+td { padding: 4.2pt 7pt; vertical-align: top; border-bottom: .6pt solid #dce3eb; }
+tr { break-inside: avoid; }
+.meta th { width: 19%; background: white; padding-left: 0; }
+.meta td { width: 31%; }
+.check { color: #075e67; font-weight: 700; }
+.sources { font-size: 8.2pt; }

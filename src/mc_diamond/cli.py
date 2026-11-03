@@ -8,13 +8,14 @@ from pydantic import ValidationError
 
 from .episode import emit, run_episode
 from .doctor import doctor
+from .clock import verify_clock
 from .rpc import EpisodeError, RpcSession
 from .schema import EpisodeConfig, EpisodeSummary, ErrorInfo
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="mc-diamond")
-    parser.add_argument("command", choices=["doctor", "smoke-episode"])
+    parser.add_argument("command", choices=["doctor", "smoke-episode", "verify-clock", "prepare-world"])
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
     try:
@@ -27,6 +28,8 @@ def main() -> int:
                 if probe.status != "available":
                     print(f"{name}: {probe.status}: {probe.detail}", file=sys.stderr)
             return 0 if report.ready else 1
+        if args.command in {"verify-clock", "prepare-world"} and config.backend != "rpc":
+            raise ValueError("Actual Minecraft backend required")
         command = config.command
         if config.backend == "mock":
             assert config.fixture is not None
@@ -35,6 +38,11 @@ def main() -> int:
         assert command is not None
         episode_id, attempt_id = str(uuid4()), str(uuid4())
         with RpcSession(command, config.rpc_timeout_seconds) as session:
+            if args.command == "prepare-world":
+                emit("world_prepared", {**session._call("prepare_world", {}, admin=True)})
+                return 0
+            if args.command == "verify-clock":
+                return 0 if verify_clock(session) else 1
             summary = run_episode(config, session.policy(), lambda: session.reset(episode_id, attempt_id),
                                   episode_id, attempt_id)
         if summary.error or summary.invalid:
@@ -47,6 +55,12 @@ def main() -> int:
         return 2
     except EpisodeError as failure:
         emit("error", failure.error)
+        if args.command == "verify-clock":
+            emit("clock_summary", {"planned_trials": 63, "pause_verified": False,
+                                   "clock_mode": "unverified", "error": failure.error.model_dump(mode="json")})
+            return 1
+        if args.command == "prepare-world":
+            return 1
         emit("summary", EpisodeSummary(
             episode_id=episode_id, attempt_id=attempt_id, backend=config.backend,
             clock_mode="mock", goal_completed=False, terminated=False, truncated=False,

@@ -146,7 +146,7 @@ class EpisodeSummary(Contract):
 
 class RpcRequest(Contract):
     request_id: Identifier
-    method: Literal["reset", "observe", "step"]
+    method: Literal["reset", "observe", "step", "prepare_world", "clock_trial", "certify_clock"]
     payload: dict[str, JsonValue]
 
 

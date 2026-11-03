@@ -57,7 +57,7 @@ class RpcSession:
         if self.process.poll() is None:
             self.process.terminate()
         try:
-            self.process.wait(timeout=2)
+            self.process.wait(timeout=15)
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait()

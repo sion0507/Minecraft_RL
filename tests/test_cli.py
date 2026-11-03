@@ -3,6 +3,7 @@ import subprocess
 import sys
 import os
 import shutil
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,191 @@ def test_mock_episode_runs_through_public_cli() -> None:
     assert records[-1]["data"]["active_ticks"] == 20
     assert records[-1]["data"]["reward_total"] == 1.0
     assert records[4]["data"]["probabilities"] is None
+
+
+def test_live_bridge_rejects_policy_administration_before_starting_server() -> None:
+    admin_read, admin_write = os.pipe()
+    try:
+        result = subprocess.run(
+            ["node", "bridge/minecraft.js", "--admin-fd", str(admin_read)],
+            pass_fds=(admin_read,), text=True, capture_output=True, timeout=10,
+            input='{"request_id":"p1","method":"reset","payload":{}}\n'
+                  '{"request_id":"p2","method":"clock_trial","payload":{}}\n'
+                  '{"request_id":"p3","method":"reset","payload":{},"role":"admin"}\n'
+                  '{"request_id":"p4","method":"say","payload":{"command":"secret-marker"}}\n',
+        )
+    finally:
+        os.close(admin_read)
+        os.close(admin_write)
+    assert result.returncode == 0, result.stderr
+    output = records(result)
+    assert [r["request_id"] for r in output] == ["p1", "p2", "p3", "p4"]
+    assert [r["error"]["code"] for r in output] == [
+        "permission_denied", "permission_denied", "invalid_request", "invalid_request",
+    ]
+    assert "secret-marker" not in result.stdout + result.stderr
+
+
+def test_verify_clock_rejects_mock_as_actual_pause_evidence() -> None:
+    result = subprocess.run(["mc-diamond", "verify-clock", "--config", "configs/pilot.yaml"],
+                            text=True, capture_output=True, timeout=10)
+    assert result.returncode == 2
+    assert records(result)[0]["data"]["code"] == "invalid_config"
+    assert "Traceback" not in result.stderr
+
+
+def test_corrupt_snapshot_preserves_current_world_and_hides_admin_state(tmp_path: Path) -> None:
+    server = tmp_path / "server"
+    (server / "world").mkdir(parents=True)
+    original = server / "world" / "player-state"
+    original.write_text("preserve-current-world")
+    (server / "server.properties").write_text("server-ip=127.0.0.1\n")
+    (server / "installation.json").write_text(json.dumps({
+        "minecraft": "1.16.5", "eula_accepted_by_user": "2026-11-02", "world_seed": "secret-marker",
+    }))
+    snapshot = tmp_path / "snapshots" / "C4"
+    (snapshot / "world").mkdir(parents=True)
+    (snapshot / "world" / "level.dat").write_text("corrupted")
+    (snapshot / "snapshot.json").write_text(json.dumps({"task": "C4", "sha256": "0" * 64}))
+    config = yaml.safe_load(Path("configs/minecraft.yaml").read_text())
+    config["command"] = ["node", "bridge/minecraft.js", "--server-dir", str(server)]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+    result = run_cli(config_path)
+    assert result.returncode == 1
+    assert records(result)[-1]["data"]["error"]["code"] == "backend_error"
+    assert original.read_text() == "preserve-current-world"
+    assert "secret-marker" not in result.stdout + result.stderr
+
+
+def test_snapshot_root_symlink_cannot_replace_current_world(tmp_path: Path) -> None:
+    server = tmp_path / "server"
+    (server / "world").mkdir(parents=True)
+    original = server / "world" / "player-state"
+    original.write_text("preserve-current-world")
+    (server / "server.properties").write_text("server-ip=127.0.0.1\n")
+    (server / "installation.json").write_text(json.dumps({
+        "minecraft": "1.16.5", "eula_accepted_by_user": "2026-11-02",
+    }))
+    frozen = tmp_path / "frozen"
+    frozen.mkdir()
+    (frozen / "level.dat").write_bytes(b"valid")
+    snapshot = tmp_path / "snapshots" / "C4"
+    snapshot.mkdir(parents=True)
+    (snapshot / "world").symlink_to(frozen, target_is_directory=True)
+    digest = hashlib.sha256(b'["level.dat",5]\nvalid').hexdigest()
+    (snapshot / "snapshot.json").write_text(json.dumps({"task": "C4", "sha256": digest}))
+    config = yaml.safe_load(Path("configs/minecraft.yaml").read_text())
+    config["command"] = ["node", "bridge/minecraft.js", "--server-dir", str(server)]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+    result = run_cli(config_path)
+    assert result.returncode == 1
+    assert original.exists() and original.read_text() == "preserve-current-world"
+    assert not (server / "world").is_symlink()
+
+
+def test_rpc_shutdown_waits_for_backend_resource_cleanup(tmp_path: Path) -> None:
+    marker = tmp_path / "closed"
+    backend = tmp_path / "slow_close.py"
+    backend.write_text(
+        "import atexit,os,signal,time\nfrom pathlib import Path\n"
+        "from mc_diamond.mock_bridge import main\n"
+        "def finish(*args):\n"
+        " signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+        " time.sleep(3)\n"
+        f" Path({str(marker)!r}).write_text('closed')\n"
+        " os._exit(0)\n"
+        "signal.signal(signal.SIGTERM,finish);atexit.register(finish)\nmain()\n",
+        encoding="utf-8",
+    )
+    config = yaml.safe_load(Path("configs/pilot.yaml").read_text())
+    config.pop("fixture")
+    config.update(backend="rpc", command=[sys.executable, str(backend), "--fixture", "fixtures/mock_episode.json"])
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+    result = run_cli(config_path)
+    assert result.returncode == 0, result.stderr
+    assert marker.exists() and marker.read_text() == "closed"
+
+
+def test_runtime_hash_tracks_loaded_dependencies_and_added_mods(tmp_path: Path) -> None:
+    for name in (".fabric/server/game.jar", "libraries/fabric/loader.jar", "mods/pause.jar",
+                 "server.jar", "fabric-server-launch.jar"):
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"original")
+    script = (
+        "const {Server}=require('./bridge/server');"
+        "new Server(process.argv[1]).runtimeHash().then(console.log)"
+    )
+
+    def digest() -> str:
+        result = subprocess.run(["node", "-e", script, str(tmp_path)],
+                                text=True, capture_output=True, check=True, timeout=10)
+        return result.stdout.strip()
+
+    original = digest()
+    for name in (".fabric/server/game.jar", "libraries/fabric/loader.jar", "mods/pause.jar"):
+        target = tmp_path / name
+        target.write_bytes(b"modified")
+        assert digest() != original
+        target.write_bytes(b"original")
+        assert digest() == original
+    (tmp_path / "mods/extra.jar").write_bytes(b"added")
+    assert digest() != original
+
+
+@pytest.mark.parametrize("changed", ["unchanged", "position", "oxygen", "ticks", "missing_state", "bad_position"])
+def test_clock_report_rejects_actual_state_drift(tmp_path: Path, changed: str) -> None:
+    # Scripted transport tests the CLI verdict, not Minecraft physics.
+    backend = tmp_path / "clock_backend.py"
+    backend.write_text(
+        "import argparse,json,os,copy\n"
+        "p=argparse.ArgumentParser();p.add_argument('--admin-fd',type=int);a=p.parse_args()\n"
+        "for line in os.fdopen(a.admin_fd):\n"
+        " r=json.loads(line)\n"
+        " if r['method']=='certify_clock':\n"
+        "  print(json.dumps({'request_id':r['request_id'],'result':{}}),flush=True);continue\n"
+        " state={'Motion':'[0.0d,-0.1d,0.0d]','Health':'19.0f','Air':'280s',"
+        "'Fire':'20s','Inventory':'[]','FallDistance':'1.0f','HurtTime':'0s'}\n"
+        " client={'position':[0.0,64.0,0.0],'velocity':[0.0,-0.1,0.0],'health':19,"
+        "'oxygen':280,'on_fire':True,'on_ground':True,'inventory':{},'events':0}\n"
+        " before={'client':client,'server':{'position':[0.0,64.0,0.0],'state':state,"
+        "'game_ticks':20,'furnace':'CookTime: 5s','drop':'Tags: [mc_clock], Age: 5s'}}\n"
+        f" changed={changed!r}\n"
+        " if changed=='missing_state':del before['server']['state']['Air']\n"
+        " after=copy.deepcopy(before)\n"
+        " if changed=='position':after['client']['position'][0]=0.002\n"
+        " if changed=='oxygen':after['server']['state']['Air']='279s'\n"
+        " if changed=='ticks':after['server']['game_ticks']=21\n"
+        " if changed=='bad_position':after['client']['position'][0]=None\n"
+        " result={**r['payload'],'before':before,'after':after,'executed_ticks':1,"
+        "'wall_seconds':r['payload']['delay_seconds']}\n"
+        " print(json.dumps({'request_id':r['request_id'],'result':result}),flush=True)\n",
+        encoding="utf-8",
+    )
+    config = yaml.safe_load(Path("configs/pilot.yaml").read_text(encoding="utf-8"))
+    config.pop("fixture")
+    config.update(backend="rpc", command=[sys.executable, str(backend)])
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    result = subprocess.run(["mc-diamond", "verify-clock", "--config", str(config_path)],
+                            text=True, capture_output=True, timeout=15)
+    assert result.returncode == (0 if changed == "unchanged" else 1)
+    output = records(result)
+    if changed == "bad_position":
+        assert output[0]["data"]["code"] == "protocol_error"
+        assert output[-1]["type"] == "clock_summary"
+        assert output[-1]["data"]["pause_verified"] is False
+        assert "Traceback" not in result.stderr
+        return
+    assert output[-1]["type"] == "clock_summary"
+    assert output[-1]["data"]["pause_verified"] is (changed == "unchanged")
+    assert output[-1]["data"]["trials"] == 63
+    assert all(record["data"]["passed"] is (changed == "unchanged") for record in output[:-1])
+    assert all(record["data"]["scene_prepared"] is (changed != "missing_state")
+               for record in output[:-1])
 
 
 @pytest.mark.parametrize("outcome", ["truncated", "invalid"])

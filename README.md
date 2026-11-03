@@ -8,8 +8,8 @@
 
 ## 현재 상태
 
-연구 방향과 스펙은 확정되었으며, 이슈 #2의 환경 진단·공통 자료형·JSONL RPC·모의 에피소드·pytest/mypy를 구현했습니다.
-실제 Minecraft 연결·정지·모델/API·PPO·학습 효과·실험 결과는 미검증입니다. 실행 결과와 남은 작업은 [PROGRESS.md](PROGRESS.md)에 기록합니다.
+이슈 #2의 환경 진단·공통 자료형·JSONL RPC·모의 에피소드에 이어, 이슈 #3의 실제 Minecraft 연결·고정 snapshot/reset·wait·정지 진단을 구현했습니다.
+현재 실제 backend는 자기 상태 관측과 wait를 제공합니다. 지형 관측·다른 매크로·모델/API·PPO·학습 효과는 후속 작업입니다. 실제 검사와 실패 기록은 [PROGRESS.md](PROGRESS.md)에 있습니다.
 
 ## 실험 범위
 
@@ -58,21 +58,52 @@ GPU 검사는 CUDA 드라이버 API로 직접 작은 산술 커널을 실행합�
 
 `smoke-episode`는 제공된 모의 fixture를 subprocess backend로 실행하고 reset→관측→고정 목표→후보→선택→실행→진단 보상→요약을 출력합니다.
 모의 보상은 획득 사건 수이고, 실제 local/full 보상·PPO·다이아 성공 판정의 검증이 아닙니다. 정상 종료/유효 절단은 0, backend 오류/무효 경험은 1, 설정 오류는 2입니다.
-실제 backend는 설정의 `backend: rpc`와 `command`로 같은 실행 경로에 연결할 수 있으며 `fixture`는 제거합니다. 현재 실제 게임 backend는 제공하지 않습니다.
+실제 backend는 설정의 `backend: rpc`와 `command`로 같은 실행 경로에 연결하고 `fixture`는 제거합니다. 제공하는 설정은 `configs/minecraft.yaml`입니다.
 
-RPC backend는 `--admin-fd <fd>`로 전달받은 파이프에서 reset만, stdin에서 observe/step만 받아야 합니다. 두 채널의 응답은 request_id에 맞춰 stdout JSONL로 반환하고 진단은 stderr에 기록합니다.
+RPC backend는 `--admin-fd <fd>`로 전달받은 파이프에서 reset·snapshot 준비·시계 진단만, stdin에서 observe/step만 받습니다. 두 채널의 응답은 request_id에 맞춰 stdout JSONL로 반환하고 진단은 stderr에 기록합니다.
 요청은 `request_id/method/payload`, 응답은 `request_id`와 정확히 하나의 `result/error`를 가지며 현재 호출은 직렬입니다.
 자료형과 허용 필드는 [schema.py](src/mc_diamond/schema.py)에 있습니다. 결과·후보 ID·원본 관측·mask와 episode/attempt ID를 로그에 보존합니다.
 알 수 없는 관측 필드와 RPC 결과는 오류로 종료하고 원본 오류 입력을 로그에 출력하지 않습니다.
 
 시계·정보 경계·모델·학습 연결 진단 및 예산 확인 후 실험 설정을 고정합니다.
-후속 명령은 아직 구현되지 않았습니다. 전체 실행 계약은 [PLAN.md §14](PLAN.md#14-구현-후-사용할-명령), 개발 지침은 [AGENTS.md](AGENTS.md)에 있습니다.
+아래 실제 Minecraft 검사 외의 후속 실험 명령은 아직 구현되지 않았습니다. 전체 실행 계약은 [PLAN.md §14](PLAN.md#14-구현-후-사용할-명령), 개발 지침은 [AGENTS.md](AGENTS.md)에 있습니다.
+
+## 실제 Minecraft 실행
+
+이 작업공간에는 사용자의 EULA 동의 후 Minecraft 1.16.5, Fabric Loader 0.16.14, Carpet 1.4.44를 `worlds/server/`에 설치했습니다. Java 21.0.12.1·Node 24.20.0·Mineflayer 4.39.0에서 실제 연결을 확인했습니다. Linux의 `flock`으로 서버 디렉터리 사용을 잠급니다. 출처와 정확한 해시는 `third_party/README.md` 및 로컬 `worlds/server/installation.json`에 있습니다.
+
+서버는 `127.0.0.1:25565`에서만 열리며 로컬 봇은 `auth: offline`을 사용합니다. 계정 로그인·비밀번호·토큰은 사용하지 않습니다. Microsoft 계정 인증이나 공개 서버 운영을 검증한 결과가 아닙니다.
+
+Carpet freeze만으로는 침수 중 플레이어 산소가 계속 줄었습니다. 자체 확장 `bridge/pausemod/`는 Carpet의 활성 틱 조건에 맞춰 플레이어 tick·이동을 멈추고, 초기 로그인 상태 패킷은 별도로 보냅니다. 설치된 Fabric 서버 라이브러리로 빌드합니다.
+
+```bash
+python3 bridge/pausemod/build.py
+```
+
+최초 snapshot이 없는 새 설치에서만 `uv run mc-diamond prepare-world --config configs/minecraft.yaml`을 실행합니다. 기존 snapshot 덮어쓰기는 거부합니다. 이 작업공간은 C4/G1–G4를 이미 준비했습니다. 단일 자연 월드의 시드와 지상 spawn을 광석 조사 전에 정했고, G2/G3/G4의 도구 지급과 G4의 고정 지하 준비 공간은 관리자 준비로 기록했습니다. 월드·snapshot·실행 산출물은 Git에서 제외합니다.
+
+```bash
+uv run mc-diamond verify-clock --config configs/minecraft.yaml
+uv run mc-diamond smoke-episode --config configs/minecraft.yaml
+```
+
+각 명령이 서버를 시작하고 종료합니다. `verify-clock`은 평지·제련·드롭·용암·낙하·침수·화염에서 0/5/10초를 각각 3회 검사합니다. 실제 위험 상태가 준비됐는지, 위치 오차 0.001블록과 다른 상태·사건·틱이 보존되는지 판정합니다. 전부 통과한 실행만 검증 기록을 원자 저장하며, 코드·게임 의존성·Java/Node 버전·서버 설정·snapshot hash가 바뀌면 다시 검사합니다. 모의 backend를 실제 정지 근거로 사용하지 않습니다.
+
+실제 smoke는 같은 reset→관측→목표→후보→선택→실행→보상→요약 흐름에서 wait를 실행합니다. 원목 수집·다이아 성공·학습을 수행한 결과가 아니며 actor 경험과 진단 보상은 0입니다. 활성 틱과 실제 경과 시간을 분리하고, 지원하지 않는 행동의 실패도 실제 한 틱을 실행해 기록합니다.
+
+수동으로 서버만 열 때는 실험 CLI를 종료한 뒤 아래 명령을 사용합니다. 확장 모드는 기동 시 정지 상태로 시작하며, 콘솔의 `stop`으로 저장·종료합니다.
+
+```bash
+cd worlds/server
+flock -n .mc-diamond-owner java -Xms512M -Xmx3G -jar fabric-server-launch.jar nogui
+```
 
 ## 문서
 
 | 문서 | 내용 |
 | --- | --- |
 | [스펙 이슈 #1](https://github.com/sion0507/Minecraft_RL/issues/1) / [PRD.md](PRD.md) | 확정된 구현 스펙과 테스트 경계 |
+| [reports/](reports/README.md) | 이슈별 검토 PDF·HTML 원본과 작성 규칙 |
 | [PLAN.md](PLAN.md) | 상세 실험 규격과 구현 순서 |
 | [DECISIONS.md](DECISIONS.md) | 확정한 결정과 근거 |
 | [GLOSSARY.md](GLOSSARY.md) | 도메인 용어 |
