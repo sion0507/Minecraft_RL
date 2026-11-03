@@ -3,6 +3,8 @@
 이슈 #2는 배포 패키지를 의존성으로 설치한다. 외부 데모 코드·프롬프트 파일을 복사·번역·변형하지 않았다. schema/RPC/실행기/모의 backend와 PTX 커널은 자체 구현이다.
 모델은 아직 다운로드하지 않았다. 이슈 #3에서 사용자 EULA 승인 후 Minecraft/Fabric/Carpet 공식 바이너리를 설치했다. 외부 게임 실행 코드·프롬프트를 복사하지 않았으며 Node 실행기·snapshot 처리·정지 진단·플레이어 정지 확장은 자체 구현이다.
 
+이슈 #4의 voxel 광선·공개 지도 BFS·보행 제어·정보 fixture/감사도 자체 구현이다. 설치된 Mineflayer와 전이 의존성 `vec3`의 공개 API만 사용하며 외부 데모의 경로/코드/프롬프트는 복사하지 않는다. 새 패키지나 모델은 추가하지 않았고 정확한 배포 무결성은 기존 `bridge/package-lock.json`을 따른다. 시드·숨은 블록·전체 청크를 후보/경로에 제공하지 않는다.
+
 |도구|고정 배포 버전 / revision|허용 근거·사용|
 |---|---|---|
 |[uv](https://github.com/astral-sh/uv)|0.12.23|[MIT/Apache-2.0](https://github.com/astral-sh/uv/blob/main/LICENSE-MIT), 공식 설치 binary; Git 제외|

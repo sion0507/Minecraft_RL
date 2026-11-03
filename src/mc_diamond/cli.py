@@ -9,13 +9,14 @@ from pydantic import ValidationError
 from .episode import emit, run_episode
 from .doctor import doctor
 from .clock import verify_clock
+from .information import audit_information
 from .rpc import EpisodeError, RpcSession
 from .schema import EpisodeConfig, EpisodeSummary, ErrorInfo
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="mc-diamond")
-    parser.add_argument("command", choices=["doctor", "smoke-episode", "verify-clock", "prepare-world"])
+    parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "verify-clock", "prepare-world", "audit-information"])
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
     try:
@@ -28,7 +29,7 @@ def main() -> int:
                 if probe.status != "available":
                     print(f"{name}: {probe.status}: {probe.detail}", file=sys.stderr)
             return 0 if report.ready else 1
-        if args.command in {"verify-clock", "prepare-world"} and config.backend != "rpc":
+        if args.command in {"verify-clock", "prepare-world", "audit-information"} and config.backend != "rpc":
             raise ValueError("Actual Minecraft backend required")
         command = config.command
         if config.backend == "mock":
@@ -43,10 +44,14 @@ def main() -> int:
                 return 0
             if args.command == "verify-clock":
                 return 0 if verify_clock(session) else 1
+            if args.command == "audit-information":
+                return 0 if audit_information(session) else 1
             summary = run_episode(config, session.policy(), lambda: session.reset(episode_id, attempt_id),
-                                  episode_id, attempt_id)
+                                  episode_id, attempt_id, movement=args.command == "smoke-movement")
         if summary.error or summary.invalid:
             print(f"Episode stopped: {summary.reason}", file=sys.stderr)
+            return 1
+        if args.command == "smoke-movement" and not summary.movement_completed:
             return 1
         return 0
     except (OSError, ValueError, yaml.YAMLError, ValidationError):
@@ -61,9 +66,13 @@ def main() -> int:
             return 1
         if args.command == "prepare-world":
             return 1
+        if args.command == "audit-information":
+            emit("information_summary", {"information_verified": False,
+                                        "error": failure.error.model_dump(mode="json")})
+            return 1
         emit("summary", EpisodeSummary(
             episode_id=episode_id, attempt_id=attempt_id, backend=config.backend,
-            clock_mode="mock", goal_completed=False, terminated=False, truncated=False,
+            clock_mode="mock" if config.backend == "mock" else "unverified", goal_completed=False, terminated=False, truncated=False,
             invalid=False, reason=failure.error.code, error=failure.error,
             active_ticks=0, wall_seconds=0.0, decisions=0, reward_total=0.0,
         ))

@@ -54,6 +54,161 @@ def test_mock_episode_runs_through_public_cli() -> None:
     assert records[4]["data"]["probabilities"] is None
 
 
+def test_movement_cli_uses_only_observed_clearance_and_support(tmp_path: Path) -> None:
+    fixture = mock_fixture()
+    cells = []
+    for x in range(3):
+        for y, block in [(63, "stone"), (64, "air"), (65, "air")]:
+            cells.append({"position": [float(x), float(y), 0.0], "block": block,
+                          "passable": block == "air", "support": block == "stone", "hazard": False})
+    fixture["initial"].update(position=[0.5, 64.0, 0.5], observed_map=cells, map_version=1)
+    fixture["steps"][0]["observation"].update(position=[2.5, 64.0, 0.5], observed_map=cells, map_version=1)
+    fixture["steps"][0].update(reason="path_completed", distance_moved=2.0,
+                               events=[{"kind": "moved", "source": "mock"}])
+    config = fixture_config(tmp_path, fixture)
+    result = subprocess.run(["mc-diamond", "smoke-movement", "--config", str(config)],
+                            text=True, capture_output=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    output = records(result)
+    candidates = next(row["data"] for row in output if row["type"] == "candidates")["candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["action_kind"] == "move_observed"
+    assert candidates[0]["params"] == {"path": [[1.5, 64.0, 0.5], [2.5, 64.0, 0.5]], "map_version": 1}
+    assert candidates[0]["max_ticks"] <= 400
+    assert output[-1]["data"]["task"] == "movement_smoke"
+    assert output[-1]["data"]["actor_transitions"] == 0
+    assert output[-1]["data"]["movement_completed"] is True
+
+
+def test_movement_does_not_route_through_unknown_or_exposed_hazard(tmp_path: Path) -> None:
+    fixture = mock_fixture()
+    fixture["initial"]["observed_map"] = [
+        {"block": "lava", "position": [1.0, 64.0, 0.0], "hazard": True},
+        {"block": "stone", "position": [1.0, 63.0, 0.0], "support": True},
+    ]
+    result = subprocess.run(["mc-diamond", "smoke-movement", "--config", str(fixture_config(tmp_path, fixture))],
+                            text=True, capture_output=True, timeout=15)
+    assert result.returncode == 1, result.stderr
+    output = records(result)
+    assert next(row["data"] for row in output if row["type"] == "candidates")["candidates"] == []
+    assert next(row["data"] for row in output if row["type"] == "selection")["selector_mode"] == "forced_wait"
+    assert output[-1]["data"]["movement_completed"] is False
+
+
+def test_live_terrain_never_queries_behind_opaque_wall_and_rejects_unknown_route() -> None:
+    script = r"""
+const assert = require('node:assert/strict')
+const {Terrain} = require('./bridge/terrain')
+const {Vec3} = require('./bridge/node_modules/vec3')
+let hiddenReads = 0
+const bot = {entity: {position: new Vec3(0.5, 64, 0.5), eyeHeight: 1.62}, blockAt(p) {
+  if (p.x > 2) hiddenReads++
+  const name = p.x === 2 || p.y === 63 ? 'stone' : p.x === 0 && p.y === 64 ? 'grass' : 'air'
+  return {name, shapes: name === 'stone' ? [[0,0,0,1,1,1]] : []}
+}}
+const terrain = new Terrain()
+terrain.scan(bot)
+assert.equal(hiddenReads, 0)
+assert(terrain.cells().some(c => c.block === 'stone'))
+assert(!terrain.cells().some(c => c.position[0] > 2))
+assert.equal(terrain.safe([1.5,64,0.5]), true)
+assert.equal(terrain.safe([0.5,64,0.5]), true)
+assert.equal(terrain.safe([3.5,64,0.5]), false)
+assert.equal(terrain.validPath([0.5,64,0.5], [[1.5,64,0.5]]), true)
+assert.equal(terrain.validPath([0.5,64,0.5], [[3.5,64,0.5]]), false)
+const resting = {position:[0.5,64,0.5], velocity:[0,-0.0784000015258789,0], on_ground:true, in_liquid:false, on_fire:false}
+assert.equal(terrain.stable(resting), true)
+assert.equal(terrain.stable({...resting, on_ground:false}), false)
+assert.equal(terrain.stable({...resting, velocity:[0.1,-0.0784000015258789,0]}), false)
+const before = terrain.version
+terrain.scan(bot)
+assert.equal(terrain.version, before)
+terrain.reset()
+assert.deepEqual(terrain.cells(), [])
+assert.deepEqual(terrain.visited, [])
+let cornerReads = 0
+terrain.scan({entity:{position:new Vec3(0.5,62.88,0.5),eyeHeight:1.62}, blockAt(p) {
+  if (p.x >= 1 && p.z >= 1) cornerReads++
+  const name = p.x === 1 || p.z === 1 ? 'stone' : 'air'
+  return {name,shapes:name === 'stone' ? [[0,0,0,1,1,1]] : []}
+}})
+assert.equal(cornerReads, 0)
+"""
+    result = subprocess.run(["node", "-e", script], text=True, capture_output=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
+def test_information_audit_rejects_mock_as_real_evidence() -> None:
+    result = subprocess.run(["mc-diamond", "audit-information", "--config", "configs/pilot.yaml"],
+                            text=True, capture_output=True, timeout=10)
+    assert result.returncode == 2
+    assert records(result)[0]["data"]["code"] == "invalid_config"
+
+
+def test_information_audit_fails_when_hidden_variant_changes_policy_input(tmp_path: Path) -> None:
+    backend = tmp_path / "information_backend.py"
+    backend.write_text(
+        "import json,os,sys\n"
+        "f=json.load(open('fixtures/mock_episode.json'))\n"
+        "fd=int(sys.argv[sys.argv.index('--admin-fd')+1])\n"
+        "for line in os.fdopen(fd):\n"
+        " r=json.loads(line)\n"
+        " variant=r['payload']['variant']\n"
+        " print(json.dumps({'request_id':r['request_id'],'result':{'fixture_ready':True}}),flush=True)\n"
+        " r=json.loads(sys.stdin.readline())\n"
+        " o=f['initial'];o['observed_map']=[];o['health']=20.0 if variant=='ore' else 19.0\n"
+        " print(json.dumps({'request_id':r['request_id'],'result':o}),flush=True)\n",
+        encoding="utf-8",
+    )
+    config = yaml.safe_load(Path("configs/minecraft.yaml").read_text())
+    config["command"] = [sys.executable, str(backend)]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+    result = subprocess.run(["mc-diamond", "audit-information", "--config", str(config_path)],
+                            text=True, capture_output=True, timeout=10)
+    assert result.returncode == 1, result.stderr
+    assert records(result)[-1]["type"] == "information_summary"
+    assert records(result)[-1]["data"]["information_verified"] is False
+
+
+@pytest.mark.parametrize("actual_ticks", [20, 401])
+def test_information_audit_checks_complete_evidence_and_tick_bound(tmp_path: Path, actual_ticks: int) -> None:
+    backend = tmp_path / "audit_backend.py"
+    backend.write_text('''import json,os,sys
+fd=int(sys.argv[sys.argv.index('--admin-fd')+1])
+admin=os.fdopen(fd)
+def reply(r,v):
+ print(json.dumps({'request_id':r['request_id'],'result':v}),flush=True)
+for line in admin:
+ r=json.loads(line);p=r['payload'];reply(r,{'fixture_ready':True})
+ o=json.load(open('fixtures/mock_episode.json'))['initial']
+ o.update(position=[0.5,64.0,0.5],remaining_ticks=1000,map_version=1,observed_map=[])
+ for x in range(3):
+  for y,block in [(63,'stone'),(64,'air'),(65,'air')]:
+   o['observed_map'].append({'block':block,'position':[float(x),float(y),0.0],
+      'passable':block=='air','support':block=='stone','hazard':False})
+ if p['exposed']:
+  o['observed_map'].append({'block':'diamond_ore' if p['variant']=='ore' else 'lava','position':[4.0,64.0,0.0]})
+ r=json.loads(sys.stdin.readline());reply(r,o)
+ if not p['exposed']:
+  r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];ticks=int(sys.argv[1])
+  n={**o,'obs_id':'obs-1','active_ticks':ticks,'remaining_ticks':1000-ticks,'position':[2.5,64.0,0.5]}
+  reply(r,{'observation':n,'actual_ticks':ticks,'events':[{'kind':'moved','source':'minecraft'}],
+    'terminated':False,'truncated':False,'invalid':False,'reason':'path_completed',
+    'clock_mode':'paused','pause_verified':True,'stable_boundary':True,'wall_seconds':0.1,
+    'source_obs_id':o['obs_id'],'map_version':1,'path':c['params']['path'],
+    'stop_evidence':['obs-1','path_completed'],'distance_moved':2.0})
+''', encoding="utf-8")
+    config = yaml.safe_load(Path("configs/minecraft.yaml").read_text())
+    config["command"] = [sys.executable, str(backend), str(actual_ticks)]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+    result = subprocess.run(["mc-diamond", "audit-information", "--config", str(config_path)],
+                            text=True, capture_output=True, timeout=10)
+    assert result.returncode == (0 if actual_ticks == 20 else 1), result.stderr
+    assert records(result)[-1]["data"]["information_verified"] is (actual_ticks == 20)
+
+
 def test_live_bridge_rejects_policy_administration_before_starting_server() -> None:
     admin_read, admin_write = os.pipe()
     try:
@@ -75,6 +230,14 @@ def test_live_bridge_rejects_policy_administration_before_starting_server() -> N
         "permission_denied", "permission_denied", "invalid_request", "invalid_request",
     ]
     assert "secret-marker" not in result.stdout + result.stderr
+
+
+def test_information_fixtures_are_forbidden_on_policy_channel() -> None:
+    from mc_diamond.rpc import EpisodeError, RpcSession
+    with RpcSession(["node", "bridge/minecraft.js"], 5.0) as session:
+        with pytest.raises(EpisodeError) as failure:
+            session._call("information_fixture", {"variant": "ore", "exposed": False})
+        assert failure.value.error.code == "permission_denied"
 
 
 def test_verify_clock_rejects_mock_as_actual_pause_evidence() -> None:

@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ValidationError
 
 from .rpc import EpisodeError, PolicyEnvironment
+from .navigation import generate_movement_candidates
 from .schema import (
     Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Goal, Observation, SelectionResult,
 )
@@ -29,15 +30,18 @@ def generate_candidates(observation: Observation, goal: Goal) -> CandidateSet:
 
 
 def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
-                reset: Callable[[], Observation], episode_id: str, attempt_id: str) -> EpisodeSummary:
+                reset: Callable[[], Observation], episode_id: str, attempt_id: str,
+                *, movement: bool = False) -> EpisodeSummary:
     started = time.monotonic()
     active_ticks = decisions = 0
     reward_total = 0.0
+    distance_moved = 0.0
+    movement_completed = False
     acquired_target = 0
     terminated = truncated = invalid = completed = False
     reason = "decision_limit"
     error: ErrorInfo | None = None
-    clock_mode: Literal["mock", "paused", "realtime"] = "mock"
+    clock_mode: Literal["mock", "paused", "realtime", "unverified"] = "mock" if config.backend == "mock" else "unverified"
     try:
         initial = reset()
         emit("reset", initial)
@@ -53,7 +57,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             if observation.remaining_ticks == 0:
                 truncated, reason = True, "active_tick_limit"
                 break
-            saved = generate_candidates(observation, config.goal)
+            saved = generate_movement_candidates(observation) if movement else generate_candidates(observation, config.goal)
             emit("candidates", saved)
             candidate = saved.candidates[0] if saved.candidates else Candidate(
                 candidate_id=f"{observation.obs_id}:wait", action_kind="wait", params={},
@@ -75,6 +79,9 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             active_ticks = step.observation.active_ticks
             clock_mode = step.clock_mode
             emit("step", step)
+            distance_moved += step.distance_moved
+            movement_completed |= (candidate.action_kind == "move_observed" and step.reason == "path_completed"
+                                   and step.stable_boundary and 0 < step.distance_moved <= 16 and not step.invalid)
             reward = float(sum(event.quantity for event in step.events if event.kind == "acquired"))
             reward_total += reward
             emit("reward", {"value": reward, "kind": "smoke_acquisition_count", "actor_valid": False})
@@ -97,10 +104,12 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         emit("error", error)
     summary = EpisodeSummary(
         episode_id=episode_id, attempt_id=attempt_id, backend=config.backend,
+        task="movement_smoke" if movement else "smoke",
         clock_mode=clock_mode, goal_completed=completed, terminated=terminated,
         truncated=truncated, invalid=invalid, reason=reason, error=error,
         active_ticks=active_ticks, wall_seconds=time.monotonic() - started,
         decisions=decisions, reward_total=reward_total,
+        movement_completed=movement_completed, distance_moved=distance_moved,
     )
     emit("summary", summary)
     return summary

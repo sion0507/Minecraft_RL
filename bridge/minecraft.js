@@ -9,6 +9,10 @@ const { execFile } = require('node:child_process')
 const { promisify } = require('node:util')
 const { Server } = require('./server')
 const mineflayer = require('mineflayer')
+const { Vec3 } = require('vec3')
+const { Terrain } = require('./terrain')
+const terrain = new Terrain()
+let history = []
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const identifier = value => typeof value === 'string' && value.length > 0 && value.length <= 128
@@ -39,7 +43,7 @@ async function fingerprint () {
   const java = await promisify(execFile)('java', ['-version'], { timeout: 5000 })
   hash.update(process.version + java.stderr)
   hash.update(await server.runtimeHash())
-  for (const file of [__filename, path.join(__dirname, 'server.js'),
+  for (const file of [__filename, path.join(__dirname, 'server.js'), path.join(__dirname, 'terrain.js'),
     path.join(__dirname, '../src/mc_diamond/clock.py'), path.join(__dirname, 'package-lock.json'),
     ...['C4', 'G1', 'G2', 'G3', 'G4'].map(t => path.join(server.snapshots, t, 'snapshot.json'))]) {
     hash.update(await fsp.readFile(file))
@@ -122,6 +126,7 @@ function clientState () {
 async function observation () {
   if (!episode || !bot || !connected || !frozen) fail('backend_error')
   const self = clientState()
+  terrain.scan(bot)
   return { ...episode, obs_id: observationId(), active_ticks: activeTicks,
     objective_kind: task === 'C4' ? 'full' : 'local', remaining_ticks: Math.max(0, budget - activeTicks),
     position: self.position, velocity: self.velocity, health: self.health, oxygen: self.oxygen,
@@ -129,26 +134,34 @@ async function observation () {
     in_liquid: !!(bot.entity.isInWater || bot.entity.isInLava), inventory: self.inventory,
     tool: bot.heldItem ? bot.heldItem.name : null,
     tool_durability: bot.heldItem && bot.heldItem.maxDurability ? bot.heldItem.maxDurability - (bot.heldItem.durabilityUsed || 0) : null,
-    // Terrain observation and non-wait macros are implemented in the following tickets.
-    observed_map: [], history: [] }
+    yaw: bot.entity.yaw, pitch: bot.entity.pitch, map_version: terrain.version,
+    hidden_hazard_peek: false, visited: terrain.visited,
+    observed_map: terrain.cells(), history }
 }
 
-async function advance (ticks) {
+async function advance (ticks, walking = false) {
   if (!bot || !connected) fail('backend_error')
   if (!Number.isInteger(ticks) || ticks < 1 || ticks > 400 || !frozen) fail('invalid_request')
   const before = await server.gameTime()
+  let clientTicks = 0
+  const limitPhysics = () => { if (++clientTicks >= ticks) bot.physicsEnabled = false }
+  if (walking) bot.on('physicsTick', limitPhysics)
   bot.physicsEnabled = previousPhysics
-  await server.command('tick step ' + ticks)
-  const deadline = performance.now() + ticks * 50 + 5000
-  let after
-  do {
-    await sleep(50)
-    after = await server.gameTime()
-    if (performance.now() > deadline) throw new Error('Tick step timeout')
-  } while (after - before < ticks)
-  bot.clearControlStates()
-  bot.physicsEnabled = false
-  await sleep(150)
+  try {
+    await server.command('tick step ' + ticks)
+    const deadline = performance.now() + ticks * 50 + 5000
+    let after
+    do {
+      await sleep(50)
+      after = await server.gameTime()
+      if (performance.now() > deadline) throw new Error('Tick step timeout')
+    } while (after - before < ticks || (walking && bot.health > 0 && clientTicks < ticks))
+  } finally {
+    if (walking) bot.removeListener('physicsTick', limitPhysics)
+    bot.clearControlStates()
+    bot.physicsEnabled = false
+  }
+  if (!walking) await sleep(150)
   const actual = (await server.gameTime()) - before
   activeTicks += actual
   if (actual !== ticks) throw new Error('Unexpected server tick duration')
@@ -166,11 +179,60 @@ async function reset (payload) {
   episode = payload
   observationEpoch = randomUUID()
   activeTicks = observationIndex = eventCount = 0
+  terrain.reset()
+  history = []
   clockTrials.clear()
   clockFingerprint = await fingerprint()
   const certificate = await fsp.readFile(path.join(server.root, 'clock-verification.json'), 'utf8').then(JSON.parse).catch(() => null)
   pauseVerified = certificate?.fingerprint === clockFingerprint && certificate?.trials === 63 && certificate?.pause_verified === true
   return await observation()
+}
+
+async function moveObserved (candidate) {
+  const started = performance.now()
+  const initial = await observation()
+  const route = candidate.params.path
+  const allowed = exactKeys(candidate.params, ['path', 'map_version']) &&
+    candidate.params.map_version === initial.map_version && terrain.validPath(initial.position, route)
+  const limit = Math.min(candidate.max_ticks, budget - activeTicks)
+  let ticks = 0
+  let index = 0
+  let distance = 0
+  let idle = 0
+  let reason = allowed ? 'path_completed' : 'invalid_path'
+  let state = initial
+  let interrupted = false
+  if (!allowed) { ticks += await advance(1, true); observationIndex++; state = await observation() }
+  while (allowed && ticks < limit) {
+    if (terrain.danger(state) || state.health < initial.health) { reason = 'observed_hazard'; interrupted = true; break }
+    if (index < route.length && Math.hypot(route[index][0] - state.position[0], route[index][2] - state.position[2]) < 0.15) index++
+    const settling = index >= route.length || distance >= 15
+    if (settling && terrain.stable(state)) { reason = index >= route.length ? 'path_completed' : 'distance_limit'; break }
+    if (index < route.length && !terrain.safe(route[index])) { reason = 'path_changed'; interrupted = true; break }
+    if (!settling) {
+      await bot.lookAt(new Vec3(...route[index]).offset(0, bot.entity.eyeHeight, 0), true)
+      bot.setControlState('forward', true)
+    }
+    const previous = state.position
+    ticks += await advance(1, true)
+    observationIndex++
+    state = await observation()
+    const travelled = Math.hypot(...state.position.map((v, i) => v - previous[i]))
+    distance += travelled
+    idle = travelled < 0.001 && !settling ? idle + 1 : 0
+    if (idle >= 20) { reason = 'no_progress'; interrupted = true; break }
+  }
+  if (!ticks) { ticks += await advance(1, true); observationIndex++; state = await observation() }
+  if (allowed && ticks >= limit) reason = 'active_tick_limit'
+  history = [...history.slice(-15), 'move_observed:' + reason]
+  state = await observation()
+  return { observation: state, actual_ticks: ticks,
+    events: [{ kind: distance > 0 ? 'moved' : 'stopped', source: 'minecraft' }],
+    terminated: state.health <= 0, truncated: state.health > 0 && allowed && activeTicks >= budget,
+    invalid: !allowed && state.health > 0, reason, clock_mode: 'paused', pause_verified: pauseVerified,
+    stable_boundary: !interrupted && terrain.stable(state), wall_seconds: (performance.now() - started) / 1000,
+    source_obs_id: candidate.source_obs_id, map_version: state.map_version,
+    path: allowed ? route : [], stop_evidence: [state.obs_id, reason], distance_moved: distance }
 }
 
 async function prepareWorld () {
@@ -253,13 +315,42 @@ async function clockTrial (payload) {
   return { ...payload, before, after, executed_ticks: executedTicks, wall_seconds: (performance.now() - start) / 1000 }
 }
 
+async function informationFixture (payload) {
+  if (!exactKeys(payload, ['variant', 'exposed']) || !['ore', 'lava'].includes(payload.variant) || typeof payload.exposed !== 'boolean') fail('invalid_request')
+  await reset({ episode_id: 'information-audit', attempt_id: 'fixture' })
+  const x = Math.floor(bot.entity.position.x); const z = Math.floor(bot.entity.position.z); const y = 100
+  // Constructed diagnostics only; frozen task snapshots are never edited.
+  await server.command(`fill ${x - 9} ${y - 1} ${z - 9} ${x + 9} ${y + 6} ${z + 9} minecraft:air`)
+  await server.command(`fill ${x - 9} ${y - 1} ${z - 9} ${x + 9} ${y - 1} ${z + 9} minecraft:stone`)
+  await server.command(`fill ${x + 3} ${y} ${z - 8} ${x + 3} ${y + 5} ${z + 8} minecraft:stone`)
+  const target = payload.variant === 'ore' ? 'diamond_ore' : 'lava'
+  await server.command(`setblock ${x + 4} ${y} ${z} minecraft:${target}`)
+  const verified = await server.command(`execute if block ${x + 4} ${y} ${z} minecraft:${target} run say fixture_target_ok`)
+  if (!verified.includes('fixture_target_ok')) fail('backend_error')
+  if (payload.exposed) await server.command(`fill ${x + 3} ${y} ${z} ${x + 3} ${y + 2} ${z} minecraft:air`)
+  else {
+    const wall = await server.command(`execute if block ${x + 3} ${y} ${z} minecraft:stone run say fixture_wall_ok`)
+    if (!wall.includes('fixture_wall_ok')) fail('backend_error')
+  }
+  await server.command(`tp ResearchBot ${x + 0.5} ${y} ${z + 0.5}`)
+  await sleep(150)
+  await bot.look(0, 0, true)
+  const setupTicks = await advance(5, true)
+  await pause()
+  terrain.reset()
+  history = []
+  activeTicks = observationIndex = 0
+  return { fixture_ready: true, setup_ticks: setupTicks }
+}
+
 async function dispatch (request, admin) {
   if (!exactKeys(request, ['request_id', 'method', 'payload']) || !identifier(request.request_id) || !exactKeys({ payload: request.payload }, ['payload']) || !request.payload || Array.isArray(request.payload) || typeof request.payload !== 'object') fail('invalid_request')
-  const methods = ['reset', 'observe', 'step', 'prepare_world', 'clock_trial', 'certify_clock']
+  const methods = ['reset', 'observe', 'step', 'prepare_world', 'clock_trial', 'certify_clock', 'information_fixture']
   if (!methods.includes(request.method)) fail('invalid_request')
-  if (admin ? !['reset', 'prepare_world', 'clock_trial', 'certify_clock'].includes(request.method) : !['observe', 'step'].includes(request.method)) fail('permission_denied')
+  if (admin ? !['reset', 'prepare_world', 'clock_trial', 'certify_clock', 'information_fixture'].includes(request.method) : !['observe', 'step'].includes(request.method)) fail('permission_denied')
   if (request.method === 'reset') return await reset(request.payload)
   if (request.method === 'clock_trial') return await clockTrial(request.payload)
+  if (request.method === 'information_fixture') return await informationFixture(request.payload)
   if (request.method === 'certify_clock') {
     if (!exactKeys(request.payload, []) || clockTrials.size !== 63 || await fingerprint() !== clockFingerprint) fail('invalid_request')
     const certificate = { fingerprint: clockFingerprint, trials: 63, pause_verified: true }
@@ -275,6 +366,8 @@ async function dispatch (request, admin) {
   const candidate = request.payload.candidate
   if (!exactKeys(candidate, ['candidate_id', 'action_kind', 'params', 'max_ticks', 'stop_rule_id', 'source_obs_id', 'description']) || !identifier(candidate.candidate_id) || !identifier(candidate.stop_rule_id) || typeof candidate.description !== 'string' || !candidate.params || typeof candidate.params !== 'object' || Array.isArray(candidate.params) || !Number.isInteger(candidate.max_ticks) || candidate.max_ticks < 1 || candidate.max_ticks > 400) fail('invalid_request')
   if (!episode || candidate.source_obs_id !== observationId()) fail('invalid_selection')
+  if (activeTicks >= budget) fail('invalid_selection')
+  if (candidate.action_kind === 'move_observed') return await moveObserved(candidate)
   const supported = candidate.action_kind === 'wait' && exactKeys(candidate.params, [])
   const started = performance.now()
   const ticks = await advance(Math.min(supported ? candidate.max_ticks : 1, budget - activeTicks))
@@ -284,7 +377,9 @@ async function dispatch (request, admin) {
     terminated: false, truncated: supported && activeTicks >= budget, invalid: !supported,
     reason: supported ? 'wait_completed' : 'unsupported_action', clock_mode: 'paused',
     // Only the complete real diagnostic can authorize this claim.
-    pause_verified: pauseVerified, stable_boundary: next.on_ground && !next.in_liquid,
+    pause_verified: pauseVerified, stable_boundary: terrain.stable(next),
+    source_obs_id: candidate.source_obs_id, map_version: next.map_version,
+    stop_evidence: [next.obs_id, supported ? 'wait_completed' : 'unsupported_action'],
     wall_seconds: (performance.now() - started) / 1000 }
 }
 

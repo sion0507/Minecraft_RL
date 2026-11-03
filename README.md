@@ -8,8 +8,8 @@
 
 ## 현재 상태
 
-이슈 #2의 환경 진단·공통 자료형·JSONL RPC·모의 에피소드에 이어, 이슈 #3의 실제 Minecraft 연결·고정 snapshot/reset·wait·정지 진단을 구현했습니다.
-현재 실제 backend는 자기 상태 관측과 wait를 제공합니다. 지형 관측·다른 매크로·모델/API·PPO·학습 효과는 후속 작업입니다. 실제 검사와 실패 기록은 [PROGRESS.md](PROGRESS.md)에 있습니다.
+이슈 #2의 공통 실행 흐름, #3의 실제 Minecraft reset·정지에 이어 #4의 제한 지형 관측·관측 지도 보행·정보 감사 명령을 구현했습니다.
+현재 실제 backend는 자기 상태, 직접 보인 표면·공기/방문 기억, wait와 같은 높이의 보행을 제공합니다. 채굴·제작·계단·터널·모델/API·PPO는 후속 작업입니다. 실제 검사와 실패 기록은 [PROGRESS.md](PROGRESS.md)에 있습니다.
 
 ## 실험 범위
 
@@ -60,7 +60,7 @@ GPU 검사는 CUDA 드라이버 API로 직접 작은 산술 커널을 실행합�
 모의 보상은 획득 사건 수이고, 실제 local/full 보상·PPO·다이아 성공 판정의 검증이 아닙니다. 정상 종료/유효 절단은 0, backend 오류/무효 경험은 1, 설정 오류는 2입니다.
 실제 backend는 설정의 `backend: rpc`와 `command`로 같은 실행 경로에 연결하고 `fixture`는 제거합니다. 제공하는 설정은 `configs/minecraft.yaml`입니다.
 
-RPC backend는 `--admin-fd <fd>`로 전달받은 파이프에서 reset·snapshot 준비·시계 진단만, stdin에서 observe/step만 받습니다. 두 채널의 응답은 request_id에 맞춰 stdout JSONL로 반환하고 진단은 stderr에 기록합니다.
+RPC backend는 `--admin-fd <fd>`로 전달받은 파이프에서 reset·snapshot 준비·시계/정보 fixture 진단만, stdin에서 observe/step만 받습니다. 두 채널의 응답은 request_id에 맞춰 stdout JSONL로 반환하고 진단은 stderr에 기록합니다.
 요청은 `request_id/method/payload`, 응답은 `request_id`와 정확히 하나의 `result/error`를 가지며 현재 호출은 직렬입니다.
 자료형과 허용 필드는 [schema.py](src/mc_diamond/schema.py)에 있습니다. 결과·후보 ID·원본 관측·mask와 episode/attempt ID를 로그에 보존합니다.
 알 수 없는 관측 필드와 RPC 결과는 오류로 종료하고 원본 오류 입력을 로그에 출력하지 않습니다.
@@ -85,11 +85,19 @@ python3 bridge/pausemod/build.py
 ```bash
 uv run mc-diamond verify-clock --config configs/minecraft.yaml
 uv run mc-diamond smoke-episode --config configs/minecraft.yaml
+uv run mc-diamond smoke-movement --config configs/minecraft.yaml
+uv run mc-diamond audit-information --config configs/minecraft.yaml
 ```
 
 각 명령이 서버를 시작하고 종료합니다. `verify-clock`은 평지·제련·드롭·용암·낙하·침수·화염에서 0/5/10초를 각각 3회 검사합니다. 실제 위험 상태가 준비됐는지, 위치 오차 0.001블록과 다른 상태·사건·틱이 보존되는지 판정합니다. 전부 통과한 실행만 검증 기록을 원자 저장하며, 코드·게임 의존성·Java/Node 버전·서버 설정·snapshot hash가 바뀌면 다시 검사합니다. 모의 backend를 실제 정지 근거로 사용하지 않습니다.
 
 실제 smoke는 같은 reset→관측→목표→후보→선택→실행→보상→요약 흐름에서 wait를 실행합니다. 원목 수집·다이아 성공·학습을 수행한 결과가 아니며 actor 경험과 진단 보상은 0입니다. 활성 틱과 실제 경과 시간을 분리하고, 지원하지 않는 행동의 실패도 실제 한 틱을 실행해 기록합니다.
+
+`smoke-movement`는 같은 실행기에서 관측된 바닥·발/머리 공간만 연결해 최대 8개 경로를 만들고 첫 후보를 실행합니다. 같은 높이에서 최대 16블록/400 활성 틱이며, 위험·공개 경로 변경·진행 정체에서 멈춥니다. 후보 경로, 원본 관측 ID, 지도 버전, 중단 근거, 실제 이동 거리/틱/경과 시간과 안정 경계를 출력합니다. 최소 한 번의 안정된 경로 완료가 있어야 exit 0이며, 이는 행동 모델의 성능 검증이 아닙니다.
+
+`audit-information`은 관리자 채널에서 벽 뒤 광석/용암의 두 실제 장면을 준비합니다. 정책은 일반 observe/step으로만 접속하며 노출 전 관측·후보·경로·실행/중단 결과가 같아야 합니다. 벽을 연 뒤 각각 관측되는 양성 대조도 확인합니다. 이 장면은 진단용 수정본이며 원본 snapshot은 보존합니다. 감사 후에는 다음 reset으로 기준 월드를 복원합니다. 실제 정지 인증이 없으면 감사가 통과하지 않습니다. 감사 범위는 현재 관측과 보행이며 후속 제작·하강·터널까지 검증했다는 뜻이 아닙니다.
+
+지형 관측은 눈에서 반경 8블록의 셀 중심으로 광선을 보내 처음 만나는 충돌 표면/위험에서 끊습니다. 지나간 공기·비충돌 식물과 첫 표면만 기억하고 미로딩 셀은 막힌 것으로 취급합니다. 유리·부분 충돌 블록을 보수적으로 가리개로 취급하며 숨은 이웃의 모양·청크 전체·시드·관리자 로그를 경로 판단에 쓰지 않습니다. `hidden_hazard_peek=false`를 기록하며 reset은 지도·방문·최근 결과를 초기화합니다.
 
 수동으로 서버만 열 때는 실험 CLI를 종료한 뒤 아래 명령을 사용합니다. 확장 모드는 기동 시 정지 상태로 시작하며, 콘솔의 `stop`으로 저장·종료합니다.
 
