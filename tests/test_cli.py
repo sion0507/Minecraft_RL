@@ -138,6 +138,25 @@ assert.equal(cornerReads, 0)
     assert result.returncode == 0, result.stderr
 
 
+def test_movement_bounds_slippery_surfaces_and_counts_failure_tick_motion() -> None:
+    result = subprocess.run(["node", "fixtures/movement_physics.cjs"], text=True, capture_output=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    rows = json.loads(result.stdout)
+    for row in rows[:-1]:
+        assert row["actual_ticks"] <= 400
+        assert row["distance_moved"] <= 16, row
+        if row["floorName"] in {"ice", "packed_ice", "frosted_ice", "blue_ice"}:
+            assert row["reason"] == "invalid_path", row
+        else:
+            assert row["stable_boundary"] is True, row
+            assert row["distance_moved"] > 0, row
+    failed = rows[-1]
+    assert failed["actual_ticks"] == 1
+    assert failed["distance_moved"] == pytest.approx(0.1)
+    assert failed["distance_moved"] == pytest.approx(failed["displacement"])
+    assert failed["events"][0]["kind"] == "moved"
+
+
 def test_information_audit_rejects_mock_as_real_evidence() -> None:
     result = subprocess.run(["mc-diamond", "audit-information", "--config", "configs/pilot.yaml"],
                             text=True, capture_output=True, timeout=10)

@@ -202,7 +202,6 @@ async function moveObserved (candidate) {
   let reason = allowed ? 'path_completed' : 'invalid_path'
   let state = initial
   let interrupted = false
-  if (!allowed) { ticks += await advance(1, true); observationIndex++; state = await observation() }
   while (allowed && ticks < limit) {
     if (terrain.danger(state) || state.health < initial.health) { reason = 'observed_hazard'; interrupted = true; break }
     if (index < route.length && Math.hypot(route[index][0] - state.position[0], route[index][2] - state.position[2]) < 0.15) index++
@@ -222,7 +221,12 @@ async function moveObserved (candidate) {
     idle = travelled < 0.001 && !settling ? idle + 1 : 0
     if (idle >= 20) { reason = 'no_progress'; interrupted = true; break }
   }
-  if (!ticks) { ticks += await advance(1, true); observationIndex++; state = await observation() }
+  if (!ticks) {
+    ticks += await advance(1, true)
+    observationIndex++
+    state = await observation()
+    distance = Math.hypot(...state.position.map((value, axis) => value - initial.position[axis]))
+  }
   if (allowed && ticks >= limit) reason = 'active_tick_limit'
   history = [...history.slice(-15), 'move_observed:' + reason]
   state = await observation()

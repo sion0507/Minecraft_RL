@@ -1,5 +1,15 @@
 # 실행 기록
 
+## 2026-11-03 — 이슈 #4 PR #29 생성·독립 검토 수정
+
+구현·문서·원본 보고서 18개 파일을 `0b928808b6f5855b754219a23ca0a920d66dfc58`로 커밋하고 `origin/ticket-4`에 푸시했다. [PR #29](https://github.com/sion0507/Minecraft_RL/pull/29)를 생성했으며 원격 head 일치·base main `624b9c6`·MERGEABLE·Open, 원격 statusCheckRollup 비어 있음을 확인했다. PR 본문에 실제와 mock/scripted 검증을 구분하고 #4를 연결했다. main 머지·이슈 종료는 수행하지 않는다.
+
+두 독립 검토자의 Standards/Spec 검토를 수행했다. Standards에서 P2 두 건을 재현했다. (1) 얼음 관성으로 이동 상한 16블록을 넘는 경우: ice/packed/frosted 16.8120, blue_ice 17.0373블록. 네 종류는 관측하되 제동 교정 전까지 support=false로 제외한다. (2) 무효 경로의 필수 1틱에서 실제 0.1블록 움직였지만 거리 0·stopped로 기록하는 경우: 중복 tick 처리를 합쳐 실제 변위를 기록한다.
+
+설치된 Physics/PlayerState와 실제 Terrain 관측을 쓰는 scripted fixture에서 첫 상한 초과 RED, 수정 후 실패 tick 거리 RED를 차례로 확인한 뒤 전체 pytest **38 passed(9.96초)**·strict mypy **15개 파일**·Node 3개 파일 구문·diff 공백 검사를 통과했다. 이 fixture는 실제 서버 검증이 아니다. 돌/슬라임은 각각 15.3222/15.8764블록으로 상한 안이며 얼음 네 종류는 경로를 거부하고 실패 1틱의 변위는 실제 0.1블록과 일치한다.
+
+수정본 재검토에서 Standards 두 건 해결·남은 중대한 문제 없음, Spec 남은 차단 지적 없음이다. 사용자 요청에 따라 수정 commit을 같은 PR에 푸시하고 실제 정지 인증·정보 감사·이동을 새 코드로 재검증한다. 이 문단 작성 시 실제 재검증은 진행 중이며 완료를 주장하지 않는다. 과거 보고서와 raw artifact는 보존한다.
+
 ## 2026-11-03 — 이슈 #4 커밋·푸시·PR 검토 준비
 
 사용자가 이슈 #4의 커밋·푸시·PR 생성과 검토를 요청했다. `ticket-4`와 최신 `origin/main`의 공통 기준은 `624b9c6`이다. 이슈 #4는 Open이며 기존 ticket-4 PR은 없고 최신 #1/#4 본문·댓글을 재조회했다. 실제 코드·보고서·문서만 커밋하며 월드/원시 artifact/캐시를 제외한다. 기존 PDF/HTML의 작성 당시 미커밋 상태는 보존한다.

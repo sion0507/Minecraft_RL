@@ -1,6 +1,8 @@
 // Policy rays stop at the first occupied shape or hazardous surface.
 const { Vec3 } = require('vec3')
 const hazards = new Set(['lava', 'water', 'fire', 'soul_fire', 'magma_block', 'cactus', 'sweet_berry_bush', 'campfire', 'soul_campfire'])
+// shortcut: ice supports are excluded until braking is calibrated on ice.
+const slippery = new Set(['ice', 'packed_ice', 'frosted_ice', 'blue_ice'])
 const key = p => p.join(',')
 
 class Terrain {
@@ -28,7 +30,7 @@ class Terrain {
       if (!block) { cache.set(id, false); return false }
       const passable = block.shapes.length === 0 && !hazards.has(block.name)
       const cell = { block: block.name, position: point, passable,
-        support: JSON.stringify(block.shapes) === '[[0,0,0,1,1,1]]' && !hazards.has(block.name),
+        support: JSON.stringify(block.shapes) === '[[0,0,0,1,1,1]]' && !hazards.has(block.name) && !slippery.has(block.name),
         hazard: hazards.has(block.name) }
       if (JSON.stringify(this.memory.get(id)) !== JSON.stringify(cell)) {
         this.memory.set(id, cell)
