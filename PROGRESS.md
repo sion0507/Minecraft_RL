@@ -1,5 +1,15 @@
 # 실행 기록
 
+## 2026-11-03 — PR #28 수정본 검토·실제 재검증 완료, 통합 준비
+
+리뷰 수정 코드 `21a63593992eb0b51630a1110c535ed83f85de51`을 `origin/ticket-3`에 푸시했다. 두 독립 검토자는 수정 diff를 재검토해 Standards 남은 차단 문제 0건, Spec 추가 차단 문제 0건으로 판정했다. Spec의 실제 재검증 조건도 아래 실행으로 충족했다. GitHub 계정의 승인 리뷰로 표시하지 않는다.
+
+수정본 공개 verify-clock은 **exit 0, 63/63**이다. 63개 고유 조합 모두 위험 장면 준비 상태를 만족하고 before/after 측정값이 정확히 같으며 위치 drift 0, 낙하 9건 모두 공중 상태다. 원시 결과 `artifacts/issue-3/verify-clock-pr28.jsonl`, 새 인증 fingerprint `d9aeb6f565cea776a90a4be6912835e2a93c2553520cfb38395af67e231aca50`. 과거 인증을 새 코드의 근거로 재사용하지 않고 실제로 다시 검사했다.
+
+후속 공개 실제 smoke도 **exit 0, 2결정·40틱·10.97초**, 두 step pause_verified=true, actor 0·보상 0·다이아 성공 false, 정상 decision_limit 절단이다. reset 뒤 새 인증 재사용을 확인했고 CLI가 서버를 종료했다. 원시 결과 `artifacts/issue-3/smoke-episode-pr28.jsonl`. pytest 29개·mypy 12개 파일과 Node/공백 검사는 코드 수정 후 통과한 결과이며 문서 작성 중 불필요하게 다시 실행하지 않았다.
+
+후속 PDF는 A4 2쪽으로 출력해 모든 페이지 이미지를 직접 확인했다. 한글·핵심 수치 추출, 전체 글꼴 embedded/subset/Unicode mapping, 잘림·표 분리 없음도 확인했다. 기존 PDF/HTML을 보존하고 `reports/issue-003-T02-2026-11-03-v2.{html,pdf}`에 독립 검토·수정·새 실제 검증·미실행과 작성 당시 Git 상태를 구분해 기록한다. 이 기록 작성 시 PR #28은 Open, main 미머지·이슈 #3 Open이다. 검토 문서/보고서를 같은 PR에 반영한 후 요청대로 merge하고 종료 상태를 확인한다. 최종 통합 상태는 PR/이슈의 GitHub 기록을 따른다. 모델/PPO·유료 API·전체 예산 검증을 수행하거나 완료로 주장하지 않는다.
+
 ## 2026-11-03 — PR #28 독립 검토와 정지 인증 보완
 
 사용자 요청으로 `ticket-3`→`main` PR [#28](https://github.com/sion0507/Minecraft_RL/pull/28)을 생성했다. 기준 main `1de47b7`, 최초 검토 head `29c962d`다. 별도 읽기 전용 Standards/Spec 검토를 병렬 수행했다. Spec은 T02 범위에서 추가 차단 지적이 없었다. Standards는 Fabric Loader/Mixin/intermediary/ASM 및 실제 remapped game jar가 fingerprint에서 빠져, 의존성 변경 후 옛 정지 인증을 재사용할 수 있는 P2를 발견했다.
