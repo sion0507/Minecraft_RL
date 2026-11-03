@@ -1,5 +1,13 @@
 # 실행 기록
 
+## 2026-11-03 — PR #28 독립 검토와 정지 인증 보완
+
+사용자 요청으로 `ticket-3`→`main` PR [#28](https://github.com/sion0507/Minecraft_RL/pull/28)을 생성했다. 기준 main `1de47b7`, 최초 검토 head `29c962d`다. 별도 읽기 전용 Standards/Spec 검토를 병렬 수행했다. Spec은 T02 범위에서 추가 차단 지적이 없었다. Standards는 Fabric Loader/Mixin/intermediary/ASM 및 실제 remapped game jar가 fingerprint에서 빠져, 의존성 변경 후 옛 정지 인증을 재사용할 수 있는 P2를 발견했다.
+
+서버의 `.fabric/`, `libraries/`, `mods/` 전체 트리와 bootstrap/game jar를 실제 내용으로 hash하도록 보완했다. 기존 snapshot treeHash를 재사용하고 추가 모드도 hash 변화에 포함한다. 회귀 검사는 누락된 메서드에서 먼저 실패한 뒤 변경·원복·모드 추가의 hash 동작을 통과했다. 기존 drift 검사 fixture가 미준비 상태여서 실패 이유를 구분하지 못하던 부분도 준비된 샘플과 무변경 성공 대조군으로 고쳤다. 이 scripted 검사는 물리 근거가 아니다.
+
+수정 후 전체 pytest **29 passed(9.23초)**, strict mypy **12개 파일 통과**, Node 구문·diff 공백 검사 통과다. 새 fingerprint로 실제 공개 63회 정지 검증을 실행 중이며 `artifacts/issue-3/verify-clock-pr28.jsonl`에 저장한다. 이 시점 실제 재검증·수정본 독립 재검토·main 머지·이슈 종료는 미완료다. 기존 보고서는 보존하고 최종 결과는 별도 후속 PDF/HTML에 기록한다.
+
 ## 2026-11-03 — ticket-3 구현 커밋·원격 푸시 완료
 
 구현·설정·검토 문서·PDF 보고서·완료 보고 규칙 28개 파일을 `1312252e200df81e352a34570a8561ef049fb84c` (`feat: implement real Minecraft reset and verified pause (#3)`)로 커밋하고 `git push -u origin ticket-3`가 성공했다. 원격 신규 브랜치 생성과 upstream 설정, 로컬/추적 브랜치의 일치를 확인했다. 게임 jar·월드·raw artifact·캐시·비밀값은 포함하지 않았다.

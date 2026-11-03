@@ -38,9 +38,9 @@ async function fingerprint () {
   const hash = createHash('sha256')
   const java = await promisify(execFile)('java', ['-version'], { timeout: 5000 })
   hash.update(process.version + java.stderr)
+  hash.update(await server.runtimeHash())
   for (const file of [__filename, path.join(__dirname, 'server.js'),
     path.join(__dirname, '../src/mc_diamond/clock.py'), path.join(__dirname, 'package-lock.json'),
-    ...['server.jar', 'fabric-server-launch.jar', 'mods/fabric-carpet-1.16.5-1.4.44+v210714.jar', 'mods/mc-diamond-pause.jar'].map(p => path.join(server.root, p)),
     ...['C4', 'G1', 'G2', 'G3', 'G4'].map(t => path.join(server.snapshots, t, 'snapshot.json'))]) {
     hash.update(await fsp.readFile(file))
   }

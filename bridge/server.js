@@ -35,6 +35,18 @@ class Server {
     this.closed = false
   }
 
+  async runtimeHash () {
+    const hash = createHash('sha256')
+    for (const name of ['.fabric', 'libraries', 'mods']) {
+      hash.update(name + ':' + await treeHash(path.join(this.root, name)))
+    }
+    for (const name of ['server.jar', 'fabric-server-launch.jar']) {
+      hash.update(name + ':')
+      hash.update(await fs.readFile(path.join(this.root, name)))
+    }
+    return hash.digest('hex')
+  }
+
   async claim () {
     if (this.claimed) return
     const installation = JSON.parse(await fs.readFile(path.join(this.root, 'installation.json'), 'utf8'))

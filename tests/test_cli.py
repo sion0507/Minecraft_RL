@@ -160,7 +160,34 @@ def test_rpc_shutdown_waits_for_backend_resource_cleanup(tmp_path: Path) -> None
     assert marker.exists() and marker.read_text() == "closed"
 
 
-@pytest.mark.parametrize("changed", ["position", "oxygen", "ticks", "missing_state", "bad_position"])
+def test_runtime_hash_tracks_loaded_dependencies_and_added_mods(tmp_path: Path) -> None:
+    for name in (".fabric/server/game.jar", "libraries/fabric/loader.jar", "mods/pause.jar",
+                 "server.jar", "fabric-server-launch.jar"):
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"original")
+    script = (
+        "const {Server}=require('./bridge/server');"
+        "new Server(process.argv[1]).runtimeHash().then(console.log)"
+    )
+
+    def digest() -> str:
+        result = subprocess.run(["node", "-e", script, str(tmp_path)],
+                                text=True, capture_output=True, check=True, timeout=10)
+        return result.stdout.strip()
+
+    original = digest()
+    for name in (".fabric/server/game.jar", "libraries/fabric/loader.jar", "mods/pause.jar"):
+        target = tmp_path / name
+        target.write_bytes(b"modified")
+        assert digest() != original
+        target.write_bytes(b"original")
+        assert digest() == original
+    (tmp_path / "mods/extra.jar").write_bytes(b"added")
+    assert digest() != original
+
+
+@pytest.mark.parametrize("changed", ["unchanged", "position", "oxygen", "ticks", "missing_state", "bad_position"])
 def test_clock_report_rejects_actual_state_drift(tmp_path: Path, changed: str) -> None:
     # Scripted transport tests the CLI verdict, not Minecraft physics.
     backend = tmp_path / "clock_backend.py"
@@ -168,15 +195,24 @@ def test_clock_report_rejects_actual_state_drift(tmp_path: Path, changed: str) -
         "import argparse,json,os,copy\n"
         "p=argparse.ArgumentParser();p.add_argument('--admin-fd',type=int);a=p.parse_args()\n"
         "for line in os.fdopen(a.admin_fd):\n"
-        " r=json.loads(line);state={'position':[0.0,64.0,0.0],'oxygen':300,'game_ticks':20}\n"
-        " before={'client':copy.deepcopy(state),'server':copy.deepcopy(state)}\n"
-        " after=copy.deepcopy(before)\n"
+        " r=json.loads(line)\n"
+        " if r['method']=='certify_clock':\n"
+        "  print(json.dumps({'request_id':r['request_id'],'result':{}}),flush=True);continue\n"
+        " state={'Motion':'[0.0d,-0.1d,0.0d]','Health':'19.0f','Air':'280s',"
+        "'Fire':'20s','Inventory':'[]','FallDistance':'1.0f','HurtTime':'0s'}\n"
+        " client={'position':[0.0,64.0,0.0],'velocity':[0.0,-0.1,0.0],'health':19,"
+        "'oxygen':280,'on_fire':True,'on_ground':True,'inventory':{},'events':0}\n"
+        " before={'client':client,'server':{'position':[0.0,64.0,0.0],'state':state,"
+        "'game_ticks':20,'furnace':'CookTime: 5s','drop':'Tags: [mc_clock], Age: 5s'}}\n"
         f" changed={changed!r}\n"
+        " if changed=='missing_state':del before['server']['state']['Air']\n"
+        " after=copy.deepcopy(before)\n"
         " if changed=='position':after['client']['position'][0]=0.002\n"
-        " if changed=='oxygen':after['server']['oxygen']=299\n"
+        " if changed=='oxygen':after['server']['state']['Air']='279s'\n"
         " if changed=='ticks':after['server']['game_ticks']=21\n"
         " if changed=='bad_position':after['client']['position'][0]=None\n"
-        " result={**r['payload'],'before':before,'after':after,'executed_ticks':1,'wall_seconds':0.1}\n"
+        " result={**r['payload'],'before':before,'after':after,'executed_ticks':1,"
+        "'wall_seconds':r['payload']['delay_seconds']}\n"
         " print(json.dumps({'request_id':r['request_id'],'result':result}),flush=True)\n",
         encoding="utf-8",
     )
@@ -187,7 +223,7 @@ def test_clock_report_rejects_actual_state_drift(tmp_path: Path, changed: str) -
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     result = subprocess.run(["mc-diamond", "verify-clock", "--config", str(config_path)],
                             text=True, capture_output=True, timeout=15)
-    assert result.returncode == 1
+    assert result.returncode == (0 if changed == "unchanged" else 1)
     output = records(result)
     if changed == "bad_position":
         assert output[0]["data"]["code"] == "protocol_error"
@@ -196,9 +232,11 @@ def test_clock_report_rejects_actual_state_drift(tmp_path: Path, changed: str) -
         assert "Traceback" not in result.stderr
         return
     assert output[-1]["type"] == "clock_summary"
-    assert output[-1]["data"]["pause_verified"] is False
+    assert output[-1]["data"]["pause_verified"] is (changed == "unchanged")
     assert output[-1]["data"]["trials"] == 63
-    assert all(not record["data"]["passed"] for record in output[:-1])
+    assert all(record["data"]["passed"] is (changed == "unchanged") for record in output[:-1])
+    assert all(record["data"]["scene_prepared"] is (changed != "missing_state")
+               for record in output[:-1])
 
 
 @pytest.mark.parametrize("outcome", ["truncated", "invalid"])
