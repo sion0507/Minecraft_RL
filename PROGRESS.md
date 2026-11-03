@@ -1,5 +1,11 @@
 # 실행 기록
 
+## 2026-11-03 — ticket-3 구현 커밋·원격 푸시 완료
+
+구현·설정·검토 문서·PDF 보고서·완료 보고 규칙 28개 파일을 `1312252e200df81e352a34570a8561ef049fb84c` (`feat: implement real Minecraft reset and verified pause (#3)`)로 커밋하고 `git push -u origin ticket-3`가 성공했다. 원격 신규 브랜치 생성과 upstream 설정, 로컬/추적 브랜치의 일치를 확인했다. 게임 jar·월드·raw artifact·캐시·비밀값은 포함하지 않았다.
+
+커밋 직전 pytest 27개·strict mypy 12개 파일·Node 구문·공백 검사와 기존 실제 시계 검증 fingerprint 일치 확인을 통과했다. 실제 게임 63회는 재실행하지 않았다. 기존 PDF의 작성 당시 미커밋 상태를 보존하고 보고서 목록에 후속 코드 커밋/푸시 기록을 연결한다. 이 후속 문서 기록도 별도 커밋으로 같은 브랜치에 푸시한다. main 머지·PR 생성·이슈 종료·브랜치 삭제는 수행하지 않았다.
+
 ## 2026-11-03 — ticket-3 커밋·푸시 준비 검사
 
 사용자가 `ticket-3` 변경의 커밋·푸시를 명시적으로 요청했다. main 머지·PR 생성·이슈 종료는 이번 요청에 포함하지 않는다. 원격을 fetch한 결과 기존 origin/ticket-3는 없다. 커밋 직전 전체 pytest **27 passed(8.24초)**, strict mypy **12개 파일 통과**, Node backend/lifecycle 구문 검사와 diff 공백 검사 통과를 확인했다. 현재 시계 엔진·설치 환경 fingerprint가 보존된 실제 63/63 검증 기록과 일치하고, 보고서 PDF 2쪽/3쪽의 한글 추출도 재확인했다. 실제 63회 게임 검사는 재실행하지 않았다.

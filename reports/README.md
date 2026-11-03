@@ -13,6 +13,8 @@
 
 목록과 PDF의 Git 상태는 각 보고서 작성 당시의 기록이다. 후속 커밋·푸시 결과는 Git 이력과 [PROGRESS.md](../PROGRESS.md)의 최신 기록을 확인한다.
 
+2026-11-03 후속 기록: 구현 코드와 보고서를 [1312252](https://github.com/sion0507/Minecraft_RL/commit/1312252e200df81e352a34570a8561ef049fb84c)로 커밋하고 `origin/ticket-3`에 푸시했다. PR 생성·main 머지·이슈 종료는 미처리다. 기존 PDF의 작성 당시 상태는 보존한다.
+
 1. `issue-NNN-TNN-YYYY-MM-DD.html`과 같은 이름의 `.pdf`를 만든다. NNN은 GitHub 이슈 번호, TNN은 작업 코드, 날짜는 보고서 작성일이다. 실제 실행·검증일은 본문에 별도로 적는다. 이슈 #2는 T01, #3은 T02다.
 2. [TEMPLATE.html](TEMPLATE.html)을 복사하고 [report.css](report.css)를 사용한다. 한국어로 목적·수락 기준별 구현·변경 파일/구조·검증 명령/결과·실패/수정·미실행/제한·근거 경로를 적는다.
 3. 실제 환경 검증, mock/scripted 검사, 미실행을 구분한다. 과거 기록을 재구성하면 실행일을 적고 이번에 다시 실행한 것처럼 쓰지 않는다.
