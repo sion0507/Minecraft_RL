@@ -36,6 +36,7 @@ node_modules/
 # Local experiment output (keep configs and dependency lockfiles tracked)
 /runs/
 /artifacts/
+/reports/
 /checkpoints/
 /worlds/
 .cache/

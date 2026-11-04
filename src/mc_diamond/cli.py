@@ -30,7 +30,9 @@ def main() -> int:
                     print(f"{name}: {probe.status}: {probe.detail}", file=sys.stderr)
             return 0 if report.ready else 1
         if args.command in {"verify-clock", "prepare-world", "audit-information"} and config.backend != "rpc":
-            raise ValueError("Actual Minecraft backend required")
+            emit("error", ErrorInfo(code="invalid_config", message="Actual Minecraft backend required; use configs/minecraft.yaml"))
+            print("Actual Minecraft backend required; use configs/minecraft.yaml", file=sys.stderr)
+            return 2
         command = config.command
         if config.backend == "mock":
             assert config.fixture is not None
@@ -50,6 +52,9 @@ def main() -> int:
                                   episode_id, attempt_id, movement=args.command == "smoke-movement")
         if summary.error or summary.invalid:
             print(f"Episode stopped: {summary.reason}", file=sys.stderr)
+            return 1
+        if summary.clock_mode == "unverified":
+            print("Pause unverified; run verify-clock with the actual backend", file=sys.stderr)
             return 1
         if args.command == "smoke-movement" and not summary.movement_completed:
             return 1

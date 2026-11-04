@@ -117,7 +117,7 @@ class StepResult(Contract):
     truncated: bool
     invalid: bool
     reason: Identifier
-    clock_mode: Literal["mock", "paused", "realtime"]
+    clock_mode: Literal["mock", "paused", "realtime", "unverified"]
     pause_verified: bool
     stable_boundary: bool
     wall_seconds: float = Field(ge=0)
@@ -131,9 +131,23 @@ class StepResult(Contract):
     def validate_outcome(self) -> Self:
         if sum([self.terminated, self.truncated, self.invalid]) > 1:
             raise ValueError("terminal/truncation/invalid must be distinct")
-        if self.clock_mode == "mock" and self.pause_verified:
-            raise ValueError("mock cannot verify actual pause")
+        if self.pause_verified != (self.clock_mode == "paused"):
+            raise ValueError("only verified pause may use paused clock mode")
         return self
+
+
+class MovementEvidence(Contract):
+    candidate_id: Identifier
+    source_obs_id: Identifier
+    map_version: Count
+    events: list[Event]
+    reason: Identifier
+    actual_ticks: Positive
+    wall_seconds: float = Field(ge=0)
+    path: list[list[float]]
+    stop_evidence: list[str]
+    stable_boundary: bool
+    distance_moved: float = Field(ge=0)
 
 
 class EpisodeSummary(Contract):
@@ -142,6 +156,8 @@ class EpisodeSummary(Contract):
     backend: Literal["mock", "rpc"]
     task: Literal["smoke", "movement_smoke"] = "smoke"
     clock_mode: Literal["mock", "paused", "realtime", "unverified"]
+    pause_verified: bool = False
+    movement_steps: list[MovementEvidence] = Field(default_factory=list)
     movement_completed: bool = False
     distance_moved: float = Field(default=0.0, ge=0)
     goal_completed: bool

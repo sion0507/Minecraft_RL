@@ -12,7 +12,9 @@ See `docs/agents/domain.md`.
 
 ### 이슈 완료 보고서
 
-이슈 구현 완료를 보고할 때마다 검토용 PDF와 HTML 원본을 `reports/`에 저장하고 링크를 제공한다. [reports/README.md](reports/README.md)의 작성·출력·가독성 검사 규칙을 따른다. 구현/실제·mock 검증/미실행과 commit·push·merge·이슈 종료 상태를 구분하고 기존 완료 보고서를 보존한다.
+`reports/`는 사용자 검토용 로컬 전용 폴더다. 티켓별로 최신 구현·검증 보고서 PDF 1개와 코드 가이드 PDF 1개만 남기고 이전 판본은 교체한다. HTML·README·템플릿·CSS·patch 등 다른 파일은 저장하지 않는다. PDF 생성 중간 파일이 필요하면 `/tmp`에서 처리한다. `reports/`는 Git 추적·커밋·푸시 대상에서 제외한다.
+
+보고서는 한국어로 구현/실제·mock 검증/미실행과 commit·push·merge·이슈 종료 상태를 구분한다. 코드 가이드는 핵심 구현의 파일·함수·시작 줄과 확인할 로직을 연결하고 코드 기준을 명시한다. PDF의 한글 추출·글꼴 포함·모든 페이지 가독성을 확인하고 두 PDF 링크를 제공한다. 보고서 작성 때문에 게임 검사를 자동 재실행하지 않는다.
 
 ## 스택
 
@@ -44,7 +46,7 @@ npm --prefix bridge ci
 uv run mc-diamond doctor --config configs/pilot.yaml
 uv run mc-diamond smoke-episode --config configs/pilot.yaml
 uv run mc-diamond verify-clock --config configs/minecraft.yaml
-uv run mc-diamond audit-information --config configs/pilot.yaml
+uv run mc-diamond audit-information --config configs/minecraft.yaml
 uv run mc-diamond smoke-macros --config configs/pilot.yaml
 uv run mc-diamond smoke-planner --config configs/pilot.yaml
 uv run mc-diamond smoke-model --config configs/pilot.yaml

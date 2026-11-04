@@ -10,7 +10,7 @@ from pydantic import BaseModel, ValidationError
 from .rpc import EpisodeError, PolicyEnvironment
 from .navigation import generate_movement_candidates
 from .schema import (
-    Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Goal, Observation, SelectionResult,
+    Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Goal, MovementEvidence, Observation, SelectionResult,
 )
 
 
@@ -37,6 +37,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     reward_total = 0.0
     distance_moved = 0.0
     movement_completed = False
+    movement_steps: list[MovementEvidence] = []
+    pause_verified = False
     acquired_target = 0
     terminated = truncated = invalid = completed = False
     reason = "decision_limit"
@@ -77,11 +79,31 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 or step.actual_ticks > candidate.max_ticks or step.observation.obs_id == observation.obs_id):
                 raise EpisodeError(ErrorInfo(code="invalid_step", message="Inconsistent step IDs or tick accounting"))
             active_ticks = step.observation.active_ticks
-            clock_mode = step.clock_mode
             emit("step", step)
+            if decisions == 1:
+                clock_mode, pause_verified = step.clock_mode, step.pause_verified
+            elif clock_mode != step.clock_mode:
+                clock_mode, pause_verified = "unverified", False
+            else:
+                pause_verified &= step.pause_verified
+            if candidate.action_kind == "move_observed":
+                if (step.actual_ticks < 1 or step.source_obs_id != observation.obs_id
+                        or step.map_version != step.observation.map_version
+                        or step.path != ([] if step.invalid or step.reason == "invalid_path" else candidate.params["path"])
+                        or step.stop_evidence != [step.observation.obs_id, step.reason]
+                        or any(event.source != ("mock" if step.clock_mode == "mock" else "minecraft") for event in step.events)
+                        or not any(event.kind == ("moved" if step.distance_moved > 0 else "stopped") for event in step.events)):
+                    raise EpisodeError(ErrorInfo(code="invalid_step", message="Inconsistent movement evidence"))
+                assert step.source_obs_id is not None
+                movement_steps.append(MovementEvidence(
+                    candidate_id=candidate.candidate_id, source_obs_id=step.source_obs_id,
+                    **step.model_dump(include={"map_version", "events", "reason", "actual_ticks", "wall_seconds",
+                                               "path", "stop_evidence", "stable_boundary", "distance_moved"}),
+                ))
             distance_moved += step.distance_moved
             movement_completed |= (candidate.action_kind == "move_observed" and step.reason == "path_completed"
-                                   and step.stable_boundary and 0 < step.distance_moved <= 16 and not step.invalid)
+                                   and step.stable_boundary and 0 < step.distance_moved <= 16 and not step.invalid
+                                   and step.clock_mode in {"mock", "paused"})
             reward = float(sum(event.quantity for event in step.events if event.kind == "acquired"))
             reward_total += reward
             emit("reward", {"value": reward, "kind": "smoke_acquisition_count", "actor_valid": False})
@@ -102,10 +124,13 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         error = ErrorInfo(code="protocol_error", message="Backend result violates contract")
         reason = error.code
         emit("error", error)
+    if error and clock_mode != "mock":
+        clock_mode, pause_verified = "unverified", False
     summary = EpisodeSummary(
         episode_id=episode_id, attempt_id=attempt_id, backend=config.backend,
         task="movement_smoke" if movement else "smoke",
-        clock_mode=clock_mode, goal_completed=completed, terminated=terminated,
+        clock_mode=clock_mode, pause_verified=pause_verified, movement_steps=movement_steps,
+        goal_completed=completed, terminated=terminated,
         truncated=truncated, invalid=invalid, reason=reason, error=error,
         active_ticks=active_ticks, wall_seconds=time.monotonic() - started,
         decisions=decisions, reward_total=reward_total,
