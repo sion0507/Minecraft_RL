@@ -51,10 +51,11 @@ def test_mock_episode_runs_through_public_cli() -> None:
     assert records[-1]["data"]["diamond_success"] is False
     assert records[-1]["data"]["active_ticks"] == 20
     assert records[-1]["data"]["reward_total"] == 1.0
+    assert records[-1]["data"]["pause_verified"] is False
     assert records[4]["data"]["probabilities"] is None
 
 
-def test_movement_cli_uses_only_observed_clearance_and_support(tmp_path: Path) -> None:
+def movement_fixture() -> dict[str, Any]:
     fixture = mock_fixture()
     cells = []
     for x in range(3):
@@ -64,12 +65,47 @@ def test_movement_cli_uses_only_observed_clearance_and_support(tmp_path: Path) -
     fixture["initial"].update(position=[0.5, 64.0, 0.5], observed_map=cells, map_version=1)
     fixture["steps"][0]["observation"].update(position=[2.5, 64.0, 0.5], observed_map=cells, map_version=1)
     fixture["steps"][0].update(reason="path_completed", distance_moved=2.0,
+                               source_obs_id="obs-0", map_version=1,
+                               path=[[1.5, 64.0, 0.5], [2.5, 64.0, 0.5]],
+                               stop_evidence=["obs-1", "path_completed"],
                                events=[{"kind": "moved", "source": "mock"}])
+    return fixture
+
+
+def test_movement_death_during_rejected_path_tick_stays_terminal(tmp_path: Path) -> None:
+    # The bridge runs one tick for a rejected path; dying then gives invalid=false with path=[].
+    fixture = movement_fixture()
+    step = fixture["steps"][0]
+    step["observation"].update(position=[0.5, 64.0, 0.5], health=0.0, active_ticks=1, remaining_ticks=99)
+    step.update(actual_ticks=1, terminated=True, invalid=False, reason="invalid_path", distance_moved=0.0,
+                path=[], stop_evidence=["obs-1", "invalid_path"], events=[{"kind": "stopped", "source": "mock"}])
+    result = subprocess.run(["mc-diamond", "smoke-movement", "--config", str(fixture_config(tmp_path, fixture))],
+                            text=True, capture_output=True, timeout=15)
+    summary = records(result)[-1]["data"]
+    assert summary["error"] is None, summary["error"]
+    assert summary["terminated"] is True
+    assert summary["reason"] == "invalid_path"
+    assert summary["movement_steps"][0]["path"] == []
+    assert summary["movement_completed"] is False
+
+
+@pytest.mark.parametrize("broken", [None, "source_obs_id", "map_version", "path", "stop_evidence", "events"])
+def test_movement_cli_uses_only_observed_clearance_and_support(tmp_path: Path, broken: str | None) -> None:
+    fixture = movement_fixture()
+    if broken is not None:
+        fixture["steps"][0][broken] = {
+            "source_obs_id": "stale", "map_version": 99, "path": [],
+            "stop_evidence": ["stale", "path_completed"], "events": [],
+        }[broken]
     config = fixture_config(tmp_path, fixture)
     result = subprocess.run(["mc-diamond", "smoke-movement", "--config", str(config)],
                             text=True, capture_output=True, timeout=15)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == (0 if broken is None else 1), result.stderr
     output = records(result)
+    if broken is not None:
+        assert output[-1]["data"]["error"]["code"] == "invalid_step"
+        assert output[-1]["data"]["movement_completed"] is False
+        return
     candidates = next(row["data"] for row in output if row["type"] == "candidates")["candidates"]
     assert len(candidates) == 1
     assert candidates[0]["action_kind"] == "move_observed"
@@ -78,6 +114,14 @@ def test_movement_cli_uses_only_observed_clearance_and_support(tmp_path: Path) -
     assert output[-1]["data"]["task"] == "movement_smoke"
     assert output[-1]["data"]["actor_transitions"] == 0
     assert output[-1]["data"]["movement_completed"] is True
+    evidence = output[-1]["data"]["movement_steps"][0]
+    assert evidence["candidate_id"] == candidates[0]["candidate_id"]
+    assert evidence["source_obs_id"] == "obs-0"
+    assert evidence["map_version"] == 1
+    assert evidence["events"][0]["kind"] == "moved"
+    assert evidence["reason"] == "path_completed"
+    assert evidence["actual_ticks"] == 20
+    assert evidence["wall_seconds"] == 0.0
 
 
 def test_movement_does_not_route_through_unknown_or_exposed_hazard(tmp_path: Path) -> None:
@@ -157,11 +201,20 @@ def test_movement_bounds_slippery_surfaces_and_counts_failure_tick_motion() -> N
     assert failed["events"][0]["kind"] == "moved"
 
 
+@pytest.mark.parametrize("scenario", ["logging", "unchanged", "client", "server", "ticks", "freeze_reply"])
+def test_live_bridge_rejects_pause_drift_and_keeps_mineflayer_errors_off_stdout(scenario: str) -> None:
+    result = subprocess.run(["node", "fixtures/bridge_contracts.cjs", scenario],
+                            text=True, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"passed": True}
+
+
 def test_information_audit_rejects_mock_as_real_evidence() -> None:
     result = subprocess.run(["mc-diamond", "audit-information", "--config", "configs/pilot.yaml"],
                             text=True, capture_output=True, timeout=10)
     assert result.returncode == 2
     assert records(result)[0]["data"]["code"] == "invalid_config"
+    assert records(result)[0]["data"]["message"] == "Actual Minecraft backend required; use configs/minecraft.yaml"
 
 
 def test_information_audit_fails_when_hidden_variant_changes_policy_input(tmp_path: Path) -> None:
@@ -589,11 +642,22 @@ def test_goal_completion_preserves_acquisitions_across_decisions(tmp_path: Path)
     assert records(result)[-1]["data"]["goal_completed"] is True
 
 
-def test_rpc_wire_can_carry_actual_backend_provenance(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mode, verified, expected", [
+    ("realtime", False, 0), ("paused", True, 0), ("paused", False, 1), ("unverified", False, 1),
+    ("recertified", True, 1), ("revoked", False, 1),
+])
+def test_rpc_wire_can_carry_actual_backend_provenance(tmp_path: Path, mode: str, verified: bool, expected: int) -> None:
     # Scripted external RPC replies test compatibility; this is not Minecraft verification.
     fixture = mock_fixture()
     fixture["steps"][0]["events"][0]["source"] = "minecraft"
-    fixture["steps"][0]["clock_mode"] = "realtime"
+    fixture["steps"][0].update(clock_mode=mode, pause_verified=verified)
+    if mode in {"recertified", "revoked"}:
+        first = fixture["steps"][0]
+        first.update(terminated=False, clock_mode="unverified" if verified else "paused", pause_verified=not verified)
+        last = json.loads(json.dumps(first))
+        last.update(terminated=True, clock_mode="paused" if verified else "unverified", pause_verified=verified)
+        last["observation"].update(obs_id="obs-2", active_ticks=40, remaining_ticks=60)
+        fixture["steps"].append(last)
     fixture_path = tmp_path / "wire.json"
     fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
     backend = tmp_path / "backend.py"
@@ -604,11 +668,12 @@ def test_rpc_wire_can_carry_actual_backend_provenance(tmp_path: Path) -> None:
         "request=json.loads(os.fdopen(args.admin_fd).readline())\n"
         "ids=request['payload'];observation=fixture['initial'];observation.update(ids)\n"
         "print(json.dumps({'request_id':request['request_id'],'result':observation}),flush=True)\n"
+        "index=0\n"
         "for line in sys.stdin:\n"
         " request=json.loads(line)\n"
         " if request['method']=='observe': result=observation\n"
         " else:\n"
-        "  result=fixture['steps'][0];result['observation'].update(ids)\n"
+        "  result=fixture['steps'][index];result['observation'].update(ids);index+=1\n"
         " print(json.dumps({'request_id':request['request_id'],'result':result}),flush=True)\n",
         encoding="utf-8",
     )
@@ -618,8 +683,13 @@ def test_rpc_wire_can_carry_actual_backend_provenance(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     result = run_cli(config_path)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == expected, result.stderr
     output = records(result)
+    summary = output[-1]["data"]
+    assert summary["pause_verified"] is (mode == "paused" and verified)
+    if expected:
+        assert summary["clock_mode"] == "unverified"
+        return
     assert output[5]["data"]["events"][0]["source"] == "minecraft"
-    assert output[-1]["data"]["clock_mode"] == "realtime"
+    assert summary["clock_mode"] == mode
     assert output[-1]["data"]["diamond_success"] is False

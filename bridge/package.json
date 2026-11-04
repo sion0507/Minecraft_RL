@@ -4,5 +4,5 @@
   "private": true,
   "description": "Local Minecraft RPC bridge with restricted terrain and bounded movement",
   "engines": {"node": ">=22"},
-  "dependencies": {"mineflayer": "4.39.0"}
+  "dependencies": {"mineflayer": "4.39.0", "vec3": "0.1.10"}
 }

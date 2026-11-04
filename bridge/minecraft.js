@@ -6,7 +6,7 @@ const { createInterface } = require('node:readline')
 const { once } = require('node:events')
 const { randomUUID, createHash } = require('node:crypto')
 const { execFile } = require('node:child_process')
-const { promisify } = require('node:util')
+const { promisify, isDeepStrictEqual } = require('node:util')
 const { Server } = require('./server')
 const mineflayer = require('mineflayer')
 const { Vec3 } = require('vec3')
@@ -54,13 +54,13 @@ async function fingerprint () {
 }
 
 async function connect () {
-  bot = mineflayer.createBot({ host: '127.0.0.1', port: 25565, username: 'ResearchBot', version: '1.16.5', auth: 'offline', physicsEnabled: false })
+  bot = mineflayer.createBot({ host: '127.0.0.1', port: 25565, username: 'ResearchBot', version: '1.16.5', auth: 'offline', physicsEnabled: false, logErrors: false })
   const current = bot
   connected = false
   const lost = () => { connected = false }
   current.on('end', lost)
   current.on('error', lost)
-  current.on('error', () => {})
+  current.on('error', () => { process.stderr.write('Minecraft bot connection error\n') })
   await new Promise((resolve, reject) => {
     const cleanup = () => { clearTimeout(timeout); current.removeListener('spawn', spawned); current.removeListener('end', ended); current.removeListener('error', ended) }
     const spawned = () => { cleanup(); resolve() }
@@ -90,8 +90,21 @@ async function pause () {
   bot.clearControlStates()
   if (!frozen) previousPhysics = bot.physicsEnabled
   bot.physicsEnabled = false
-  if (!frozen) { await server.command('tick freeze deep'); frozen = true }
-  await sleep(150)
+  try {
+    if (!frozen) {
+      const reply = await server.command('tick freeze deep')
+      if (!reply.includes('Game is deeply frozen')) fail('backend_error')
+      frozen = true
+    }
+    await sleep(150)
+    const before = await sample()
+    await sleep(150)
+    const after = await sample()
+    if (bot.physicsEnabled || !isDeepStrictEqual(before, after)) fail('backend_error')
+  } catch (error) {
+    pauseVerified = false
+    throw error
+  }
 }
 
 async function data (subject, field = '') {
@@ -228,12 +241,13 @@ async function moveObserved (candidate) {
     distance = Math.hypot(...state.position.map((value, axis) => value - initial.position[axis]))
   }
   if (allowed && ticks >= limit) reason = 'active_tick_limit'
+  await pause()
   history = [...history.slice(-15), 'move_observed:' + reason]
   state = await observation()
   return { observation: state, actual_ticks: ticks,
     events: [{ kind: distance > 0 ? 'moved' : 'stopped', source: 'minecraft' }],
     terminated: state.health <= 0, truncated: state.health > 0 && allowed && activeTicks >= budget,
-    invalid: !allowed && state.health > 0, reason, clock_mode: 'paused', pause_verified: pauseVerified,
+    invalid: !allowed && state.health > 0, reason, clock_mode: pauseVerified ? 'paused' : 'unverified', pause_verified: pauseVerified,
     stable_boundary: !interrupted && terrain.stable(state), wall_seconds: (performance.now() - started) / 1000,
     source_obs_id: candidate.source_obs_id, map_version: state.map_version,
     path: allowed ? route : [], stop_evidence: [state.obs_id, reason], distance_moved: distance }
@@ -348,7 +362,7 @@ async function informationFixture (payload) {
 }
 
 async function dispatch (request, admin) {
-  if (!exactKeys(request, ['request_id', 'method', 'payload']) || !identifier(request.request_id) || !exactKeys({ payload: request.payload }, ['payload']) || !request.payload || Array.isArray(request.payload) || typeof request.payload !== 'object') fail('invalid_request')
+  if (!exactKeys(request, ['request_id', 'method', 'payload']) || !identifier(request.request_id) || !request.payload || Array.isArray(request.payload) || typeof request.payload !== 'object') fail('invalid_request')
   const methods = ['reset', 'observe', 'step', 'prepare_world', 'clock_trial', 'certify_clock', 'information_fixture']
   if (!methods.includes(request.method)) fail('invalid_request')
   if (admin ? !['reset', 'prepare_world', 'clock_trial', 'certify_clock', 'information_fixture'].includes(request.method) : !['observe', 'step'].includes(request.method)) fail('permission_denied')
@@ -375,11 +389,12 @@ async function dispatch (request, admin) {
   const supported = candidate.action_kind === 'wait' && exactKeys(candidate.params, [])
   const started = performance.now()
   const ticks = await advance(Math.min(supported ? candidate.max_ticks : 1, budget - activeTicks))
+  await pause()
   observationIndex++
   const next = await observation()
   return { observation: next, actual_ticks: ticks, events: [{ kind: 'wait', source: 'minecraft' }],
     terminated: false, truncated: supported && activeTicks >= budget, invalid: !supported,
-    reason: supported ? 'wait_completed' : 'unsupported_action', clock_mode: 'paused',
+    reason: supported ? 'wait_completed' : 'unsupported_action', clock_mode: pauseVerified ? 'paused' : 'unverified',
     // Only the complete real diagnostic can authorize this claim.
     pause_verified: pauseVerified, stable_boundary: terrain.stable(next),
     source_obs_id: candidate.source_obs_id, map_version: next.map_version,

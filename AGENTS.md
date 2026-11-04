@@ -46,7 +46,7 @@ npm --prefix bridge ci
 uv run mc-diamond doctor --config configs/pilot.yaml
 uv run mc-diamond smoke-episode --config configs/pilot.yaml
 uv run mc-diamond verify-clock --config configs/minecraft.yaml
-uv run mc-diamond audit-information --config configs/pilot.yaml
+uv run mc-diamond audit-information --config configs/minecraft.yaml
 uv run mc-diamond smoke-macros --config configs/pilot.yaml
 uv run mc-diamond smoke-planner --config configs/pilot.yaml
 uv run mc-diamond smoke-model --config configs/pilot.yaml

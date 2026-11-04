@@ -1,5 +1,51 @@
 # 실행 기록
 
+## 2026-11-04 — 리뷰 수정본 재검토 후 사망 경로 결함 수정
+
+수정본 재검토(Standards/Spec)에서 이전 지적은 모두 해소됐고 새 결함 1건이 확인됐다. 거부된 이동 경로도 bridge가 1틱을 실행하므로 그 틱에 사망하면 `invalid=false`, `path=[]`인데 episode의 이동 근거 검사가 후보 경로를 기대해 사망을 `invalid_step`으로 바꿨다. 기대 경로를 `invalid` 또는 `reason=invalid_path`일 때 빈 경로로 판정하도록 고쳤다. 공개 CLI 회귀 `test_movement_death_during_rejected_path_tick_stays_terminal`이 수정 전 실패(invalid_step)·수정 후 통과함을 확인했다. 전체 pytest **55 passed**, mypy·diff 공백 검사 통과. Python 검사 한 줄만 바꿨고 bridge는 변경하지 않아 실제 Minecraft 재실행은 하지 않았다. 남은 판단 사항(이동 근거 검사의 episode/information 중복, MovementEvidence 필드 재선언)과 결정당 약 1.2초의 경계 확인 지연은 T19 예산 실측에서 다룬다.
+
+## 2026-11-04 — 로컬 보고서 폴더 정리
+
+사용자 요청으로 reports에는 #2/T01 최종본, #3/T02·#4/T03 최신 v2의 보고서/코드 가이드 PDF 한 쌍씩 총 6개만 유지한다. 나머지 이전 PDF·통합 리뷰 PDF·HTML·README·템플릿·CSS·patch는 삭제한다. 남긴 PDF는 내용 변경 없이 보존한다. 기존 보고서 보존·HTML 동봉 규칙은 이번 명시적 요청으로 대체하고 AGENTS를 갱신했다. reports를 .gitignore 및 Git 추적 제외 대상으로 변경하며 새 보고서·코드·게임 검사는 만들거나 실행하지 않는다. 기존 Git 이력은 재작성하지 않으며 commit/push는 수행하지 않는다.
+
+## 2026-11-04 — T01–T03 로컬 리뷰 지적 재현·수정
+
+사용자가 작업 폴더의 `code-review-2026-11-04.txt` 지적을 실제로 검증하고 맞으면 고치도록 요청했다. main `893ff27`에서 #1 본문·댓글(없음), #3/#4 본문·댓글(없음), PLAN §§4.1–4.3/5.2/12–14와 GLOSSARY를 대조했다. 시작 때 이미 존재한 PROGRESS/보고서 README/TEMPLATE 변경과 code-guide HTML/PDF, 원문 리뷰는 보존했다. 현재 수정은 미커밋·미푸시이며 새 PR·merge·GitHub 게시/이슈 변경은 수행하지 않았다. #2/#3/#4는 조회 시 이미 Closed였다.
+
+### 재현과 구현
+
+- 실제 Mineflayer 4.39.0의 error forwarding을 쓰고 네트워크 client만 대체한 주입 검사에서 stdout의 여러 줄 Error로 JSON 파싱 실패를 재현했다. logErrors=false로 끄고 연결 오류는 민감한 원문 없이 stderr에 남긴다.
+- 인증 없는데 paused로 반환하는 경로를 수정했다. StepResult는 paused↔pause_verified 일치를 강제하며 미인증 실제 결과는 unverified다. summary에도 pause_verified를 남기고 에피소드 중 모드 불일치·오류를 마지막 정상 step으로 덮지 않는다. 실제 미인증 smoke는 exit 1이다.
+- 기존 인증서가 매 결정의 실제 정지 확인을 대체하던 공백을 보완했다. reset·wait/이동 종료에서 입력 해제/클라이언트 물리 정지 후 양쪽 전체 상태 두 표본과 실제 틱의 불변을 확인한다. freeze 요청을 보냈으면 깊은 정지 응답도 검사한다. 변화·거부 시 인증 해제/backend_error다. 관리자 player 표본은 시계 검사에만 사용한다.
+- 이동 summary의 movement_steps에 결정별 후보 ID·원본 obs·map·사건·path/stop 근거·이유·시간·거리·안정 경계를 남긴다. 잘못된 source_obs_id/map_version/path/stop_evidence와 빈 events가 성공 처리되던 다섯 변형을 공개 CLI에서 invalid_step으로 거부한다.
+- 실제 backend 필요 오류는 exit 2/invalid_config를 유지하고 원인과 configs/minecraft.yaml을 안내한다. AGENTS의 잘못된 감사 설정 예시를 고쳤다. vec3 0.1.10 직접 의존성/lock 선언, 항상 참인 payload 검사 제거, 전체 bridge 로드로 물리 fixture의 함수 순서 의존성도 제거했다.
+- 단순 중복 틱/안전 검사·과제/장면/권한 목록·63 상수·private RPC 호출은 현재 기능 불일치가 없어 구조를 유지했다. README에 uv PATH 설정이 이미 있으므로 영구 셸 변경은 하지 않았다. 전체 판정은 `docs/reviews/review-fixes-2026-11-04.md`, 선택 이유는 DECISIONS에 기록한다.
+
+### 개발 검사
+
+변경 전 pytest **38 passed(9.90초)**. Python 회귀 12개 RED→GREEN, Mineflayer 오류/경계 drift·freeze 거부 5개 RED+정상 대조 1개→모두 GREEN을 확인했다. 미인증→인증/인증→미인증의 두 다중 결정 회귀도 추가했다. 최종 전체 pytest **54 passed(13.78초)**, strict mypy **16개 파일 통과**, Node 문법·git diff --check·npm ls vec3 통과다. 기존 scripted 물리의 거리 상한·얼음 거부·실패 1틱 변위를 유지했다. 독립 읽기 전용 코드 검토에서 추가 구체적 결함은 없었고 검토자도 주입 시나리오/물리 fixture를 재실행했다. scripted 검사를 실제 정지 근거로 표시하지 않는다.
+
+### 실제 Minecraft 재검증 (2026-11-04)
+
+- sandbox 최초 smoke는 서버 디렉터리 flock 제한으로 backend_error였고, 권한 재실행과 별도로 보존했다. 실제 미인증 smoke는 **exit 1**, 2결정·40틱·14.30초, step/summary 모두 **unverified/false**, error=null이다. 새 코드와 다른 과거 인증을 재사용하지 않았다.
+- 새 공개 verify-clock은 **exit 0, 63/63**, 63개 고유 조합·위험 장면 준비 63/63·양쪽 위치 최대 drift **0.0**, 다른 상태·사건·틱 불변이다. 새 코드/package-lock fingerprint로 실제 다시 인증했다.
+- 인증 후 공개 smoke-episode는 **exit 0**, 2결정·40틱·14.19초, **paused/pause_verified=true**다. 실제 wait이며 원목 획득·학습 결과가 아니다.
+- 공개 smoke-movement는 **exit 0**, **2결정·47틱·6.37928897648239블록·21.03초**, movement_completed=true, paused/인증 true다. 두 결정의 사건/원본 obs/map/이유/시간이 최종 movement_steps에 남았다. actor 0·보상 0·다이아 성공 false, 정상 decision_limit 절단이다.
+- 공개 audit-information은 **exit 0, information_verified=true, 57.43초**다. 숨은 광석/용암 두 장면의 공개 입력 hash는 모두 `7c35ab78e49d07ccd3a42abb987471f493db1acb65147cddb88f554e4e4dc38d`이며 셀 1,161개·후보 8개다. 두 이동은 모두 **18틱·2.1548446042413616블록·path_completed·지도 버전 6·정지 인증/안정 경계 true**로 같다. 벽을 연 두 양성 대조도 통과했다.
+- 진단 뒤 C4 기준 snapshot reset/observe 일치, 활성 틱 0·빈 인벤토리·체력 20을 확인하고 서버를 종료했다. 자연 snapshot을 덮어쓰지 않았다. 모든 시도/검사·복원 근거는 `artifacts/review-2026-11-04/`에 저장했다.
+
+기존 같은 이동 17.63초 대비 이번 21.03초는 추가 경계 확인의 벽시계 비용을 포함한다. 활성 틱/거리는 같지만 처리량 보장은 아니며 본 학습 전 예산을 새로 실측해야 한다. 현재 180시간을 충분하다고 재확정하거나 늘리지 않는다. 모델·PPO·유료 API·본 학습·최종 평가·새 월드 일반화·자연 다이아 성공은 미실행/미검증이며 새 의존성 다운로드·결제는 없다.
+
+후속 보고서는 `reports/issue-003-004-T02-T03-2026-11-04-review-fixes.{html,pdf}`다. A4 **3쪽**, 한글·핵심 수치 추출과 세 글꼴 embedded/subset/Unicode mapping을 확인하고 모든 페이지 이미지를 직접 읽었다. 잘림·깨짐·표 행 분리·외딴 문장 페이지가 없다. WeasyPrint fontTools fallback 경고는 출력/가독성 실패가 아니며 새 시스템 패키지는 설치하지 않았다. 현재 코드는 미커밋이므로 원격 링크는 고정 main의 수정 전 비교 위치임을 명시하고, 실제 변경본은 신규 fixture까지 포함한 동봉 `.patch`로 보존했다. patch SHA-256 `ed5117837573387b7739c18103c0e315b94d61b0e9a848e6d46cc082f5114a67`, `git apply --reverse --check` 통과다. 기존 보고서와 사용자 문서 변경을 보존했으며 최종 프로세스 목록에 Minecraft/Java 서버가 남아 있지 않다.
+
+## 2026-11-03 — 보고서별 핵심 구현 코드 안내 추가
+
+사용자 요청으로 이슈 #2/#3/#4의 기존 보고서 5개 각각에 핵심 변경·구현 → 파일·함수/클래스·시작 줄 → 확인할 로직 표와 권장 읽기 순서를 추가한 `-code-guide.{html,pdf}` 판본을 만들었다. 기존 HTML/PDF는 바이트까지 보존했다. 코드 링크는 원문 범위에 맞춰 각각 d809cd9 / 1312252 / 21a6359 / 0b92880 / ad2790b에 고정했다. 최신 main의 후속 기능을 과거 구현으로 혼동하지 않도록 기준을 명시했다. reports/README.md에 5개 추가본 링크와 작성 규칙을, TEMPLATE.html에 같은 코드 안내 항목을 반영했다.
+
+검증: 코드 링크 **77개** 모두 로컬 Git에서 해당 커밋의 파일·시작 줄/정의를 확인했고 PDF의 URL annotation에도 남아 있음을 확인했다. 새 PDF는 각각 3/4/3/3/3쪽(총 16쪽)이다. 한글 추출·모든 글꼴 포함/subset/Unicode mapping 통과. 기존 본문 11쪽은 텍스트와 페이지 이미지가 원본과 같음을 비교했다(전체 쪽수 표시가 달라지는 푸터 제외). 추가 코드 안내 5쪽은 직접 이미지를 읽어 잘림·깨진 글자·표 행 분리·외딴 문장 페이지가 없음을 확인했다.
+
+문서와 보고서만 변경했다. pytest/mypy·실제 Minecraft·모델·학습은 재실행하지 않았으며 기존 수치를 새 실행 결과로 표시하지 않았다. 현재 변경의 commit·push는 수행하지 않았다.
+
 ## 2026-11-03 — PR #29 수정본 실제 재검증 완료
 
 수정 코드 `ad2790b`를 `origin/ticket-4`에 푸시했다. Standards의 P2 두 건을 재현·수정했고 수정본 독립 재검토는 남은 중대한 문제 없음, Spec도 남은 차단 지적 없음이다. GitHub 계정의 approve 리뷰로 표시하지 않는다.
