@@ -19,6 +19,14 @@ class Surface(Contract):
     passable: bool = False
     support: bool = False
     hazard: bool = False
+    visible: bool = True
+
+
+class ObservedDrop(Contract):
+    entity_id: int
+    item: Identifier
+    quantity: Positive
+    position: list[float] = Field(min_length=3, max_length=3)
 
 
 class Observation(Contract):
@@ -45,6 +53,7 @@ class Observation(Contract):
     map_version: Count = 0
     visited: list[list[float]] = Field(default_factory=list)
     hidden_hazard_peek: Literal[False] = False
+    drops: list[ObservedDrop] = Field(default_factory=list)
 
 
 class Goal(Contract):
@@ -103,10 +112,13 @@ class SelectionResult(Contract):
 
 
 class Event(Contract):
-    kind: Literal["acquired", "wait", "moved", "stopped"]
+    kind: Literal["acquired", "wait", "moved", "stopped", "mined", "equipped", "failed"]
     item: str | None = None
     quantity: Count = 0
     source: Literal["mock", "minecraft"]
+    event_id: Identifier | None = None
+    position: list[float] | None = Field(default=None, min_length=3, max_length=3)
+    entity_id: int | None = None
 
 
 class StepResult(Contract):
@@ -126,6 +138,7 @@ class StepResult(Contract):
     path: list[list[float]] = Field(default_factory=list)
     stop_evidence: list[str] = Field(default_factory=list)
     distance_moved: float = Field(default=0.0, ge=0)
+    cancelled: bool = False
 
     @model_validator(mode="after")
     def validate_outcome(self) -> Self:
@@ -148,16 +161,20 @@ class MovementEvidence(Contract):
     stop_evidence: list[str]
     stable_boundary: bool
     distance_moved: float = Field(ge=0)
+    cancelled: bool = False
 
 
 class EpisodeSummary(Contract):
     episode_id: Identifier
     attempt_id: Identifier
     backend: Literal["mock", "rpc"]
-    task: Literal["smoke", "movement_smoke"] = "smoke"
+    task: Literal["smoke", "movement_smoke", "macros_smoke"] = "smoke"
     clock_mode: Literal["mock", "paused", "realtime", "unverified"]
     pause_verified: bool = False
     movement_steps: list[MovementEvidence] = Field(default_factory=list)
+    macro_steps: list[MovementEvidence] = Field(default_factory=list)
+    selection_requests: Count = 0
+    cancelled_selections: Count = 0
     movement_completed: bool = False
     distance_moved: float = Field(default=0.0, ge=0)
     goal_completed: bool

@@ -30,13 +30,13 @@ async function main () {
       server.command = async () => 'Game runs normally'
       let samples = 0
       sample = async () => ({
-        client: {position: [scenario === 'client' ? samples * 0.01 : 0, 64, 0], health: 20},
+        client: {position: [scenario === 'client' ? samples * 0.01 : scenario === 'mismatch' ? 0.01 : 0, 64, 0], health: 20},
         server: {position: [0, 64, 0], state: {Air: scenario === 'server' ? String(samples) : '300s'},
           game_ticks: scenario === 'ticks' ? samples++ : (samples++, 0)}
       })
     `, context)
     if (scenario === 'unchanged') await context.pause()
-    else await assert.rejects(context.pause(), error => error.code === 'backend_error')
+    else await assert.rejects(context.pause(scenario === 'mismatch'), error => error.code === 'backend_error')
     assert.equal(vm.runInContext('bot.physicsEnabled', context), false)
     assert.equal(vm.runInContext('bot.controlsCleared', context), true)
     if (scenario !== 'unchanged') assert.equal(vm.runInContext('pauseVerified', context), false)

@@ -16,7 +16,7 @@ from .schema import EpisodeConfig, EpisodeSummary, ErrorInfo
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="mc-diamond")
-    parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "verify-clock", "prepare-world", "audit-information"])
+    parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "smoke-macros", "verify-clock", "prepare-world", "audit-information"])
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
     try:
@@ -49,7 +49,8 @@ def main() -> int:
             if args.command == "audit-information":
                 return 0 if audit_information(session) else 1
             summary = run_episode(config, session.policy(), lambda: session.reset(episode_id, attempt_id),
-                                  episode_id, attempt_id, movement=args.command == "smoke-movement")
+                                  episode_id, attempt_id, movement=args.command == "smoke-movement",
+                                  macros=args.command == "smoke-macros")
         if summary.error or summary.invalid:
             print(f"Episode stopped: {summary.reason}", file=sys.stderr)
             return 1
@@ -57,6 +58,8 @@ def main() -> int:
             print("Pause unverified; run verify-clock with the actual backend", file=sys.stderr)
             return 1
         if args.command == "smoke-movement" and not summary.movement_completed:
+            return 1
+        if args.command == "smoke-macros" and not summary.goal_completed:
             return 1
         return 0
     except (OSError, ValueError, yaml.YAMLError, ValidationError):

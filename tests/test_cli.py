@@ -201,7 +201,7 @@ def test_movement_bounds_slippery_surfaces_and_counts_failure_tick_motion() -> N
     assert failed["events"][0]["kind"] == "moved"
 
 
-@pytest.mark.parametrize("scenario", ["logging", "unchanged", "client", "server", "ticks", "freeze_reply"])
+@pytest.mark.parametrize("scenario", ["logging", "unchanged", "client", "server", "ticks", "freeze_reply", "mismatch"])
 def test_live_bridge_rejects_pause_drift_and_keeps_mineflayer_errors_off_stdout(scenario: str) -> None:
     result = subprocess.run(["node", "fixtures/bridge_contracts.cjs", scenario],
                             text=True, capture_output=True, timeout=10)
@@ -261,15 +261,23 @@ for line in admin:
       'passable':block=='air','support':block=='stone','hazard':False})
  if p['exposed']:
   o['observed_map'].append({'block':'diamond_ore' if p['variant']=='ore' else 'lava','position':[4.0,64.0,0.0]})
+ if p.get('scope')=='wood':
+  o['observed_map'] += [{'block':'oak_log','position':[1.0,y,0.0],'support':True} for y in [64.0,65.0]]
  r=json.loads(sys.stdin.readline());reply(r,o)
  if not p['exposed']:
   r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];ticks=int(sys.argv[1])
   n={**o,'obs_id':'obs-1','active_ticks':ticks,'remaining_ticks':1000-ticks,'position':[2.5,64.0,0.5]}
-  reply(r,{'observation':n,'actual_ticks':ticks,'events':[{'kind':'moved','source':'minecraft'}],
+  result={'observation':n,'actual_ticks':ticks,'events':[{'kind':'moved','source':'minecraft'}],
     'terminated':False,'truncated':False,'invalid':False,'reason':'path_completed',
     'clock_mode':'paused','pause_verified':True,'stable_boundary':True,'wall_seconds':0.1,
-    'source_obs_id':o['obs_id'],'map_version':1,'path':c['params']['path'],
-    'stop_evidence':['obs-1','path_completed'],'distance_moved':2.0})
+    'source_obs_id':o['obs_id'],'map_version':1,'path':c['params'].get('path',[]),
+    'stop_evidence':['obs-1','path_completed'],'distance_moved':2.0}
+  if p.get('scope')=='wood':
+   n.update(position=o['position'],inventory={'oak_log':2})
+   result.update(path=[],reason='cluster_completed',stop_evidence=['obs-1','cluster_completed'],distance_moved=0.0,
+      events=[{'kind':'mined','item':'oak_log','quantity':2,'source':'minecraft'},
+              {'kind':'acquired','item':'oak_log','quantity':2,'source':'minecraft'}])
+  reply(r,result)
 ''', encoding="utf-8")
     config = yaml.safe_load(Path("configs/minecraft.yaml").read_text())
     config["command"] = [sys.executable, str(backend), str(actual_ticks)]
@@ -325,7 +333,7 @@ def test_corrupt_snapshot_preserves_current_world_and_hides_admin_state(tmp_path
     (server / "world").mkdir(parents=True)
     original = server / "world" / "player-state"
     original.write_text("preserve-current-world")
-    (server / "server.properties").write_text("server-ip=127.0.0.1\n")
+    (server / "server.properties").write_text("server-ip=127.0.0.1\nallow-flight=true\n")
     (server / "installation.json").write_text(json.dumps({
         "minecraft": "1.16.5", "eula_accepted_by_user": "2026-11-02", "world_seed": "secret-marker",
     }))
@@ -349,7 +357,7 @@ def test_snapshot_root_symlink_cannot_replace_current_world(tmp_path: Path) -> N
     (server / "world").mkdir(parents=True)
     original = server / "world" / "player-state"
     original.write_text("preserve-current-world")
-    (server / "server.properties").write_text("server-ip=127.0.0.1\n")
+    (server / "server.properties").write_text("server-ip=127.0.0.1\nallow-flight=true\n")
     (server / "installation.json").write_text(json.dumps({
         "minecraft": "1.16.5", "eula_accepted_by_user": "2026-11-02",
     }))
