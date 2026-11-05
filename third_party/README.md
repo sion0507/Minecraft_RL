@@ -5,6 +5,8 @@
 
 이슈 #4의 voxel 광선·공개 지도 BFS·보행 제어·정보 fixture/감사도 자체 구현이다. 설치된 Mineflayer와 전이 의존성 `vec3`의 공개 API만 사용하며 외부 데모의 경로/코드/프롬프트는 복사하지 않는다. 새 패키지나 모델은 추가하지 않았고 정확한 배포 무결성은 기존 `bridge/package-lock.json`을 따른다. 시드·숨은 블록·전체 청크를 후보/경로에 제공하지 않는다.
 
+이슈 #5의 목재 후보·장착·활성 틱 채굴·드롭 회수·취소 집계는 자체 구현이다. 설치된 Mineflayer 4.39.0의 digging.js를 읽어 digTime과 1.16.5 block_dig 시작/완료/취소의 연결을 확인했다. 기본 dig의 벽시계 완료/낙관적 블록 제거를 재사용하지 않고, 해당 설치 의존성이 제공하는 클라이언트 전송 API와 실제 서버 블록 갱신을 사용한다. 외부 데모 코드를 복사하지 않았고 게임 의존성은 추가하지 않았다. 보고서 작성에는 기존 로컬 캐시의 ReportLab 5.0.1과 시스템 WenQuanYi Zen Hei 글꼴을 사용하며 프로젝트 런타임/lock에는 넣지 않는다.
+
 |도구|고정 배포 버전 / revision|허용 근거·사용|
 |---|---|---|
 |[uv](https://github.com/astral-sh/uv)|0.12.23|[MIT/Apache-2.0](https://github.com/astral-sh/uv/blob/main/LICENSE-MIT), 공식 설치 binary; Git 제외|
@@ -25,7 +27,7 @@
 
 Minecraft 공식 server jar와 Fabric이 실제로 받은 `.fabric/server/1.16.5-server.jar` 모두 위 SHA-1과 일치한다. SHA-256은 Minecraft jar `58f329c7d2696526f948470aa6fd0b45545039b64cb75015e64c12194b373da6`, Fabric launcher `0aae5206659acfa2f7639a2bf4d0c500f516efb181bdc2bfca70af10e5c78c59`, Carpet jar `480e4afe497bab4c9a43637d159e3f8b395ea767af725ec714f0ecfeaee63625`다. 실제 설치한 16개 jar의 전체 SHA-256은 로컬 `worlds/server/installation.json`에 보존한다.
 
-자체 `bridge/pausemod/`는 외부 mixin 코드를 복사하지 않고 Carpet의 `TickSpeed`/확장 API와 Sponge Mixin 주입 API를 호출한다. Java 21.0.12.1의 javac `--release 8`로 빌드하고 배포 파일명·클래스명·zip timestamp를 고정한다. 현재 자체 jar SHA-256은 `169c35019242042f8e93c32a72d9b5d866d130f589234eae89d44d39e3bd5cbb`다. 1.16.5 외 버전에 대한 호환성은 주장하지 않는다.
+자체 `bridge/pausemod/`는 외부 mixin 코드를 복사하지 않고 Carpet의 `TickSpeed`/확장 API와 Sponge Mixin 주입 API를 호출한다. Java 21.0.12.1의 javac `--release 8`로 빌드하고 배포 파일명·클래스명·zip timestamp를 고정한다. T04에서 정지 중 이동 패킷 보관과 활성 틱 적용을 보완했다. 현재 자체 jar SHA-256은 `83d8fdc54807e788087c4800298d8f3da46e803ad76a65e0632614dcd5ffcfc8`다. 1.16.5 외 버전에 대한 호환성은 주장하지 않는다.
 
 Python의 정확한 전이 의존성·배포 URL·SHA-256은 uv.lock, Node 배포 URL·무결성 값은 bridge/package-lock.json을 기준으로 한다. 설치 패키지에 동봉된 라이선스를 보존하며 코드를 vendoring하지 않는다.
 Python 전이 의존성은 pydantic-core/annotated-types/typing-inspection/iniconfig/librt/mypy_extensions/pluggy(MIT), typing_extensions(PSF-2.0), Pygments(BSD-2-Clause), packaging(Apache-2.0 OR BSD-2-Clause), pathspec(MPL-2.0)다. Hatchling의 격리 build에는 tomlkit 0.15.1, trove-classifiers 2026.9.21.13, editables 0.6(MIT)도 설치됐다. build backend 자체는 고정했으며 이 build 전이 의존성은 uv.lock 대상이 아니다.

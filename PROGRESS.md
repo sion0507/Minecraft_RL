@@ -1,5 +1,68 @@
 # 실행 기록
 
+## 2026-11-05 — T04 재개, 남은 실제 검사 완료
+
+사용자의 `continue`로 중지한 #5 보완을 재개했다. GitHub #1/#5 본문·댓글(모두 댓글 없음, Open), AGENTS/CONTEXT/관련 PLAN/GLOSSARY와 작업 트리를 확인했다. final-2 manifest의 모든 소스 hash가 일치하고 bridge·Node/Java runtime·snapshot·설정 fingerprint도 기존 인증 `a15976b0849d81fc6d48d4ef73635fc4dfc4a88ce30318b6c161eee70886c789`와 같아 완료한 **시계63/63을 반복하지 않았다**. 코드·테스트 변경 없이 이미 완료한 pytest **68 passed**, strict mypy **20파일 통과**, 독립 Standards/Spec 재검토 **각0건**도 유지했다. 이번 재개는 남은 실제 진단·저장 근거 재계산·문서/PDF·로컬 커밋 범위다.
+
+실행: `UV_CACHE_DIR=.cache/uv .tools/uv run --locked python tools/verify_t04.py --output artifacts/issue-5-review-2026-11-05/resume-1 information macros`. 드라이버 exit0. 실제 결과는 다음과 같다.
+
+|검사|최종 결과|
+|---|---|
+|확장 정보 감사|18장면 통과, exit0, 494.08초. 관측/이동/군집·회수와 독립 장착·드롭 wait·0후보·wait20/100/200 숨은 광석/용암 쌍 불변, 벽 개방 양성 대조 통과.|
+|맨손 수집|1결정·81틱·직접1개 획득·목표 완료·exit0.|
+|장착 후 수집|3결정·103틱·직접1개 획득·목표 완료·exit0.|
+|실제 파손|3결정·51틱·목표 완료·exit0. 같은 step의 mined/tool_broken 보존 후 직접1개 회수.|
+|완료 틱 위험|12결정·72틱, mined/observed_hazard 동시 보존. 목표 미완료·exit1은 예상 결과.|
+|독립 드롭 대기|2회 wait·40틱·직접1개 회수·목표 완료·exit0. 관리자 준비71틱은 에피소드와 별도.|
+|0후보|12회 실제 wait+failed·240틱·actor 제외. 목표 미완료·exit1은 예상 결과.|
+|실제 취소/재선택|실제 상태 진전20+취소 대기20=40틱을 원 선택에 보존, actor 제외·trace_mask=0 뒤 재선택. 총121틱·1실행 결정·목표 완료. 전체 realtime 인증과 구분.|
+|최종 복원|G1 reset/observe 일치, 활성0틱·빈 인벤토리·체력20. 검사·서버 프로세스 종료 확인.|
+
+모든 최종 step/summary는 paused·pause_verified=true이며 actor 전이0이다. `resume-1/evidence-recomputed.json`에 시계/재개 manifest hash 일치·실제 step 틱 합계·목표/예상 실패·취소 원 선택·reset을 원시에서 재계산한 결과를 보존했다. `final-1`과 `final-2` 감사 중단, `macros-preflight` 미인증 결과와 자연 G1 사전 실패(12결정294틱 나무 미발견)를 최종 성공으로 바꾸지 않았다. 최종 장착/파손 소요량은 이번 실제 드롭 이동 결과이며 사전 수치로 대체하지 않았다.
+
+한국어 보고서 `reports/issue-005-T04-report.pdf`(2쪽)와 코드 가이드 `reports/issue-005-T04-code-guide.pdf`(3쪽)를 이번 보완·최종 실제 결과·코드 함수/시작 줄/hash·Git/이슈 상태로 교체한다. 한글 추출·사용 글꼴 전체 포함/subset/Unicode·모든 페이지 렌더 가독성을 확인하며, 생성 중간 파일은 /tmp에만 둔다. reports는 Git 제외, 다른 티켓 PDF는 보존한다. 보고서 때문에 게임 검사를 다시 실행하지 않는다.
+
+검증본은 기존 main 이력을 보존해 현재 브랜치의 로컬 커밋으로 마무리한다. **push·PR·merge·이슈종료/댓글은 수행하지 않으며 #5는 Open**이다. 관리자 실제 진단 성공은 자연 C4/다이아·모델 성능의 근거가 아니다. 실제 사망은 mock 주입만 확인했다. 전체 realtime 운용, 제작/제련/하강/터널, 모델/API/과금/PPO/본 학습/최종 평가/일반화는 미실행이고 PC180시간 예산을 재확정하거나 증액하지 않았다. 후속 #6/T05는 이번에 착수하지 않는다.
+
+## 2026-11-05 — T04 보완, 사용자 요청으로 중지
+
+main `9f9aca5` 대비 완료 틱 증거 유실·위조 stop_rule_id/임의 wait·중복 근거/명명/죽은 분기, 공개 진단·감사 범위와 재현 실행기를 보완했다. 전체 pytest **68 passed(16.60초)**, strict mypy **20파일 통과**, Node 문법·diff 검사 통과. 독립 Standards/Spec 수정본 재검토 남은 지적은 각 **0건**이다. 항목별 처리는 `docs/reviews/issue-5-review-fixes-2026-11-05.md`.
+
+실제 맨손/장착/파손 수집·완료 틱 위험·독립 dropwait·0후보·실제 제어된 취소/재선택은 macros-preflight에서 확인했으나 새 인증 전이라 unverified/exit1을 유지했다. 자연 G1 사전 공개CLI는12결정294틱에 나무미발견이며 관리자 진단 성공과 구분한다. 최종 코드 **verify-clock63/63**, 고유63/준비63/위치 drift0.0 재계산은 완료했다.
+
+사용자가 내일 continue하도록 중지를 요청해 정보 감사를 SIGINT로 중단했다. `artifacts/issue-5-review-2026-11-05/final-2/`에 clock exit0·audit exit-2/미완료(요약 없음)·G1 reset/observe 일치·0틱·빈 인벤토리·체력20 복원을 기록했고 검사/서버 프로세스 종료를 확인했다. 중단 뒤 driver AssertionError는 의도한 중단의 종료코드 검사이며 감사 완료나 새 결함으로 세지 않는다. final-1도 준비 틱 집계 수정 전 중단/복원 기록이다.
+
+현재 **미커밋·미푸시**, PR/merge/이슈종료 없음. 확장 감사18장면·인증 후 최종 공개CLI/macros·최신 PDF 생성/검수·로컬 커밋이 남았다. reports의 #5 두 PDF는 이전 판본이며 교체하지 않았다. 재개 명령과 상세 상태는 `CONTEXT.md`에 보존했다. continue 전에는 추가 작업을 실행하지 않는다.
+
+## 2026-11-04 — 이슈 #5 / T04 원목 후보·채굴·획득
+
+기준: 시작 시 깨끗한 main `e60493612125ea8803e533838acefc089005f818`, GitHub #1/#5 본문·댓글(둘 다 댓글 없음), PLAN §§4.1–4.3/5.2/5.4/12–14, GLOSSARY. #2–#4는 Closed이므로 선행 조건을 충족했고 다음 티켓은 #5임을 확인했다. `implement` 지시에 따라 현재 main에 구현·검증 변경을 로컬 커밋한다. push·merge·PR 생성·#5 종료는 실행하지 않으며 GitHub #5는 Open이다.
+
+### 구현
+
+- 공개 `smoke-macros`, mock pilot과 실제 G1 `configs/macros.yaml`. 제한 관측의 현재 노출 원목·같은 높이 접근 경로·장착·1/최대 8블록 작업량을 중복 제거해 최대 8후보로 저장한다. ID·내용·순서·mask·source obs/map과 결정별 macro_steps를 보존한다.
+- 기존 보행/정지와 실제 활성 틱 기반 채굴 패킷, 서버 파괴 확인·직후 2틱 내 드롭 생성·자기 수집·인벤토리 증가 연결. 선택 밖 군집으로 확장하지 않는다. 노출 군집 최대 8블록/400틱, wait 20/100/200틱, 매 기본 조작 관측과 위험·피해·산소·파손·실패·시간·사망 중단을 연결했다.
+- 0후보 실제 wait+failed, 1후보 확률 1과 actor 제외. 취소된 원 후보/선택·대기 사건/시간·비용을 보존하고 trace_mask=0 뒤 재선택한다. 미실행 매크로 상한과 취소 대기를 구분하고 사건 ID의 중복 집계를 거부한다. smoke actor 전이는 항상 0이다.
+- 실제 회수 실패를 추적해 기존 정지 확장이 클라이언트 이동 패킷을 버려 서버 플레이어는 출발점에 남는 결함을 확인했다. 서버 스레드에서 최신 위치/방향을 보관하고 활성 틱에 vanilla 검증으로 적용하며 순서·텔레포트 경계를 보완했다. 이동 종료에서 서버/클라이언트 위치도 0.001블록 이내로 일치해야 한다. 관리자 위치는 검증에만 사용한다.
+- 정지 중 공중 상태의 벽시계 비행 추방을 막도록 표준 allow-flight=true를 공통 서버 설정으로 고정했다. Survival 비행 능력/물리·행동 권한은 바꾸지 않는다. backend 시작 전에 검사하고 fingerprint에 포함한다. 자체 확장 jar SHA-256은 `83d8fdc54807e788087c4800298d8f3da46e803ad76a65e0632614dcd5ffcfc8`이다.
+
+### 검증
+
+- 새 CLI·후보/단일 확률·0후보, 관측 드롭 회수·실제 위치 기준 회수 거리, 취소 20/450틱·짧은 취소 상한, 중복 사건, 현재 시야/중복 제거/8후보, 오래된·실패한 파괴 출처, 위치 불일치 거부를 공개 CLI/배포 bridge로 검사했다. 회귀는 RED→GREEN을 확인했다.
+- 최종 전체 pytest **65 passed(16.32초)**, strict mypy **19개 파일 통과**, Node 문법·diff 공백 검사 통과. 실제 Java 소스를 설치된 jar와 컴파일한 5개 패킷 순서/정지/텔레포트 assert도 통과했다. mock/scripted 검사는 실제 물리 근거가 아니다.
+- 독립 code-review: Standards 1건, Spec 2건을 재현·수정했다. 추가 Java 경계 검토의 패킷 순서 2건도 재현하고 5개 assert로 수정 검증했다. 상세는 docs/reviews/issue-5.md.
+- 최종 실제 서버 이동 사전 검사: **2결정·47틱**, 정상 경로 완료, 각 이동 종료의 서버/클라이언트 위치 일치 검사 통과. 이 사전 검사 당시에는 새 인증 전이라 unverified를 유지했다.
+- 최종 실제 verify-clock: **63/63 통과**, 낙하 10초 사전 검사도 통과. 새 Java 확장·bridge·allow-flight 설정 fingerprint로 인증했다.
+- 실제 audit-information: **통과, 148.19초**, 현재 관측·보행·원목 군집 채굴·드롭 회수 범위. 숨은 광석/용암 입력 쌍은 일치하고 이동은 각각 **18틱**, 목재 군집은 각각 **156틱·원목 2개 직접 획득·정지 인증/안정 경계 true**로 일치했다. 벽 개방 양성 대조도 통과했다. 무작위 드롭 좌표·사건/entity ID만 정규화하고 정책 상태·item/count·경로·중단 근거는 비교했다.
+- 실제 맨손 수집: **2결정·162틱·직접 2개 획득**. 도끼 장착 포함: **3결정·103틱·직접 2개 획득**. 모두 goal_completed=true, paused/인증 true, actor 0, 진단 보상 2.0이다. 용암 위험에서 **1틱·observed_hazard·stable_boundary=false**를 확인했다.
+- 진단 뒤 **기준 G1 snapshot reset/observe 일치·0틱·빈 인벤토리·체력 20**을 확인하고 서버를 종료했다. 진단 지형을 자연 task snapshot으로 저장하지 않았다. 최종 raw는 `artifacts/issue-5/final-4/`, 실행기/패킷 재현 검사는 `artifacts/issue-5/`에 보존한다.
+
+### 실패와 해석·상태
+
+샌드박스의 서버 소유권 잠금 차단은 권한 재실행과 구분했다. 최초 probe는 2개 중 1개만 회수(271틱)해 실패했고 수정했다. 해당 최초 JSONL은 두 번째 probe에 의해 교체됐으므로 도구 출력의 실패 요약을 별도 JSON으로 남겼고 이후 final-1~4 원시는 분리 보존했다. final-1은 시계 63회 통과 후 목재 감사/회수에 실패했다. 진단 위치 대조에서 client `[-239.5597,100,187.7220]`, server `[-240.5,100,186.5]`를 확인해 실제 이동 결함을 수정했다. final-2 사전 검사는 정상 이동을 unverified 때문에 실패로 판정한 실행기 조건을 보완했다. final-3은 서버 이동 통과 후 시계 37회 지점에서 낙하의 floating 자동 추방으로 중단됐으며 공통 설정을 수정하고 final-4에서 63회 전체를 다시 통과했다. 이전 클라이언트 보행 성공만으로 실제 서버 이동을 입증했다고 해석하지 않는다.
+
+실제 원목은 관리자 진단용 배치다. 자연 C4/다이아 성공이나 학습·모델 성능 결과가 아니다. 실제 realtime 전환·제작/제련/하강/터널·7B/NanoJev/Jev/Astra·과금·PPO·본 학습·최종 평가·일반화는 미실행이며 PC 180시간의 충분성을 재확정하거나 증액하지 않았다. 다음 티켓은 #6/T05다. 보고서 작성 때문에 게임 검사를 추가 실행하지 않는다. `reports/issue-005-T04-report.pdf`, `reports/issue-005-T04-code-guide.pdf` 두 개를 로컬 전용으로 생성했다. 각각 A4 2쪽이며 한글 추출·모든 사용 글꼴 embedded/subset/Unicode mapping·전체 4페이지 가독성 검수가 통과했다. HTML/중간 파일은 /tmp에만 두고 PDF는 Git 추적·커밋에서 제외한다.
+
 ## 2026-11-04 — 리뷰 수정본 재검토 후 사망 경로 결함 수정
 
 수정본 재검토(Standards/Spec)에서 이전 지적은 모두 해소됐고 새 결함 1건이 확인됐다. 거부된 이동 경로도 bridge가 1틱을 실행하므로 그 틱에 사망하면 `invalid=false`, `path=[]`인데 episode의 이동 근거 검사가 후보 경로를 기대해 사망을 `invalid_step`으로 바꿨다. 기대 경로를 `invalid` 또는 `reason=invalid_path`일 때 빈 경로로 판정하도록 고쳤다. 공개 CLI 회귀 `test_movement_death_during_rejected_path_tick_stays_terminal`이 수정 전 실패(invalid_step)·수정 후 통과함을 확인했다. 전체 pytest **55 passed**, mypy·diff 공백 검사 통과. Python 검사 한 줄만 바꿨고 bridge는 변경하지 않아 실제 Minecraft 재실행은 하지 않았다. 남은 판단 사항(이동 근거 검사의 episode/information 중복, MovementEvidence 필드 재선언)과 결정당 약 1.2초의 경계 확인 지연은 T19 예산 실측에서 다룬다.

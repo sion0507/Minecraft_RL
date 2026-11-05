@@ -13,21 +13,24 @@ class Terrain {
     this.version = 0
     this.visited = []
     this.visitKeys = new Set()
+    this.visible = new Set()
   }
 
-  cells () { return [...this.memory.values()].sort((a, b) => key(a.position).localeCompare(key(b.position), 'en')) }
+  cells () { return [...this.memory.values()].map(cell => ({ ...cell, visible: this.visible.has(key(cell.position)) })).sort((a, b) => key(a.position).localeCompare(key(b.position), 'en')) }
 
   scan (bot) {
     const origin = bot.entity.position.offset(0, bot.entity.eyeHeight, 0).toArray()
     const base = origin.map(Math.floor)
     const cache = new Map()
     let changed = false
+    const visible = new Set()
     const inspect = point => {
       const id = key(point)
       if (cache.has(id)) return cache.get(id)
       if (Math.hypot(...point.map((v, i) => v + 0.5 - origin[i])) > 8) return false
       const block = bot.blockAt(new Vec3(...point), false)
       if (!block) { cache.set(id, false); return false }
+      visible.add(id)
       const passable = block.shapes.length === 0 && !hazards.has(block.name)
       const cell = { block: block.name, position: point, passable,
         support: JSON.stringify(block.shapes) === '[[0,0,0,1,1,1]]' && !hazards.has(block.name) && !slippery.has(block.name),
@@ -62,7 +65,8 @@ class Terrain {
         for (const axis of axes) { point[axis] += step[axis]; boundary[axis] += stride[axis] }
       }
     }
-    if (changed) this.version++
+    if (changed || [...visible].sort().join(';') !== [...this.visible].sort().join(';')) this.version++
+    this.visible = visible
     const visit = bot.entity.position.floored().toArray()
     if (!this.visitKeys.has(key(visit))) { this.visitKeys.add(key(visit)); this.visited.push(visit) }
   }

@@ -1,0 +1,9 @@
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G1]
+rpc_timeout_seconds: 60.0
+max_decisions: 12
+goal:
+  goal_id: smoke-wood
+  kind: collect
+  target: oak_log
+  quantity: 1

@@ -30,6 +30,10 @@ let episode = null
 let activeTicks = 0
 let observationIndex = 0
 let eventCount = 0
+let pendingEvents = []
+let minedTargets = []
+const drops = new Map()
+let acquisitionBaseline = {}
 let observationEpoch = randomUUID()
 let connected = false
 let pauseVerified = false
@@ -71,7 +75,21 @@ async function connect () {
     current.once('error', ended)
   })
   connected = true
-  current.on('playerCollect', () => { eventCount++ })
+  current.on('itemDrop', entity => {
+    const item = entity.getDroppedItem?.()
+    const target = item && minedTargets.find(target => target.block === item.name && target.drop_id === undefined &&
+      activeTicks - target.tick <= 2 &&
+      entity.position.distanceTo(new Vec3(...target.position).offset(0.5, 0.5, 0.5)) <= 2)
+    if (target && !drops.has(entity.id) && item.count === 1) {
+      target.drop_id = entity.id
+      drops.set(entity.id, { item: item.name, quantity: item.count, entity_id: entity.id,
+        position: entity.position.toArray(), collected: false, target })
+    }
+  })
+  current.on('playerCollect', (collector, collected) => {
+    eventCount++
+    if (collector.id === current.entity.id && drops.has(collected.id)) drops.get(collected.id).collected = true
+  })
   await sleep(150)
 }
 
@@ -85,7 +103,7 @@ async function disconnect () {
   await Promise.race([ended, sleep(1000)])
 }
 
-async function pause () {
+async function pause (verifyPosition = false) {
   if (!bot || !connected) fail('backend_error')
   bot.clearControlStates()
   if (!frozen) previousPhysics = bot.physicsEnabled
@@ -100,7 +118,9 @@ async function pause () {
     const before = await sample()
     await sleep(150)
     const after = await sample()
-    if (bot.physicsEnabled || !isDeepStrictEqual(before, after)) fail('backend_error')
+    if (bot.physicsEnabled || !isDeepStrictEqual(before, after) ||
+      (verifyPosition && Math.hypot(...after.client.position.map((value, axis) => value - after.server.position[axis])) > 0.001)) fail('backend_error')
+    return after
   } catch (error) {
     pauseVerified = false
     throw error
@@ -140,6 +160,17 @@ async function observation () {
   if (!episode || !bot || !connected || !frozen) fail('backend_error')
   const self = clientState()
   terrain.scan(bot)
+  const observedDrops = []
+  for (const [id, drop] of drops) {
+    const entity = bot.entities[id]
+    if (!drop.collected && entity) {
+      const position = entity.position.toArray()
+      const key = position.map(Math.floor).join(',')
+      if (terrain.visible.has(key) && terrain.memory.get(key)?.passable) {
+        observedDrops.push({ entity_id: id, item: drop.item, quantity: drop.quantity, position })
+      }
+    }
+  }
   return { ...episode, obs_id: observationId(), active_ticks: activeTicks,
     objective_kind: task === 'C4' ? 'full' : 'local', remaining_ticks: Math.max(0, budget - activeTicks),
     position: self.position, velocity: self.velocity, health: self.health, oxygen: self.oxygen,
@@ -149,7 +180,7 @@ async function observation () {
     tool_durability: bot.heldItem && bot.heldItem.maxDurability ? bot.heldItem.maxDurability - (bot.heldItem.durabilityUsed || 0) : null,
     yaw: bot.entity.yaw, pitch: bot.entity.pitch, map_version: terrain.version,
     hidden_hazard_peek: false, visited: terrain.visited,
-    observed_map: terrain.cells(), history }
+    observed_map: terrain.cells(), drops: observedDrops, history }
 }
 
 async function advance (ticks, walking = false) {
@@ -194,6 +225,10 @@ async function reset (payload) {
   activeTicks = observationIndex = eventCount = 0
   terrain.reset()
   history = []
+  pendingEvents = []
+  minedTargets = []
+  drops.clear()
+  acquisitionBaseline = inventory()
   clockTrials.clear()
   clockFingerprint = await fingerprint()
   const certificate = await fsp.readFile(path.join(server.root, 'clock-verification.json'), 'utf8').then(JSON.parse).catch(() => null)
@@ -241,16 +276,174 @@ async function moveObserved (candidate) {
     distance = Math.hypot(...state.position.map((value, axis) => value - initial.position[axis]))
   }
   if (allowed && ticks >= limit) reason = 'active_tick_limit'
-  await pause()
+  await pause(true)
   history = [...history.slice(-15), 'move_observed:' + reason]
   state = await observation()
-  return { observation: state, actual_ticks: ticks,
-    events: [{ kind: distance > 0 ? 'moved' : 'stopped', source: 'minecraft' }],
-    terminated: state.health <= 0, truncated: state.health > 0 && allowed && activeTicks >= budget,
-    invalid: !allowed && state.health > 0, reason, clock_mode: pauseVerified ? 'paused' : 'unverified', pause_verified: pauseVerified,
-    stable_boundary: !interrupted && terrain.stable(state), wall_seconds: (performance.now() - started) / 1000,
+  return stepResult(candidate, started, ticks, state,
+    [event(distance > 0 ? 'moved' : 'stopped'), ...drainEvents()], reason,
+    { invalid: !allowed, stableBoundary: !interrupted && terrain.stable(state), path: allowed ? route : [], distanceMoved: distance })
+}
+
+function stepResult (candidate, started, ticks, state, events, reason,
+  { invalid = false, stableBoundary = terrain.stable(state) && !terrain.danger(state), path = [], distanceMoved = 0 } = {}) {
+  return { observation: state, actual_ticks: ticks, events,
+    terminated: state.health <= 0, truncated: state.health > 0 && !invalid && activeTicks >= budget,
+    invalid: invalid && state.health > 0, reason, clock_mode: pauseVerified ? 'paused' : 'unverified', pause_verified: pauseVerified,
+    stable_boundary: stableBoundary, wall_seconds: (performance.now() - started) / 1000,
     source_obs_id: candidate.source_obs_id, map_version: state.map_version,
-    path: allowed ? route : [], stop_evidence: [state.obs_id, reason], distance_moved: distance }
+    path, stop_evidence: [state.obs_id, reason], distance_moved: distanceMoved }
+}
+
+function event (kind, details = {}) {
+  return { kind, source: 'minecraft', event_id: observationEpoch + ':event:' + eventCount++, ...details }
+}
+
+function drainEvents () {
+  const held = drops.size ? inventory() : {}
+  for (const [id, drop] of drops) {
+    if (drop.target.confirmed && drop.collected && (held[drop.item] || 0) >= (acquisitionBaseline[drop.item] || 0) + drop.quantity) {
+      pendingEvents.push(event('acquired', { item: drop.item, quantity: drop.quantity,
+        entity_id: drop.entity_id, position: drop.position }))
+      acquisitionBaseline[drop.item] = (acquisitionBaseline[drop.item] || 0) + drop.quantity
+      drops.delete(id)
+    }
+  }
+  const result = pendingEvents
+  pendingEvents = []
+  return result
+}
+
+function interruptReason (state, initial) {
+  if (state.health <= 0) return 'death'
+  if (terrain.danger(state) || state.health < initial.health || state.oxygen < initial.oxygen) return 'observed_hazard'
+  if (initial.tool && (state.tool !== initial.tool || state.tool_durability === 0)) return 'tool_broken'
+  return null
+}
+
+async function executeMacro (candidate, recoveryWait = false) {
+  const started = performance.now()
+  const initial = await observation()
+  const limit = Math.min(candidate.max_ticks, budget - activeTicks)
+  let state = initial
+  let ticks = 0
+  let reason = interruptReason(state, initial)
+  let invalid = false
+  let distance = 0
+  let pathTaken = []
+  const events = []
+  const tick = async () => {
+    ticks += await advance(1, true)
+    observationIndex++
+    state = await observation()
+    reason = interruptReason(state, candidate.action_kind === 'place_or_equip' ? { ...initial, tool: null } : initial)
+  }
+  if (candidate.action_kind === 'wait') {
+    const allowed = exactKeys(candidate.params, []) && ([20, 100, 200].includes(candidate.max_ticks) ||
+      candidate.max_ticks === Math.min(20, budget - activeTicks) || (recoveryWait && candidate.max_ticks <= 20))
+    invalid = !allowed
+    if (!allowed) reason = 'invalid_wait'
+    while (!reason && ticks < limit) await tick()
+    if (!reason) reason = 'wait_completed'
+    events.push(event('wait'))
+  } else if (candidate.action_kind === 'place_or_equip') {
+    const item = exactKeys(candidate.params, ['item']) && bot.inventory.items().find(item =>
+      item.name === candidate.params.item && /^(wooden|stone|iron|golden|diamond|netherite)_axe$/.test(item.name))
+    if (!reason && item) {
+      await bot.equip(item, 'hand')
+      events.push(event('equipped', { item: item.name, quantity: 1 }))
+      reason = 'equip_completed'
+    } else if (!reason) { reason = 'invalid_equipment'; invalid = true }
+  } else if (candidate.action_kind === 'mine_visible_cluster') {
+    const { blocks, block, map_version: mapVersion } = candidate.params
+    const reachable = point => Array.isArray(point) && point.length === 3 && point.every(Number.isInteger) &&
+      point[1] >= Math.floor(state.position[1]) && terrain.visible.has(point.join(',')) &&
+      terrain.memory.get(point.join(','))?.block === block &&
+      Math.hypot(point[0] + 0.5 - state.position[0], point[2] + 0.5 - state.position[2]) <= 1.8 &&
+      Math.hypot(point[0] + 0.5 - state.position[0], point[1] + 0.5 - state.position[1] - 1.62, point[2] + 0.5 - state.position[2]) <= 4.5
+    const allowed = exactKeys(candidate.params, ['blocks', 'block', 'map_version']) && typeof block === 'string' && /_log$/.test(block) &&
+      mapVersion === initial.map_version && Array.isArray(blocks) && blocks.length >= 1 && blocks.length <= 8 &&
+      new Set(blocks.map(p => JSON.stringify(p))).size === blocks.length && blocks.every(reachable) &&
+      blocks.every((p, i) => i === 0 || blocks.slice(0, i).some(q => p.reduce((sum, v, axis) => sum + Math.abs(v - q[axis]), 0) === 1))
+    if (!reason && !allowed) { invalid = true; reason = 'invalid_cluster' }
+    const mined = []
+    for (const point of allowed ? blocks : []) {
+      if (reason || ticks >= limit) break
+      if (!reachable(point)) { reason = 'block_changed'; break }
+      // Only the selected, currently exposed cell is read. No Mineflayer raycast/neighbour search.
+      const target = bot.blockAt(new Vec3(...point), false)
+      if (!target || target.name !== block) { reason = 'block_changed'; break }
+      const required = Math.ceil(bot.digTime(target) / 50)
+      if (!Number.isFinite(required) || required < 1) { reason = 'dig_failed'; break }
+      await bot.lookAt(new Vec3(...point).offset(0.5, 0.5, 0.5), true)
+      const packet = { location: new Vec3(...point), face: 1 }
+      bot._client.write('block_dig', { ...packet, status: 0 })
+      try {
+        for (let elapsed = 0; elapsed < required && ticks < limit && !reason; elapsed++) {
+          bot.swingArm()
+          await tick()
+          if (!reason && !reachable(point)) reason = 'block_changed'
+        }
+        if (!reason && ticks < limit) {
+          const broken = { block, position: point, tick: activeTicks, confirmed: false }
+          minedTargets = minedTargets.filter(target => activeTicks - target.tick <= 2)
+          minedTargets.push(broken)
+          bot._client.write('block_dig', { ...packet, status: 2 })
+          await tick()
+          if (terrain.memory.get(point.join(','))?.block === 'air') {
+            broken.confirmed = true
+            events.push(event('mined', { item: block, quantity: 1, position: point }))
+            mined.push(point)
+          } else if (!reason) reason = 'dig_failed'
+        }
+      } finally {
+        bot._client.write('block_dig', { ...packet, status: 1 })
+      }
+    }
+    if (!reason && allowed && mined.length < blocks.length) reason = 'macro_tick_limit'
+    if (!reason && mined.length) {
+      const point = mined.find(p => p[1] === Math.floor(state.position[1]) &&
+        terrain.validPath(state.position, [[p[0] + 0.5, p[1], p[2] + 0.5]]))
+      if (point && ticks < limit) {
+        const route = [[point[0] + 0.5, point[1], point[2] + 0.5]]
+        const moved = await moveObserved({ ...candidate, action_kind: 'move_observed',
+          source_obs_id: state.obs_id, max_ticks: limit - ticks, params: { path: route, map_version: state.map_version } })
+        ticks += moved.actual_ticks
+        state = moved.observation
+        events.push(...moved.events)
+        distance = moved.distance_moved
+        pathTaken = route
+        if (moved.reason !== 'path_completed') reason = moved.reason
+      }
+      // Vanilla drop pickup delay is active game time; preserve it inside this macro's cap.
+      for (let n = 0; n < 20 && !reason && ticks < limit; n++) await tick()
+    }
+    if (!reason) reason = 'cluster_completed'
+  } else {
+    invalid = true
+    reason = 'unsupported_action'
+  }
+  if (!ticks) {
+    const outcome = reason
+    await tick()
+    reason = reason || outcome
+  }
+  if (!reason || activeTicks >= budget) reason = 'active_tick_limit'
+  await pause()
+  history = [...history.slice(-15), candidate.action_kind + ':' + reason]
+  state = await observation()
+  events.push(...drainEvents())
+  if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed'].includes(reason)) events.push(event('stopped'))
+  return stepResult(candidate, started, ticks, state, events, reason,
+    { invalid, path: pathTaken, distanceMoved: distance })
+}
+
+async function cancelSelection (candidate) {
+  const result = await executeMacro({ ...candidate, action_kind: 'wait', params: {},
+    max_ticks: Math.min(20, candidate.max_ticks) }, true)
+  result.cancelled = true
+  result.reason = 'candidate_invalidated'
+  result.stop_evidence = [result.observation.obs_id, result.reason]
+  return result
 }
 
 async function prepareWorld () {
@@ -334,8 +527,12 @@ async function clockTrial (payload) {
 }
 
 async function informationFixture (payload) {
-  if (!exactKeys(payload, ['variant', 'exposed']) || !['ore', 'lava'].includes(payload.variant) || typeof payload.exposed !== 'boolean') fail('invalid_request')
-  await reset({ episode_id: 'information-audit', attempt_id: 'fixture' })
+  if (!(exactKeys(payload, ['variant', 'exposed']) || exactKeys(payload, ['variant', 'exposed', 'scope']) ||
+    exactKeys(payload, ['variant', 'exposed', 'scope', 'episode_id', 'attempt_id'])) ||
+    !['ore', 'lava'].includes(payload.variant) || typeof payload.exposed !== 'boolean' ||
+    (Object.hasOwn(payload, 'scope') && !['wood', 'wood_tool', 'wood_break', 'wood_hazard', 'wood_drop', 'empty'].includes(payload.scope)) ||
+    (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
+  await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
   const x = Math.floor(bot.entity.position.x); const z = Math.floor(bot.entity.position.z); const y = 100
   // Constructed diagnostics only; frozen task snapshots are never edited.
   await server.command(`fill ${x - 9} ${y - 1} ${z - 9} ${x + 9} ${y + 6} ${z + 9} minecraft:air`)
@@ -350,12 +547,39 @@ async function informationFixture (payload) {
     const wall = await server.command(`execute if block ${x + 3} ${y} ${z} minecraft:stone run say fixture_wall_ok`)
     if (!wall.includes('fixture_wall_ok')) fail('backend_error')
   }
+  if (payload.scope?.startsWith('wood')) {
+    await server.command(`fill ${x + 1} ${y} ${z} ${x + 1} ${y + 1} ${z} minecraft:oak_log`)
+    if (['wood_tool', 'wood_break'].includes(payload.scope)) {
+      const item = payload.scope === 'wood_break' ? 'wooden_axe{Damage:58}' : 'wooden_axe'
+      await server.command(`replaceitem entity ResearchBot inventory.0 minecraft:${item} 1`)
+    }
+    if (payload.scope === 'wood_hazard') await server.command(`setblock ${x + 1} ${y - 1} ${z} minecraft:lava`)
+  }
+  if (payload.scope === 'empty') {
+    await server.command(`fill ${x - 1} ${y} ${z - 1} ${x + 1} ${y + 2} ${z + 1} minecraft:stone`)
+    await server.command(`fill ${x} ${y} ${z} ${x} ${y + 1} ${z} minecraft:air`)
+  }
   await server.command(`tp ResearchBot ${x + 0.5} ${y} ${z + 0.5}`)
   await sleep(150)
   await bot.look(0, 0, true)
-  const setupTicks = await advance(5, true)
+  let setupTicks = await advance(5, true)
   await pause()
   terrain.reset()
+  if (payload.scope === 'wood_drop') {
+    const initial = await observation()
+    const mined = await executeMacro({ action_kind: 'mine_visible_cluster', params: { block: 'oak_log',
+      blocks: [[x + 1, y, z]], map_version: initial.map_version }, max_ticks: 61,
+    source_obs_id: initial.obs_id })
+    if (!mined.events.some(e => e.kind === 'mined')) fail('backend_error')
+    setupTicks += mined.actual_ticks
+    // Relocate an owned, actually mined drop; setup assistance is outside episode time.
+    const selector = `@e[type=minecraft:item,x=${x + 1},y=${y},z=${z},distance=..3]`
+    await server.command(`tp ${selector} ${x + 0.5} ${y} ${z + 0.5}`)
+    await server.command(`execute as ${selector} run data merge entity @s {PickupDelay:40s,Motion:[0d,0d,0d]}`)
+    setupTicks += await advance(5, true)
+    await pause()
+    terrain.reset()
+  }
   history = []
   activeTicks = observationIndex = 0
   return { fixture_ready: true, setup_ticks: setupTicks }
@@ -383,23 +607,13 @@ async function dispatch (request, admin) {
   if (!exactKeys(request.payload, ['candidate'])) fail('invalid_request')
   const candidate = request.payload.candidate
   if (!exactKeys(candidate, ['candidate_id', 'action_kind', 'params', 'max_ticks', 'stop_rule_id', 'source_obs_id', 'description']) || !identifier(candidate.candidate_id) || !identifier(candidate.stop_rule_id) || typeof candidate.description !== 'string' || !candidate.params || typeof candidate.params !== 'object' || Array.isArray(candidate.params) || !Number.isInteger(candidate.max_ticks) || candidate.max_ticks < 1 || candidate.max_ticks > 400) fail('invalid_request')
-  if (!episode || candidate.source_obs_id !== observationId()) fail('invalid_selection')
+  if (!episode || typeof candidate.source_obs_id !== 'string' || !candidate.source_obs_id.startsWith(observationEpoch + ':')) fail('invalid_selection')
   if (activeTicks >= budget) fail('invalid_selection')
+  if (candidate.source_obs_id !== observationId()) return await cancelSelection(candidate)
+  const current = await observation()
+  if (Object.hasOwn(candidate.params, 'map_version') && candidate.params.map_version !== current.map_version) return await cancelSelection(candidate)
   if (candidate.action_kind === 'move_observed') return await moveObserved(candidate)
-  const supported = candidate.action_kind === 'wait' && exactKeys(candidate.params, [])
-  const started = performance.now()
-  const ticks = await advance(Math.min(supported ? candidate.max_ticks : 1, budget - activeTicks))
-  await pause()
-  observationIndex++
-  const next = await observation()
-  return { observation: next, actual_ticks: ticks, events: [{ kind: 'wait', source: 'minecraft' }],
-    terminated: false, truncated: supported && activeTicks >= budget, invalid: !supported,
-    reason: supported ? 'wait_completed' : 'unsupported_action', clock_mode: pauseVerified ? 'paused' : 'unverified',
-    // Only the complete real diagnostic can authorize this claim.
-    pause_verified: pauseVerified, stable_boundary: terrain.stable(next),
-    source_obs_id: candidate.source_obs_id, map_version: next.map_version,
-    stop_evidence: [next.obs_id, supported ? 'wait_completed' : 'unsupported_action'],
-    wall_seconds: (performance.now() - started) / 1000 }
+  return await executeMacro(candidate)
 }
 
 let queue = Promise.resolve()

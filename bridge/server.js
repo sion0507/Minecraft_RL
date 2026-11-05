@@ -53,6 +53,7 @@ class Server {
     if (installation.minecraft !== '1.16.5' || installation.eula_accepted_by_user !== '2026-11-02') throw new Error('Approved installation required')
     const properties = await fs.readFile(path.join(this.root, 'server.properties'), 'utf8')
     if (!/^server-ip=127\.0\.0\.1$/m.test(properties)) throw new Error('Loopback binding required')
+    if (!/^allow-flight=true$/m.test(properties)) throw new Error('Paused server needs allow-flight=true to avoid frozen airborne timeouts')
     // Kernel lease is released on crashes; PID files cannot safely provide that guarantee.
     this.lease = spawn('flock', ['-n', '-F', path.join(this.root, '.mc-diamond-owner'), process.execPath,
       '-e', 'process.stdout.write("locked\\n");process.stdin.resume()'], { stdio: ['pipe', 'pipe', 'ignore'] })

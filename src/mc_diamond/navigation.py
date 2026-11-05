@@ -6,20 +6,19 @@ from collections import deque
 from .schema import Candidate, CandidateSet, Observation
 
 
-def generate_movement_candidates(observation: Observation) -> CandidateSet:
+def observed_routes(observation: Observation) -> dict[tuple[int, int, int], list[list[float]]]:
     cells = {tuple(cell.position): cell for cell in observation.observed_map}
     sx, sy, sz = map(math.floor, observation.position)
     start = (sx, sy, sz)
     queue: deque[tuple[tuple[int, int, int], list[list[float]]]] = deque([(start, [])])
-    seen = {start}
-    directions: dict[tuple[int, int], list[list[float]]] = {}
+    routes: dict[tuple[int, int, int], list[list[float]]] = {start: []}
     while queue:
         (x, y, z), route = queue.popleft()
         if len(route) >= 16:
             continue
         for dx, dz in [(1, 0), (0, 1), (-1, 0), (0, -1)]:
             point = (x + dx, y, z + dz)
-            if point in seen:
+            if point in routes:
                 continue
             floor = cells.get((point[0], y - 1, point[2]))
             feet = cells.get(point)
@@ -27,12 +26,18 @@ def generate_movement_candidates(observation: Observation) -> CandidateSet:
             if not (floor and floor.support and not floor.hazard and feet and feet.passable
                     and not feet.hazard and head and head.passable and not head.hazard):
                 continue
-            seen.add(point)
             path = [*route, [point[0] + 0.5, float(y), point[2] + 0.5]]
+            routes[point] = path
             queue.append((point, path))
-            direction = ((point[0] > start[0]) - (point[0] < start[0]),
-                         (point[2] > start[2]) - (point[2] < start[2]))
-            directions[direction] = path
+    return routes
+
+
+def generate_movement_candidates(observation: Observation) -> CandidateSet:
+    sx, _, sz = map(math.floor, observation.position)
+    directions: dict[tuple[int, int], list[list[float]]] = {}
+    for (x, _, z), path in observed_routes(observation).items():
+        if path:
+            directions[((x > sx) - (x < sx), (z > sz) - (z < sz))] = path
     candidates = [Candidate(
         candidate_id=f"{observation.obs_id}:move:{index}", action_kind="move_observed",
         params={"path": [[value for value in point] for point in route], "map_version": observation.map_version},

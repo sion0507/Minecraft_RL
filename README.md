@@ -8,8 +8,8 @@
 
 ## 현재 상태
 
-이슈 #2의 공통 실행 흐름, #3의 실제 Minecraft reset·정지에 이어 #4의 제한 지형 관측·관측 지도 보행·정보 감사 명령을 구현했습니다.
-현재 실제 backend는 자기 상태, 직접 보인 표면·공기/방문 기억, wait와 같은 높이의 보행을 제공합니다. 채굴·제작·계단·터널·모델/API·PPO는 후속 작업입니다. 실제 검사와 실패 기록은 [PROGRESS.md](PROGRESS.md)에 있습니다.
+이슈 #2의 공통 실행 흐름, #3의 실제 Minecraft reset·정지, #4의 제한 관측·보행에 이어 #5의 목재 후보·장착·채굴·드롭 회수와 `smoke-macros`를 구현했습니다.
+현재 실제 backend는 자기 상태, 직접 보인 표면·공기/방문 기억, 관측 원목·직접 파괴와 연결된 드롭, wait와 같은 높이의 보행을 제공합니다. 제작·제련·계단·터널·모델/API·PPO는 후속 작업입니다. 실제 검사와 실패 기록은 [PROGRESS.md](PROGRESS.md)에 있습니다.
 
 ## 실험 범위
 
@@ -49,6 +49,7 @@ uv sync
 npm --prefix bridge ci
 uv run mc-diamond doctor --config configs/pilot.yaml
 uv run mc-diamond smoke-episode --config configs/pilot.yaml
+uv run mc-diamond smoke-macros --config configs/pilot.yaml
 uv run pytest
 uv run mypy .
 ```
@@ -74,6 +75,8 @@ RPC backend는 `--admin-fd <fd>`로 전달받은 파이프에서 reset·snapshot
 
 서버는 `127.0.0.1:25565`에서만 열리며 로컬 봇은 `auth: offline`을 사용합니다. 계정 로그인·비밀번호·토큰은 사용하지 않습니다. Microsoft 계정 인증이나 공개 서버 운영을 검증한 결과가 아닙니다.
 
+`worlds/server/server.properties`의 `allow-flight=true`가 필요합니다. 정지된 공중 상태를 서버의 벽시계 기반 비행 추방으로 오인하지 않게 하는 설정이며 Survival 플레이어에게 비행 능력을 지급하지 않습니다. backend는 누락 시 시작을 거부하고, 이 값도 시계 fingerprint에 포함합니다.
+
 Carpet freeze만으로는 침수 중 플레이어 산소가 계속 줄었습니다. 자체 확장 `bridge/pausemod/`는 Carpet의 활성 틱 조건에 맞춰 플레이어 tick·이동을 멈추고, 초기 로그인 상태 패킷은 별도로 보냅니다. 설치된 Fabric 서버 라이브러리로 빌드합니다.
 
 ```bash
@@ -86,20 +89,29 @@ python3 bridge/pausemod/build.py
 uv run mc-diamond verify-clock --config configs/minecraft.yaml
 uv run mc-diamond smoke-episode --config configs/minecraft.yaml
 uv run mc-diamond smoke-movement --config configs/minecraft.yaml
+uv run mc-diamond smoke-macros --config configs/macros.yaml
 uv run mc-diamond audit-information --config configs/minecraft.yaml
 ```
 
 각 명령이 서버를 시작하고 종료합니다. `verify-clock`은 평지·제련·드롭·용암·낙하·침수·화염에서 0/5/10초를 각각 3회 검사합니다. 실제 위험 상태가 준비됐는지, 위치 오차 0.001블록과 다른 상태·사건·틱이 보존되는지 판정합니다. 전부 통과한 실행만 검증 기록을 원자 저장하며, 코드·게임 의존성·Java/Node 버전·서버 설정·snapshot hash가 바뀌면 다시 검사합니다. 모의 backend를 실제 정지 근거로 사용하지 않습니다.
 
-인증서와 별개로 reset 및 매 행동의 결정 경계에서 입력을 해제하고 서버·클라이언트 상태와 틱의 불변을 다시 확인합니다. 상태가 바뀌면 backend 오류로 중단합니다. 인증이 없는 step과 summary는 `clock_mode=unverified`, `pause_verified=false`이며 실제 smoke는 exit 1입니다. 63회 검증과 경계 확인을 통과한 실행만 `paused`로 표시합니다.
+인증서와 별개로 reset 및 매 행동의 결정 경계에서 입력을 해제하고 서버·클라이언트 상태와 틱의 불변을 다시 확인합니다. 이동 종료에서는 양쪽 플레이어 위치도 0.001블록 이내로 일치해야 합니다. 정지 중 받은 최신 이동·방향 패킷은 서버 스레드에서 보관하고 다음 활성 틱에 vanilla 검증을 거쳐 적용합니다. 패킷의 순서를 보존하고 텔레포트 전 요청은 비우며, 정지 중에는 위치를 바꾸지 않습니다. 상태가 바뀌거나 서버 위치가 따라오지 못하면 backend 오류로 중단합니다. 인증이 없는 step과 summary는 `clock_mode=unverified`, `pause_verified=false`이며 실제 smoke는 exit 1입니다. 63회 검증과 경계 확인을 통과한 실행만 `paused`로 표시합니다.
 
-실제 smoke는 같은 reset→관측→목표→후보→선택→실행→보상→요약 흐름에서 wait를 실행합니다. 원목 수집·다이아 성공·학습을 수행한 결과가 아니며 actor 경험과 진단 보상은 0입니다. 활성 틱과 실제 경과 시간을 분리하고, 지원하지 않는 행동의 실패도 실제 한 틱을 실행해 기록합니다.
+`smoke-episode`는 초기 실행 연결 진단입니다. 실제 목재 수집은 `smoke-macros`를 사용합니다. 활성 틱과 실제 경과 시간을 분리하고, 지원하지 않는 행동의 실패도 실제 한 틱을 실행해 기록합니다.
+
+`smoke-macros`는 고정 목재 목표에서 현재 노출 원목의 대상·작업량 후보와 관측 지도 접근 경로를 최대 8개 제공합니다. 원목을 보지 못하면 관측한 같은 높이의 길에서 탐색하고, 직접 확인한 드롭을 먼저 회수합니다. 보유 도끼 장착, 선택한 노출 군집 최대 8블록/400틱 채굴, wait 20/100/200틱을 지원합니다. 채굴 완료 패킷은 Mineflayer의 벽시계 타이머 대신 실제 활성 틱에 맞춰 보내고, 서버 블록 갱신·드롭 생성·자기 수집·인벤토리 증가를 연결합니다. 매 기본 조작에서 관측을 갱신하고 위험·파손·실패·시간·사망에서 멈춥니다.
+
+첫 후보를 실행하는 진단이며 행동 모델 성능이나 PPO 결과가 아닙니다. 후보 ID·내용·순서·mask, 단일 후보의 확률 1, 모든 결정의 `macro_steps`를 기록하고 actor 전이는 0입니다. 0후보는 실제 wait와 failed 사건을 남깁니다. 선택 무효화는 원 후보·선택·대기 사건/비용과 actor 제외·trace_mask=0을 보존하고 새 관측에서 재선택합니다. 선택 요청 수와 실행 결정 수를 구분하고 중복 사건 ID는 오류로 거부합니다. 목표의 직접 획득과 보유량이 충족돼야 exit 0이며 미인증 정지는 exit 1입니다.
+
+자연 G1과 분리한 실제 매크로 회귀는 `uv run mc-diamond smoke-macros --config configs/macros.yaml --diagnostic-fixture wood`로 실행합니다. `wood_tool`은 도끼 장착, `wood_break`는 마지막 내구도, `wood_hazard`는 채굴 뒤 노출되는 용암, `wood_drop`은 직접 채굴한 드롭의 독립 대기, `empty`는 0후보를 준비합니다. 관리자 준비이며 `diagnostic_fixture` 사건에 `natural_task=false`와 준비 활성 틱을 기록합니다. `wood_drop`의 드롭 이동·초기 속도/획득 지연 설정도 진단 준비에만 적용합니다. 실패/위험 장면의 exit 1은 수집 성공과 구분합니다.
+
+전체 재현 명령은 `uv run python tools/verify_t04.py --output artifacts/t04-new`입니다. 새 폴더에 명령·코드 hash·stdout/stderr·결과를 보존하고, 시계 63조건 → 확장 정보 감사 → 실제 공개 CLI → 실제 상태 진전으로 유도한 취소·재선택을 확인합니다. 취소 검사는 전체 realtime 운용 인증이 아닙니다. 성공·실패 모두 기준 G1 reset을 시도하고 복원 실패도 기록합니다. 개별 검사는 끝에 `clock`, `information`, `macros`를 붙이며, 정보 감사 전에 같은 코드의 시계 인증이 필요합니다. 보고서 작성만을 위해 이 명령을 재실행하지 않습니다.
 
 `smoke-movement`는 같은 실행기에서 관측된 바닥·발/머리 공간만 연결해 최대 8개 경로를 만들고 첫 후보를 실행합니다. 같은 높이에서 최대 16블록/400 활성 틱이며, 위험·공개 경로 변경·진행 정체에서 멈춥니다. 얼음·꽁꽁 언 얼음·살얼음·푸른 얼음은 관측하되 제동 거리 검증 전에는 보행 지면으로 사용하지 않습니다. 후보 경로, 원본 관측 ID, 지도 버전, 중단 근거, 실제 이동 거리/틱/경과 시간과 안정 경계를 출력합니다. 최소 한 번의 안정된 경로 완료가 있어야 exit 0이며, 이는 행동 모델의 성능 검증이 아닙니다.
 
 최종 summary의 `movement_steps`에도 후보 ID·원본 관측 ID·지도 버전·사건·경로·중단 근거·이유·실제 틱·경과 시간·거리·안정 경계를 결정별로 보존합니다. smoke는 후보/결과의 근거 연결과 사건 출처를 검사하며 누락·불일치는 `invalid_step`입니다.
 
-`audit-information`은 관리자 채널에서 벽 뒤 광석/용암의 두 실제 장면을 준비합니다. 정책은 일반 observe/step으로만 접속하며 노출 전 관측·후보·경로·실행/중단 결과가 같아야 합니다. 벽을 연 뒤 각각 관측되는 양성 대조도 확인합니다. 이 장면은 진단용 수정본이며 원본 snapshot은 보존합니다. 감사 후에는 다음 reset으로 기준 월드를 복원합니다. 실제 정지 인증이 없으면 감사가 통과하지 않습니다. 감사 범위는 현재 관측과 보행이며 후속 제작·하강·터널까지 검증했다는 뜻이 아닙니다.
+`audit-information`은 관리자 채널에서 벽 뒤 광석/용암의 실제 장면을 준비합니다. 정책은 일반 observe/step으로만 접속하며 노출 전 관측·후보·경로·실행/중단 결과가 같아야 합니다. 벽을 연 양성 대조, 보이는 원목 군집 채굴·드롭 회수, 독립 도끼 장착·20/100/200틱 대기·드롭 대기·0후보를 검사합니다. 드롭의 무작위 흩어짐 좌표/사건 ID를 제외하고 종류·수량·정책 상태·경로·중단 근거를 비교하며, 대기/장착 사건이 없는 응답도 거부합니다. 이 장면의 원목은 관리자 진단용 배치이며 자연 C4 성공이 아닙니다. 원본 snapshot을 보존하고 진단 후 reset으로 기준 월드를 복원합니다. 실제 정지 인증이 없으면 감사가 통과하지 않습니다. 제작·하강·터널 감사는 후속 티켓입니다.
 
 지형 관측은 눈에서 반경 8블록의 셀 중심으로 광선을 보내 처음 만나는 충돌 표면/위험에서 끊습니다. 지나간 공기·비충돌 식물과 첫 표면만 기억하고 미로딩 셀은 막힌 것으로 취급합니다. 유리·부분 충돌 블록을 보수적으로 가리개로 취급하며 숨은 이웃의 모양·청크 전체·시드·관리자 로그를 경로 판단에 쓰지 않습니다. `hidden_hazard_peek=false`를 기록하며 reset은 지도·방문·최근 결과를 초기화합니다.
 
