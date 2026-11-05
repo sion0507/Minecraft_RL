@@ -279,13 +279,19 @@ async function moveObserved (candidate) {
   await pause(true)
   history = [...history.slice(-15), 'move_observed:' + reason]
   state = await observation()
-  return { observation: state, actual_ticks: ticks,
-    events: [event(distance > 0 ? 'moved' : 'stopped'), ...drainEvents()],
-    terminated: state.health <= 0, truncated: state.health > 0 && allowed && activeTicks >= budget,
-    invalid: !allowed && state.health > 0, reason, clock_mode: pauseVerified ? 'paused' : 'unverified', pause_verified: pauseVerified,
-    stable_boundary: !interrupted && terrain.stable(state), wall_seconds: (performance.now() - started) / 1000,
+  return stepResult(candidate, started, ticks, state,
+    [event(distance > 0 ? 'moved' : 'stopped'), ...drainEvents()], reason,
+    { invalid: !allowed, stableBoundary: !interrupted && terrain.stable(state), path: allowed ? route : [], distanceMoved: distance })
+}
+
+function stepResult (candidate, started, ticks, state, events, reason,
+  { invalid = false, stableBoundary = terrain.stable(state) && !terrain.danger(state), path = [], distanceMoved = 0 } = {}) {
+  return { observation: state, actual_ticks: ticks, events,
+    terminated: state.health <= 0, truncated: state.health > 0 && !invalid && activeTicks >= budget,
+    invalid: invalid && state.health > 0, reason, clock_mode: pauseVerified ? 'paused' : 'unverified', pause_verified: pauseVerified,
+    stable_boundary: stableBoundary, wall_seconds: (performance.now() - started) / 1000,
     source_obs_id: candidate.source_obs_id, map_version: state.map_version,
-    path: allowed ? route : [], stop_evidence: [state.obs_id, reason], distance_moved: distance }
+    path, stop_evidence: [state.obs_id, reason], distance_moved: distanceMoved }
 }
 
 function event (kind, details = {}) {
@@ -314,7 +320,7 @@ function interruptReason (state, initial) {
   return null
 }
 
-async function woodMacro (candidate) {
+async function executeMacro (candidate, recoveryWait = false) {
   const started = performance.now()
   const initial = await observation()
   const limit = Math.min(candidate.max_ticks, budget - activeTicks)
@@ -333,13 +339,12 @@ async function woodMacro (candidate) {
   }
   if (candidate.action_kind === 'wait') {
     const allowed = exactKeys(candidate.params, []) && ([20, 100, 200].includes(candidate.max_ticks) ||
-      candidate.max_ticks === budget - activeTicks || (candidate.stop_rule_id === 'cancelled_selection' && candidate.max_ticks <= 20))
+      candidate.max_ticks === Math.min(20, budget - activeTicks) || (recoveryWait && candidate.max_ticks <= 20))
     invalid = !allowed
     if (!allowed) reason = 'invalid_wait'
     while (!reason && ticks < limit) await tick()
     if (!reason) reason = 'wait_completed'
     events.push(event('wait'))
-    if (candidate.stop_rule_id === 'no_candidates') events.push(event('failed'))
   } else if (candidate.action_kind === 'place_or_equip') {
     const item = exactKeys(candidate.params, ['item']) && bot.inventory.items().find(item =>
       item.name === candidate.params.item && /^(wooden|stone|iron|golden|diamond|netherite)_axe$/.test(item.name))
@@ -348,7 +353,7 @@ async function woodMacro (candidate) {
       events.push(event('equipped', { item: item.name, quantity: 1 }))
       reason = 'equip_completed'
     } else if (!reason) { reason = 'invalid_equipment'; invalid = true }
-  } else {
+  } else if (candidate.action_kind === 'mine_visible_cluster') {
     const { blocks, block, map_version: mapVersion } = candidate.params
     const reachable = point => Array.isArray(point) && point.length === 3 && point.every(Number.isInteger) &&
       point[1] >= Math.floor(state.position[1]) && terrain.visible.has(point.join(',')) &&
@@ -384,7 +389,7 @@ async function woodMacro (candidate) {
           minedTargets.push(broken)
           bot._client.write('block_dig', { ...packet, status: 2 })
           await tick()
-          if (!reason && terrain.memory.get(point.join(','))?.block === 'air') {
+          if (terrain.memory.get(point.join(','))?.block === 'air') {
             broken.confirmed = true
             events.push(event('mined', { item: block, quantity: 1, position: point }))
             mined.push(point)
@@ -413,6 +418,9 @@ async function woodMacro (candidate) {
       for (let n = 0; n < 20 && !reason && ticks < limit; n++) await tick()
     }
     if (!reason) reason = 'cluster_completed'
+  } else {
+    invalid = true
+    reason = 'unsupported_action'
   }
   if (!ticks) {
     const outcome = reason
@@ -425,17 +433,13 @@ async function woodMacro (candidate) {
   state = await observation()
   events.push(...drainEvents())
   if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed'].includes(reason)) events.push(event('stopped'))
-  return { observation: state, actual_ticks: ticks, events,
-    terminated: state.health <= 0, truncated: state.health > 0 && activeTicks >= budget,
-    invalid: invalid && state.health > 0, reason, clock_mode: pauseVerified ? 'paused' : 'unverified', pause_verified: pauseVerified,
-    stable_boundary: terrain.stable(state), wall_seconds: (performance.now() - started) / 1000,
-    source_obs_id: candidate.source_obs_id, map_version: state.map_version,
-    path: pathTaken, stop_evidence: [state.obs_id, reason], distance_moved: distance }
+  return stepResult(candidate, started, ticks, state, events, reason,
+    { invalid, path: pathTaken, distanceMoved: distance })
 }
 
 async function cancelSelection (candidate) {
-  const result = await woodMacro({ ...candidate, action_kind: 'wait', params: {},
-    stop_rule_id: 'cancelled_selection', max_ticks: Math.min(20, candidate.max_ticks) })
+  const result = await executeMacro({ ...candidate, action_kind: 'wait', params: {},
+    max_ticks: Math.min(20, candidate.max_ticks) }, true)
   result.cancelled = true
   result.reason = 'candidate_invalidated'
   result.stop_evidence = [result.observation.obs_id, result.reason]
@@ -523,10 +527,12 @@ async function clockTrial (payload) {
 }
 
 async function informationFixture (payload) {
-  if (!(exactKeys(payload, ['variant', 'exposed']) || exactKeys(payload, ['variant', 'exposed', 'scope'])) ||
+  if (!(exactKeys(payload, ['variant', 'exposed']) || exactKeys(payload, ['variant', 'exposed', 'scope']) ||
+    exactKeys(payload, ['variant', 'exposed', 'scope', 'episode_id', 'attempt_id'])) ||
     !['ore', 'lava'].includes(payload.variant) || typeof payload.exposed !== 'boolean' ||
-    (Object.hasOwn(payload, 'scope') && !['wood', 'wood_tool'].includes(payload.scope))) fail('invalid_request')
-  await reset({ episode_id: 'information-audit', attempt_id: 'fixture' })
+    (Object.hasOwn(payload, 'scope') && !['wood', 'wood_tool', 'wood_break', 'wood_hazard', 'wood_drop', 'empty'].includes(payload.scope)) ||
+    (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
+  await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
   const x = Math.floor(bot.entity.position.x); const z = Math.floor(bot.entity.position.z); const y = 100
   // Constructed diagnostics only; frozen task snapshots are never edited.
   await server.command(`fill ${x - 9} ${y - 1} ${z - 9} ${x + 9} ${y + 6} ${z + 9} minecraft:air`)
@@ -541,16 +547,39 @@ async function informationFixture (payload) {
     const wall = await server.command(`execute if block ${x + 3} ${y} ${z} minecraft:stone run say fixture_wall_ok`)
     if (!wall.includes('fixture_wall_ok')) fail('backend_error')
   }
-  if (['wood', 'wood_tool'].includes(payload.scope)) {
+  if (payload.scope?.startsWith('wood')) {
     await server.command(`fill ${x + 1} ${y} ${z} ${x + 1} ${y + 1} ${z} minecraft:oak_log`)
-    if (payload.scope === 'wood_tool') await server.command('replaceitem entity ResearchBot inventory.0 minecraft:wooden_axe 1')
+    if (['wood_tool', 'wood_break'].includes(payload.scope)) {
+      const item = payload.scope === 'wood_break' ? 'wooden_axe{Damage:58}' : 'wooden_axe'
+      await server.command(`replaceitem entity ResearchBot inventory.0 minecraft:${item} 1`)
+    }
+    if (payload.scope === 'wood_hazard') await server.command(`setblock ${x + 1} ${y - 1} ${z} minecraft:lava`)
+  }
+  if (payload.scope === 'empty') {
+    await server.command(`fill ${x - 1} ${y} ${z - 1} ${x + 1} ${y + 2} ${z + 1} minecraft:stone`)
+    await server.command(`fill ${x} ${y} ${z} ${x} ${y + 1} ${z} minecraft:air`)
   }
   await server.command(`tp ResearchBot ${x + 0.5} ${y} ${z + 0.5}`)
   await sleep(150)
   await bot.look(0, 0, true)
-  const setupTicks = await advance(5, true)
+  let setupTicks = await advance(5, true)
   await pause()
   terrain.reset()
+  if (payload.scope === 'wood_drop') {
+    const initial = await observation()
+    const mined = await executeMacro({ action_kind: 'mine_visible_cluster', params: { block: 'oak_log',
+      blocks: [[x + 1, y, z]], map_version: initial.map_version }, max_ticks: 61,
+    source_obs_id: initial.obs_id })
+    if (!mined.events.some(e => e.kind === 'mined')) fail('backend_error')
+    setupTicks += mined.actual_ticks
+    // Relocate an owned, actually mined drop; setup assistance is outside episode time.
+    const selector = `@e[type=minecraft:item,x=${x + 1},y=${y},z=${z},distance=..3]`
+    await server.command(`tp ${selector} ${x + 0.5} ${y} ${z + 0.5}`)
+    await server.command(`execute as ${selector} run data merge entity @s {PickupDelay:40s,Motion:[0d,0d,0d]}`)
+    setupTicks += await advance(5, true)
+    await pause()
+    terrain.reset()
+  }
   history = []
   activeTicks = observationIndex = 0
   return { fixture_ready: true, setup_ticks: setupTicks }
@@ -584,21 +613,7 @@ async function dispatch (request, admin) {
   const current = await observation()
   if (Object.hasOwn(candidate.params, 'map_version') && candidate.params.map_version !== current.map_version) return await cancelSelection(candidate)
   if (candidate.action_kind === 'move_observed') return await moveObserved(candidate)
-  if (['mine_visible_cluster', 'place_or_equip', 'wait'].includes(candidate.action_kind)) return await woodMacro(candidate)
-  const supported = candidate.action_kind === 'wait' && exactKeys(candidate.params, [])
-  const started = performance.now()
-  const ticks = await advance(Math.min(supported ? candidate.max_ticks : 1, budget - activeTicks))
-  await pause()
-  observationIndex++
-  const next = await observation()
-  return { observation: next, actual_ticks: ticks, events: [{ kind: 'wait', source: 'minecraft' }],
-    terminated: false, truncated: supported && activeTicks >= budget, invalid: !supported,
-    reason: supported ? 'wait_completed' : 'unsupported_action', clock_mode: pauseVerified ? 'paused' : 'unverified',
-    // Only the complete real diagnostic can authorize this claim.
-    pause_verified: pauseVerified, stable_boundary: terrain.stable(next),
-    source_obs_id: candidate.source_obs_id, map_version: next.map_version,
-    stop_evidence: [next.obs_id, supported ? 'wait_completed' : 'unsupported_action'],
-    wall_seconds: (performance.now() - started) / 1000 }
+  return await executeMacro(candidate)
 }
 
 let queue = Promise.resolve()

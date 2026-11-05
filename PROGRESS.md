@@ -1,5 +1,39 @@
 # 실행 기록
 
+## 2026-11-05 — T04 재개, 남은 실제 검사 완료
+
+사용자의 `continue`로 중지한 #5 보완을 재개했다. GitHub #1/#5 본문·댓글(모두 댓글 없음, Open), AGENTS/CONTEXT/관련 PLAN/GLOSSARY와 작업 트리를 확인했다. final-2 manifest의 모든 소스 hash가 일치하고 bridge·Node/Java runtime·snapshot·설정 fingerprint도 기존 인증 `a15976b0849d81fc6d48d4ef73635fc4dfc4a88ce30318b6c161eee70886c789`와 같아 완료한 **시계63/63을 반복하지 않았다**. 코드·테스트 변경 없이 이미 완료한 pytest **68 passed**, strict mypy **20파일 통과**, 독립 Standards/Spec 재검토 **각0건**도 유지했다. 이번 재개는 남은 실제 진단·저장 근거 재계산·문서/PDF·로컬 커밋 범위다.
+
+실행: `UV_CACHE_DIR=.cache/uv .tools/uv run --locked python tools/verify_t04.py --output artifacts/issue-5-review-2026-11-05/resume-1 information macros`. 드라이버 exit0. 실제 결과는 다음과 같다.
+
+|검사|최종 결과|
+|---|---|
+|확장 정보 감사|18장면 통과, exit0, 494.08초. 관측/이동/군집·회수와 독립 장착·드롭 wait·0후보·wait20/100/200 숨은 광석/용암 쌍 불변, 벽 개방 양성 대조 통과.|
+|맨손 수집|1결정·81틱·직접1개 획득·목표 완료·exit0.|
+|장착 후 수집|3결정·103틱·직접1개 획득·목표 완료·exit0.|
+|실제 파손|3결정·51틱·목표 완료·exit0. 같은 step의 mined/tool_broken 보존 후 직접1개 회수.|
+|완료 틱 위험|12결정·72틱, mined/observed_hazard 동시 보존. 목표 미완료·exit1은 예상 결과.|
+|독립 드롭 대기|2회 wait·40틱·직접1개 회수·목표 완료·exit0. 관리자 준비71틱은 에피소드와 별도.|
+|0후보|12회 실제 wait+failed·240틱·actor 제외. 목표 미완료·exit1은 예상 결과.|
+|실제 취소/재선택|실제 상태 진전20+취소 대기20=40틱을 원 선택에 보존, actor 제외·trace_mask=0 뒤 재선택. 총121틱·1실행 결정·목표 완료. 전체 realtime 인증과 구분.|
+|최종 복원|G1 reset/observe 일치, 활성0틱·빈 인벤토리·체력20. 검사·서버 프로세스 종료 확인.|
+
+모든 최종 step/summary는 paused·pause_verified=true이며 actor 전이0이다. `resume-1/evidence-recomputed.json`에 시계/재개 manifest hash 일치·실제 step 틱 합계·목표/예상 실패·취소 원 선택·reset을 원시에서 재계산한 결과를 보존했다. `final-1`과 `final-2` 감사 중단, `macros-preflight` 미인증 결과와 자연 G1 사전 실패(12결정294틱 나무 미발견)를 최종 성공으로 바꾸지 않았다. 최종 장착/파손 소요량은 이번 실제 드롭 이동 결과이며 사전 수치로 대체하지 않았다.
+
+한국어 보고서 `reports/issue-005-T04-report.pdf`(2쪽)와 코드 가이드 `reports/issue-005-T04-code-guide.pdf`(3쪽)를 이번 보완·최종 실제 결과·코드 함수/시작 줄/hash·Git/이슈 상태로 교체한다. 한글 추출·사용 글꼴 전체 포함/subset/Unicode·모든 페이지 렌더 가독성을 확인하며, 생성 중간 파일은 /tmp에만 둔다. reports는 Git 제외, 다른 티켓 PDF는 보존한다. 보고서 때문에 게임 검사를 다시 실행하지 않는다.
+
+검증본은 기존 main 이력을 보존해 현재 브랜치의 로컬 커밋으로 마무리한다. **push·PR·merge·이슈종료/댓글은 수행하지 않으며 #5는 Open**이다. 관리자 실제 진단 성공은 자연 C4/다이아·모델 성능의 근거가 아니다. 실제 사망은 mock 주입만 확인했다. 전체 realtime 운용, 제작/제련/하강/터널, 모델/API/과금/PPO/본 학습/최종 평가/일반화는 미실행이고 PC180시간 예산을 재확정하거나 증액하지 않았다. 후속 #6/T05는 이번에 착수하지 않는다.
+
+## 2026-11-05 — T04 보완, 사용자 요청으로 중지
+
+main `9f9aca5` 대비 완료 틱 증거 유실·위조 stop_rule_id/임의 wait·중복 근거/명명/죽은 분기, 공개 진단·감사 범위와 재현 실행기를 보완했다. 전체 pytest **68 passed(16.60초)**, strict mypy **20파일 통과**, Node 문법·diff 검사 통과. 독립 Standards/Spec 수정본 재검토 남은 지적은 각 **0건**이다. 항목별 처리는 `docs/reviews/issue-5-review-fixes-2026-11-05.md`.
+
+실제 맨손/장착/파손 수집·완료 틱 위험·독립 dropwait·0후보·실제 제어된 취소/재선택은 macros-preflight에서 확인했으나 새 인증 전이라 unverified/exit1을 유지했다. 자연 G1 사전 공개CLI는12결정294틱에 나무미발견이며 관리자 진단 성공과 구분한다. 최종 코드 **verify-clock63/63**, 고유63/준비63/위치 drift0.0 재계산은 완료했다.
+
+사용자가 내일 continue하도록 중지를 요청해 정보 감사를 SIGINT로 중단했다. `artifacts/issue-5-review-2026-11-05/final-2/`에 clock exit0·audit exit-2/미완료(요약 없음)·G1 reset/observe 일치·0틱·빈 인벤토리·체력20 복원을 기록했고 검사/서버 프로세스 종료를 확인했다. 중단 뒤 driver AssertionError는 의도한 중단의 종료코드 검사이며 감사 완료나 새 결함으로 세지 않는다. final-1도 준비 틱 집계 수정 전 중단/복원 기록이다.
+
+현재 **미커밋·미푸시**, PR/merge/이슈종료 없음. 확장 감사18장면·인증 후 최종 공개CLI/macros·최신 PDF 생성/검수·로컬 커밋이 남았다. reports의 #5 두 PDF는 이전 판본이며 교체하지 않았다. 재개 명령과 상세 상태는 `CONTEXT.md`에 보존했다. continue 전에는 추가 작업을 실행하지 않는다.
+
 ## 2026-11-04 — 이슈 #5 / T04 원목 후보·채굴·획득
 
 기준: 시작 시 깨끗한 main `e60493612125ea8803e533838acefc089005f818`, GitHub #1/#5 본문·댓글(둘 다 댓글 없음), PLAN §§4.1–4.3/5.2/5.4/12–14, GLOSSARY. #2–#4는 Closed이므로 선행 조건을 충족했고 다음 티켓은 #5임을 확인했다. `implement` 지시에 따라 현재 main에 구현·검증 변경을 로컬 커밋한다. push·merge·PR 생성·#5 종료는 실행하지 않으며 GitHub #5는 Open이다.

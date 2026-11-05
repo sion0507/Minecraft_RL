@@ -2,11 +2,16 @@
 
 import json
 import subprocess
+import runpy
+import sys
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Self, TextIO
 
 import yaml
 import pytest
+
+from mc_diamond.schema import Observation
 
 
 def run_macros(tmp_path: Path, fixture: dict[str, Any]) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]]]:
@@ -49,6 +54,7 @@ def test_macro_cli_finds_log_after_first_eight_cells_and_forces_single_probabili
     assert summary["actor_transitions"] == 0
     assert summary["macro_steps"][0]["candidate_id"] == candidate["candidate_id"]
     assert summary["reward_total"] == 1.0
+    assert next(row["data"] for row in output if row["type"] == "reward")["actor_exclusion_reason"] == "single_candidate"
 
 
 def test_macro_cli_zero_candidates_records_real_wait_and_failure(tmp_path: Path) -> None:
@@ -57,7 +63,7 @@ def test_macro_cli_zero_candidates_records_real_wait_and_failure(tmp_path: Path)
     step = fixture["steps"][0]
     step.update(terminated=False, truncated=True, reason="active_tick_limit",
                 stop_evidence=["obs-1", "active_tick_limit"],
-                events=[{"kind": "wait", "source": "mock"}, {"kind": "failed", "source": "mock"}])
+                events=[{"kind": "wait", "source": "mock"}])
     step["observation"]["inventory"] = {}
     result, output = run_macros(tmp_path, fixture)
     assert result.returncode == 1
@@ -67,11 +73,22 @@ def test_macro_cli_zero_candidates_records_real_wait_and_failure(tmp_path: Path)
     assert summary["active_ticks"] == 20
     assert summary["reward_total"] == 0
     assert summary["macro_steps"][0]["events"][1]["kind"] == "failed"
+    assert next(row["data"] for row in output if row["type"] == "reward")["actor_exclusion_reason"] == "no_candidates"
 
 
 def test_shipping_bridge_mines_only_exposed_blocks_and_bounds_waits() -> None:
     result = subprocess.run(["node", "fixtures/wood_macros.cjs"], capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
+
+
+def test_macro_cli_rejects_zero_candidate_step_without_wait_evidence(tmp_path: Path) -> None:
+    fixture = wood_fixture()
+    fixture["initial"]["observed_map"] = []
+    fixture["steps"][0]["events"] = []
+    fixture["steps"][0]["observation"]["inventory"] = {}
+    result, rows = run_macros(tmp_path, fixture)
+    assert result.returncode == 1
+    assert rows[-1]["data"]["error"]["code"] == "invalid_step"
 
 
 @pytest.mark.parametrize("cancel_ticks", [20, 450])
@@ -166,3 +183,43 @@ def test_macro_cli_uses_actual_position_for_drop_pickup_distance(tmp_path: Path)
     candidate = next(row["data"] for row in output if row["type"] == "candidates")["candidates"][0]
     assert candidate["action_kind"] == "move_observed"
     assert candidate["params"]["path"] == [[0.5, 64.0, 0.5]]
+
+
+def test_actual_driver_restores_world_after_failed_clock_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    driver = runpy.run_path("tools/verify_t04.py")
+    initial = Observation.model_validate(wood_fixture()["initial"])
+    initial.health = 20.0
+    initial.inventory = {}
+
+    class Session:
+        def __init__(self, *args: object) -> None:
+            pass
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def reset(self, episode_id: str, attempt_id: str) -> Observation:
+            return initial
+
+        def policy(self) -> Self:
+            return self
+
+        def observe(self) -> Observation:
+            return initial
+
+    def fail_clock(argv: list[str], *, stdout: TextIO, stderr: TextIO, timeout: int) -> subprocess.CompletedProcess[str]:
+        stdout.write(json.dumps({"type": "clock_summary", "data": {"pause_verified": False}}) + "\n")
+        return subprocess.CompletedProcess(argv, 1)
+
+    monkeypatch.setitem(driver["main"].__globals__, "RpcSession", Session)
+    monkeypatch.setitem(driver["main"].__globals__, "subprocess",
+                        SimpleNamespace(run=fail_clock, check_output=lambda *args, **kwargs: "test-head"))
+    output = tmp_path / "failed-clock"
+    monkeypatch.setattr(sys, "argv", ["verify_t04.py", "--output", str(output), "clock"])
+    with pytest.raises(AssertionError):
+        driver["main"]()
+    assert json.loads((output / "results.json").read_text())["reset"] == {"passed": True}
+    assert Observation.model_validate_json((output / "restore.json").read_text()) == initial

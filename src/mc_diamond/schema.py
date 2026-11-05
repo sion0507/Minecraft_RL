@@ -149,7 +149,7 @@ class StepResult(Contract):
         return self
 
 
-class MovementEvidence(Contract):
+class MacroEvidence(Contract):
     candidate_id: Identifier
     source_obs_id: Identifier
     map_version: Count
@@ -171,8 +171,8 @@ class EpisodeSummary(Contract):
     task: Literal["smoke", "movement_smoke", "macros_smoke"] = "smoke"
     clock_mode: Literal["mock", "paused", "realtime", "unverified"]
     pause_verified: bool = False
-    movement_steps: list[MovementEvidence] = Field(default_factory=list)
-    macro_steps: list[MovementEvidence] = Field(default_factory=list)
+    movement_steps: list[MacroEvidence] = Field(default_factory=list)
+    macro_steps: list[MacroEvidence] = Field(default_factory=list)
     selection_requests: Count = 0
     cancelled_selections: Count = 0
     movement_completed: bool = False

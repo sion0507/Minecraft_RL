@@ -243,8 +243,8 @@ def test_information_audit_fails_when_hidden_variant_changes_policy_input(tmp_pa
     assert records(result)[-1]["data"]["information_verified"] is False
 
 
-@pytest.mark.parametrize("actual_ticks", [20, 401])
-def test_information_audit_checks_complete_evidence_and_tick_bound(tmp_path: Path, actual_ticks: int) -> None:
+@pytest.mark.parametrize(("actual_ticks", "missing_events"), [(20, False), (401, False), (20, True)])
+def test_information_audit_checks_complete_evidence_and_tick_bound(tmp_path: Path, actual_ticks: int, missing_events: bool) -> None:
     backend = tmp_path / "audit_backend.py"
     backend.write_text('''import json,os,sys
 fd=int(sys.argv[sys.argv.index('--admin-fd')+1])
@@ -261,8 +261,14 @@ for line in admin:
       'passable':block=='air','support':block=='stone','hazard':False})
  if p['exposed']:
   o['observed_map'].append({'block':'diamond_ore' if p['variant']=='ore' else 'lava','position':[4.0,64.0,0.0]})
- if p.get('scope')=='wood':
+ if p.get('scope') in ['wood','wood_tool']:
   o['observed_map'] += [{'block':'oak_log','position':[1.0,y,0.0],'support':True} for y in [64.0,65.0]]
+ if p.get('scope')=='wood_tool':
+  o.update(inventory={'wooden_axe':1},tool=None)
+ if p.get('scope')=='wood_drop':
+  o.update(drops=[{'entity_id':7,'item':'oak_log','quantity':1,'position':o['position']}])
+ if p.get('scope')=='empty':
+  o['observed_map']=[]
  r=json.loads(sys.stdin.readline());reply(r,o)
  if not p['exposed']:
   r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];ticks=int(sys.argv[1])
@@ -277,16 +283,28 @@ for line in admin:
    result.update(path=[],reason='cluster_completed',stop_evidence=['obs-1','cluster_completed'],distance_moved=0.0,
       events=[{'kind':'mined','item':'oak_log','quantity':2,'source':'minecraft'},
               {'kind':'acquired','item':'oak_log','quantity':2,'source':'minecraft'}])
+  if p.get('scope') in ['wood_tool','wood_drop','empty']:
+   ticks=1 if p['scope']=='wood_tool' else c['max_ticks']
+   reason='equip_completed' if p['scope']=='wood_tool' else 'wait_completed'
+   n.update(position=o['position'],active_ticks=ticks,remaining_ticks=1000-ticks)
+   result.update(actual_ticks=ticks,path=[],reason=reason,stop_evidence=['obs-1',reason],distance_moved=0.0,
+      events=[{'kind':'equipped' if p['scope']=='wood_tool' else 'wait','source':'minecraft'}])
+   if p['scope']=='wood_tool': n.update(tool='wooden_axe')
+   if p['scope']=='wood_drop':
+    n.update(inventory={'oak_log':1},drops=[])
+    result['events'].append({'kind':'acquired','item':'oak_log','quantity':1,'source':'minecraft'})
+  if p.get('scope')=='empty' and sys.argv[2]=='1': result['events']=[]
   reply(r,result)
 ''', encoding="utf-8")
     config = yaml.safe_load(Path("configs/minecraft.yaml").read_text())
-    config["command"] = [sys.executable, str(backend), str(actual_ticks)]
+    config["command"] = [sys.executable, str(backend), str(actual_ticks), "1" if missing_events else "0"]
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config))
     result = subprocess.run(["mc-diamond", "audit-information", "--config", str(config_path)],
                             text=True, capture_output=True, timeout=10)
-    assert result.returncode == (0 if actual_ticks == 20 else 1), result.stderr
-    assert records(result)[-1]["data"]["information_verified"] is (actual_ticks == 20)
+    expected = actual_ticks == 20 and not missing_events
+    assert result.returncode == (0 if expected else 1), result.stderr
+    assert records(result)[-1]["data"]["information_verified"] is expected
 
 
 def test_live_bridge_rejects_policy_administration_before_starting_server() -> None:
