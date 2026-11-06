@@ -87,7 +87,9 @@ python3 bridge/pausemod/build.py
 
 T05A의 `advance`에는 이 빌드에 포함된 관리자 전용 `mcdiamond_step`이 필요합니다.
 이 명령만 서버 실행 큐로 전달하고 Carpet의 정상 20틱/초 step을 요청합니다.
-틱 종료 후 블록·개체·인벤토리 패킷에 이어 같은 연결로 nonce와 전후 게임 틱을
+틱 종료 후 남은 블록/metadata/인벤토리 변경과 드롭 위치를 기존 watcher에
+전송합니다. 드롭의 상대이동 기준도 갱신하며 tracker 주기나 게임 틱은 추가하지 않습니다.
+이 패킷들에 이어 같은 연결로 nonce와 전후 게임 틱을
 보냅니다. bridge는 그 수신과 보행의 클라이언트 물리 틱을 기다린 뒤 매 틱 관측하며,
 일치하지 않는 틱은 실제 경과량을 보존하고 실패합니다. 결정 경계 pause 검사는 유지합니다.
 정책 RPC에는 콘솔 명령이나 이 확인 패킷을 제공하지 않습니다. 이전 확장 jar와
@@ -99,7 +101,12 @@ T05A의 `advance`에는 이 빌드에 포함된 관리자 전용 `mcdiamond_step
 
 ```bash
 uv run python tools/measure_t05a.py --output artifacts/t05a-timing-new
+uv run python tools/verify_tick_sync.py --output artifacts/t05a-sync-new
 ```
+
+두 번째 명령은 관리자 진단 loader로 침수 첫 틱의 산소, 화로 첫 틱의 점화,
+드롭 둘째 틱의 위치를 pause/콘솔 조회 전에 캡처해 서버 실제 상태와 비교합니다.
+진단 후 C4를 복원하며 이 검사 자체로 정지 인증서를 발급하지 않습니다.
 
 T05A 최종 코드를 T06 브랜치에 통합한 뒤에는 T06의 최종 fingerprint로
 63조건·정보 감사·관련 회귀를 다시 확인해야 합니다. T05A 인증을 승계하지 않습니다.

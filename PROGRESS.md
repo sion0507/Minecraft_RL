@@ -1,5 +1,59 @@
 # 실행 기록
 
+## 2026-11-07 — T05A 즉시 관측 지연 수정·재인증 준비
+
+Spec 검토의 P1을 실제 재현했다. `sync-red/`에서 침수 첫 틱 산소300/서버299,
+화로 첫 틱 litfalse/서버true, drop 둘째 틱 y101/서버100.8808로 모두 실패했다.
+`sync-before/`도 첫 산소 차이를 확인했다. 각 진단의 assert/exit1 및 finally reset을
+보존한다. 추가 게임 틱 없이 vanilla dirty block/metadata/attributes·슬롯을
+보내고 drop 위치+상대이동 기준을 동기화한 뒤 `sync-green/`은 모두 일치/exit0,
+C4 reset 통과다. accessor/invoker는 기존 watcher와 vanilla dirty 전송만 호출한다.
+
+첫 최종 시계는57/63 통과/drift0에서 의도적 SIGINT(-2) 중단했다. 검사기 exit1과
+결과/리셋을 보존하며 인증 완료로 세지 않는다. 이전688f...mod 및 속도 결과를
+새c0ff66d...mod의 인증으로 승계하지 않는다. final-speed에서 같은960틱을
+재측정 중이며 이어 새 final-v2-t05의63조건·감사·제작·경계, 별도T04/G2를 실행한다.
+수시 mypy22파일/새scripted회귀1개·새mod빌드 통과, 최종 전체 suite는 남았다.
+독립 Spec은 P1해결/잔여 확정 지적0, Standards도 위반·smell0이다.
+
+## 2026-11-06 — T05A #32 구현·최종 실제 검증 진행 중
+
+현재 사용자의 즉시 구현 지시로 T05A에 착수했다. 기준 main4694d54에서 새
+`issue-32-t05a` 브랜치와 `/tmp/Minecraft_learning-t05a-32` worktree를 생성했다.
+main과 T06 worktree는 읽기 전용이며 별도 runtime/snapshot·포트25566을 사용한다.
+코드는3284ba0에 커밋했으며 push/merge/이슈 종료는 하지 않았다.
+
+`implement` 스킬(/home/sion/.agents/skills/implement/SKILL.md)을 실제 확인·적용했다.
+공개 CLI/RPC와 기존 배포 bridge harness를 테스트 경계로 사용했다. 새 회귀는
+기존 코드의 per-tick console polling 때문에 RED, receipt 구현 뒤 GREEN이다.
+매 틱 관측·피해 즉시 중단·클라이언트 physics 상한/늦은 physics 대기·예상 밖
+실제2틱 보존/실패·nonce 불일치 무시·불량응답·끊김·listener 정리를 mock으로 확인했다.
+실제 물리/정지 인증과 구분한다. 제작 baseline10pytest, 새 scripted1pytest,
+수시 strict mypy21파일·Java 빌드·Node 문법이 통과했다. 전체 suite는 최종에 실행한다.
+
+실제 속도: 최종T05/T04 유효 로그의 같은 회귀식 재계산은1.225208660초/결정+
+0.199272347초/틱. 제외 단차/preflight 로그는 쓰지 않았다. 같은 고정 관리자 장면
+wait20/100/200 각3회·960틱은 변경 전1.174859334+0.199932601 → 최종
+1.195367608+0.050001196이다. 실제20틱/초에 가깝고 필수0.10/목표0.06을 충족한다.
+평균 advance 구간은197.55ms→47.98ms다. receipt만 적용한 중간0.100186100은
+필수 미달 시도로 남겼다. 모델/PPO 포함 예산 검증이나 자연 과제 성공은 아니다.
+
+첫 계측은 잘못된fixture scope로 invalid_request, 다음은 sandbox의 flock 실패였다.
+권한 실행 후 유효 기준선/최종 측정을 완료했다. 승인된 EULA/기존 바이너리만
+별도 복사했으며 sudo/새 라이선스/API/학습/유료 호출은 없었다.
+사전 장착/채굴은2결정52틱·원목1, 보행은2결정47틱·6.379블록·위치검사 통과다.
+둘 다 인증 전 exit1/pause_verified=false로 보존한다.
+
+최종 시계/회귀: `artifacts/issue-32/final-t05/`에서 clock information production
+boundaries 진행 중이다. 완결 전 완료로 세지 않는다. 다음은 별도 final-t04와 g2
+출력 폴더이며 G2의 기존 실패 exit1/direct_iron_verified=false/assert를 유지한다.
+이후 결과 비교·전체 pytest/mypy·독립 Standards/Spec·한국어 PDF2종을 마무리한다.
+
+원시 경로: artifacts/issue-32/baseline/{final-log-fit.json,fixed-3/},after-fixed/,
+after-scheduled/,profile-comparison.json,movement-preflight/. 소스/hash·실패 시도도 보존한다.
+T06 코드에는 이번 최적화를 넣지 않으며 이후 최종 코드 통합과63조건 재인증을
+별도 수행해야 한다. 자연G2철3의 최종 통합 인수는#8이며 기존 실패를 성공으로 쓰지 않는다.
+
 ## 2026-11-06 — 개정 T05 완료·T05A 착수 가능 (구현 미착수)
 
 **완료:** 사용자 승인으로 개정한 T05 인수7항목을 충족했다. 인수 책임 문서 커밋 `f16969647cd5c2f9cb993afe20d03272de190adb`를main/origin에 푸시하고 실제원격해시 일치를 확인했다. [#6 완료 댓글](https://github.com/sion0507/Minecraft_RL/issues/6#issuecomment-6683924522)을 남기고 #6을2026-11-06T11:38:26Z에Closed 처리했다. PR/merge는 수행하지 않았다. 이 완료 상태 기록도 별도 문서 커밋으로 보존하며 실행 코드는ff75f36과 동일하다.

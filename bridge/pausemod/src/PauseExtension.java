@@ -14,6 +14,10 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import io.netty.buffer.Unpooled;
 import java.nio.charset.StandardCharsets;
+import carpet.fakes.ThreadedAnvilChunkStorageInterface;
+import mcdiamond.mixin.ChunkStorageAccess;
+import mcdiamond.mixin.EntityTrackerAccess;
+import mcdiamond.mixin.TickStateAccess;
 
 /** Own extension: load snapshots without advancing them before the first request. */
 public final class PauseExtension implements ModInitializer, CarpetExtension {
@@ -44,8 +48,24 @@ public final class PauseExtension implements ModInitializer, CarpetExtension {
         if (after - before < ticks) return;
         byte[] receipt = (pending + " " + before + " " + after).getBytes(StandardCharsets.UTF_8);
         pending = null;
+        // Vanilla broadcasts before simulation; flush late changes without another tick.
+        for (net.minecraft.class_3218 world : server.method_3738()) {
+            net.minecraft.class_3898 storage = world.method_14178().field_17254;
+            for (net.minecraft.class_3193 holder : ((ThreadedAnvilChunkStorageInterface) storage).getChunks()) {
+                holder.method_16145().getNow(net.minecraft.class_3193.field_16427).left().ifPresent(holder::method_14006);
+            }
+            for (Object tracker : ((ChunkStorageAccess) storage).mcdiamondTrackers().values()) {
+                TickStateAccess state = (TickStateAccess) ((EntityTrackerAccess) tracker).mcdiamondEntry();
+                state.mcdiamondFlushData();
+                if (state.mcdiamondEntity() instanceof net.minecraft.class_1542) {
+                    state.mcdiamondWatchers().accept(new net.minecraft.class_2777(state.mcdiamondEntity()));
+                    state.mcdiamondPositionBaseline();
+                }
+            }
+        }
         // FIFO delivery makes all preceding block/entity/inventory updates visible first.
         for (net.minecraft.class_3222 player : server.method_3760().method_14571()) {
+            player.field_7512.method_7623();
             player.field_13987.method_14364(new class_2658(new class_2960("mcdiamond:tick"),
                 new class_2540(Unpooled.wrappedBuffer(receipt))));
         }
