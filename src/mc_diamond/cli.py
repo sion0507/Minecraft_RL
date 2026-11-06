@@ -18,7 +18,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="mc-diamond")
     parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "smoke-macros", "verify-clock", "prepare-world", "audit-information"])
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--diagnostic-fixture", choices=["wood", "wood_tool", "wood_break", "wood_hazard", "wood_drop", "empty"])
+    parser.add_argument("--diagnostic-fixture", choices=["wood", "wood_tool", "wood_break", "wood_hazard", "wood_drop", "empty",
+        "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron"])
     args = parser.parse_args()
     try:
         with args.config.open(encoding="utf-8") as handle:

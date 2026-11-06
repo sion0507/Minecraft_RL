@@ -32,6 +32,8 @@ Minecraft 공식 server jar와 Fabric이 실제로 받은 `.fabric/server/1.16.5
 Python의 정확한 전이 의존성·배포 URL·SHA-256은 uv.lock, Node 배포 URL·무결성 값은 bridge/package-lock.json을 기준으로 한다. 설치 패키지에 동봉된 라이선스를 보존하며 코드를 vendoring하지 않는다.
 Python 전이 의존성은 pydantic-core/annotated-types/typing-inspection/iniconfig/librt/mypy_extensions/pluggy(MIT), typing_extensions(PSF-2.0), Pygments(BSD-2-Clause), packaging(Apache-2.0 OR BSD-2-Clause), pathspec(MPL-2.0)다. Hatchling의 격리 build에는 tomlkit 0.15.1, trove-classifiers 2026.9.21.13, editables 0.6(MIT)도 설치됐다. build backend 자체는 고정했으며 이 build 전이 의존성은 uv.lock 대상이 아니다.
 
+이슈 #6의 소규모 레시피 허용 목록·전제조건 해석·제작/설치/화로 실행과 직접 사건 연결도 자체 구현이다. Minecraft 1.16.5의 설치된 minecraft-data/prismarine-recipe 자료와 Mineflayer craft/furnace/place/inventory API를 확인해 연결했다. 레시피 전체 데이터나 외부 데모 코드·프롬프트는 복사하지 않았으며 새 게임 의존성·모델을 추가하지 않는다. `recipes.json`은 두 실행 언어가 공유하는 자체 허용 목록이다.
+
 ## 실제 확인한 잔여 위험
 
 2026-10-09 npm audit는 [uuid 버퍼 범위 검사 권고](https://github.com/advisories/GHSA-w5hq-g745-h8pq)의 영향을 uuid→yggdrasil/MSAL→prismarine-auth/minecraft-protocol→Mineflayer로 전파해 moderate 6건을 보고했다.

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from .rpc import EpisodeError, PolicyEnvironment
 from .navigation import generate_movement_candidates
 from .macros import generate_wood_candidates
+from .production import generate_production_candidates
 from .schema import (
     Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Event, Goal, MacroEvidence, Observation, SelectionResult,
 )
@@ -44,12 +45,17 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     macro_steps: list[MacroEvidence] = []
     pause_verified = False
     acquired_target = 0
+    provided_inventory: dict[str, int] = {}
+    direct_crafted: dict[str, int] = {}
+    direct_smelted: dict[str, int] = {}
+    direct_acquired: dict[str, int] = {}
     terminated = truncated = invalid = completed = False
     reason = "decision_limit"
     error: ErrorInfo | None = None
     clock_mode: Literal["mock", "paused", "realtime", "unverified"] = "mock" if config.backend == "mock" else "unverified"
     try:
         initial = reset()
+        provided_inventory = dict(initial.inventory)
         emit("reset", initial)
         observation = environment.observe()
         if observation != initial:
@@ -64,7 +70,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 truncated, reason = True, "active_tick_limit"
                 break
             saved = (generate_movement_candidates(observation) if movement else
-                     generate_wood_candidates(observation, config.goal) if macros else generate_candidates(observation, config.goal))
+                     (generate_wood_candidates(observation, config.goal) if config.goal.target.endswith("_log") else
+                      generate_production_candidates(observation, config.goal)) if macros else generate_candidates(observation, config.goal))
             emit("candidates", saved)
             candidate = saved.candidates[0] if saved.candidates else Candidate(
                 candidate_id=f"{observation.obs_id}:wait", action_kind="wait", params={},
@@ -139,15 +146,19 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                     if event.event_id in seen_events:
                         raise EpisodeError(ErrorInfo(code="invalid_step", message="Repeated event identity"))
                     seen_events.add(event.event_id)
+                ledger = {"crafted": direct_crafted, "smelted": direct_smelted, "acquired": direct_acquired}.get(event.kind)
+                if ledger is not None and event.item:
+                    ledger[event.item] = ledger.get(event.item, 0) + event.quantity
             reward = float(sum(event.quantity for event in step.events if event.kind == "acquired"))
             reward_total += reward
             emit("reward", {"value": reward, "kind": "smoke_acquisition_count", "actor_valid": False,
                             "trace_mask": 0 if step.cancelled else 1,
                             "actor_exclusion_reason": "cancelled" if step.cancelled else "no_candidates" if not saved.candidates
                             else "single_candidate" if len(saved.candidates) == 1 else "smoke_selector"})
+            completion_kind = {"collect": "acquired", "craft": "crafted", "smelt": "smelted"}[config.goal.kind]
             acquired_target += sum(event.quantity for event in step.events
-                                   if event.kind == "acquired" and event.item == config.goal.target)
-            completed = (not step.invalid and acquired_target >= config.goal.quantity
+                                   if event.kind == completion_kind and event.item == config.goal.target)
+            completed = (not step.invalid and acquired_target > 0
                          and step.observation.inventory.get(config.goal.target, 0) >= config.goal.quantity)
             terminated, truncated, invalid, reason = step.terminated, step.truncated, step.invalid, step.reason
             observation = step.observation
@@ -177,6 +188,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         decisions=decisions, reward_total=reward_total,
         movement_completed=movement_completed, distance_moved=distance_moved,
         macro_steps=macro_steps, selection_requests=selection_requests, cancelled_selections=cancelled_selections,
+        provided_inventory=provided_inventory, direct_crafted=direct_crafted,
+        direct_smelted=direct_smelted, direct_acquired=direct_acquired,
     )
     emit("summary", summary)
     return summary

@@ -8,7 +8,9 @@
 
 ## 현재 상태
 
-이슈 #2의 공통 실행 흐름, #3의 실제 Minecraft reset·정지, #4의 제한 관측·보행에 이어 #5의 목재 후보·장착·채굴·드롭 회수와 `smoke-macros`를 구현했습니다.
+이슈 #2의 공통 실행 흐름, #3의 실제 Minecraft reset·정지, #4의 제한 관측·보행, #5의 목재 수집에 이어 #6의 개별 제작·설치·화로 투입/회수·철 채굴을 `smoke-macros`에 연결했습니다. 실제 검증 상태와 미달 항목은 [PROGRESS.md](PROGRESS.md)를 따릅니다.
+
+#6은 배치 자원의 철 곡괭이 제작·시계63조건·정보26장면·실제 제어 검증을 통과했지만, 고정 자연 G2의 철광석3개 획득 조건이 미달해 전체 인수 조건은 미완료입니다.
 현재 실제 backend는 자기 상태, 직접 보인 표면·공기/방문 기억, 관측 원목·직접 파괴와 연결된 드롭, wait와 같은 높이의 보행을 제공합니다. 제작·제련·계단·터널·모델/API·PPO는 후속 작업입니다. 실제 검사와 실패 기록은 [PROGRESS.md](PROGRESS.md)에 있습니다.
 
 ## 실험 범위
@@ -111,7 +113,7 @@ uv run mc-diamond audit-information --config configs/minecraft.yaml
 
 최종 summary의 `movement_steps`에도 후보 ID·원본 관측 ID·지도 버전·사건·경로·중단 근거·이유·실제 틱·경과 시간·거리·안정 경계를 결정별로 보존합니다. smoke는 후보/결과의 근거 연결과 사건 출처를 검사하며 누락·불일치는 `invalid_step`입니다.
 
-`audit-information`은 관리자 채널에서 벽 뒤 광석/용암의 실제 장면을 준비합니다. 정책은 일반 observe/step으로만 접속하며 노출 전 관측·후보·경로·실행/중단 결과가 같아야 합니다. 벽을 연 양성 대조, 보이는 원목 군집 채굴·드롭 회수, 독립 도끼 장착·20/100/200틱 대기·드롭 대기·0후보를 검사합니다. 드롭의 무작위 흩어짐 좌표/사건 ID를 제외하고 종류·수량·정책 상태·경로·중단 근거를 비교하며, 대기/장착 사건이 없는 응답도 거부합니다. 이 장면의 원목은 관리자 진단용 배치이며 자연 C4 성공이 아닙니다. 원본 snapshot을 보존하고 진단 후 reset으로 기준 월드를 복원합니다. 실제 정지 인증이 없으면 감사가 통과하지 않습니다. 제작·하강·터널 감사는 후속 티켓입니다.
+`audit-information`은 관리자 채널에서 벽 뒤 광석/용암의 실제 장면을 준비합니다. 정책은 일반 observe/step으로만 접속하며 노출 전 관측·후보·경로·실행/중단 결과가 같아야 합니다. 벽을 연 양성 대조, 보이는 원목 군집 채굴·드롭 회수, 독립 도끼 장착·20/100/200틱 대기·드롭 대기·0후보를 검사합니다. 드롭의 무작위 흩어짐 좌표/사건 ID를 제외하고 종류·수량·정책 상태·경로·중단 근거를 비교하며, 대기/장착 사건이 없는 응답도 거부합니다. 이 장면의 원목은 관리자 진단용 배치이며 자연 C4 성공이 아닙니다. 원본 snapshot을 보존하고 진단 후 reset으로 기준 월드를 복원합니다. 실제 정지 인증이 없으면 감사가 통과하지 않습니다. 제작·설치·화로·철 채굴 감사도 같은 공개 실행 흐름에서 비교합니다. 하강·터널 감사는 후속 티켓입니다.
 
 지형 관측은 눈에서 반경 8블록의 셀 중심으로 광선을 보내 처음 만나는 충돌 표면/위험에서 끊습니다. 지나간 공기·비충돌 식물과 첫 표면만 기억하고 미로딩 셀은 막힌 것으로 취급합니다. 유리·부분 충돌 블록을 보수적으로 가리개로 취급하며 숨은 이웃의 모양·청크 전체·시드·관리자 로그를 경로 판단에 쓰지 않습니다. `hidden_hazard_peek=false`를 기록하며 reset은 지도·방문·최근 결과를 초기화합니다.
 
@@ -121,6 +123,18 @@ uv run mc-diamond audit-information --config configs/minecraft.yaml
 cd worlds/server
 flock -n .mc-diamond-owner java -Xms512M -Xmx3G -jar fabric-server-launch.jar nogui
 ```
+
+제작 진단은 다음 명령을 사용합니다. `production`은 빈 인벤토리와 관리자 배치 원목·돌·철광석에서 시작합니다. 목표의 관측 가능한 전제조건을 하나씩 후보로 제시하고 매번 선택하며, 전체 사슬을 하나의 매크로로 실행하지 않습니다. 기본 smoke의 결정적 첫 후보 선택이며 S 선택기나 모델 성능 결과가 아닙니다.
+
+```bash
+uv run mc-diamond smoke-macros --config configs/production.yaml --diagnostic-fixture production
+uv run mc-diamond smoke-macros --config configs/g2.yaml
+uv run python tools/verify_t05.py --output artifacts/t05-new clock information production boundaries g2
+```
+
+공유 `src/mc_diamond/recipes.json`의 레시피만 사용합니다. 제작 출력은 1–8개이고 레시피 출력 단위의 배수이며, 설치/장착·투입·회수는 별도 후보로 각각 최대 400틱입니다. 현재 보이는 작업대·화로와 재료·도구·연료·지지면을 실행 직전 검사합니다. 화로 상태는 직접 연 창의 기억이며 경과 시간으로 출력을 추측하지 않고 다시 열어 확인합니다. `provided_inventory`, `direct_acquired`, `direct_crafted`, `direct_smelted`로 시작 보유량과 직접 사건을 분리합니다. 직접 제련은 이 에피소드에서 선택한 화로에 넣은 입력과 실제 출력 회수가 연결된 경우만 기록합니다.
+
+`production_no_tool`·`production_no_fuel`·`production_hazard`는 전제조건/위험 진단용이며, 실행기의 `boundaries` 검사가 해당 행동을 명시적으로 선택해 거부·실제 시간·취소/재선택을 검사합니다. `iron`은 제공된 돌 곡괭이와 배치 철광석 진단입니다. fixture 없는 `configs/g2.yaml`만 고정 자연 G2 snapshot에서 시작하고 활성 상한 12,000틱을 유지합니다. 관리자 지원 진단을 자연 G2나 C4 성공으로 합치지 않습니다. 검사기는 G2 직접 철광석 3개 획득이 없으면 실패하며 최종 기준 C4 reset을 시도합니다. 매번 새 출력 경로를 사용합니다.
 
 ## 문서
 

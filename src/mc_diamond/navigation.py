@@ -34,10 +34,16 @@ def observed_routes(observation: Observation) -> dict[tuple[int, int, int], list
 
 def generate_movement_candidates(observation: Observation) -> CandidateSet:
     sx, _, sz = map(math.floor, observation.position)
+    visited = {tuple(point) for point in observation.visited}
     directions: dict[tuple[int, int], list[list[float]]] = {}
-    for (x, _, z), path in observed_routes(observation).items():
+    for point, path in observed_routes(observation).items():
         if path:
-            directions[((x > sx) - (x < sx), (z > sz) - (z < sz))] = path
+            x, _, z = point
+            direction = ((x > sx) - (x < sx), (z > sz) - (z < sz))
+            previous = directions.get(direction)
+            if previous and point in visited and tuple(math.floor(v) for v in previous[-1]) not in visited:
+                continue
+            directions[direction] = path
     candidates = [Candidate(
         candidate_id=f"{observation.obs_id}:move:{index}", action_kind="move_observed",
         params={"path": [[value for value in point] for point in route], "map_version": observation.map_version},

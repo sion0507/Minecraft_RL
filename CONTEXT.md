@@ -1,4 +1,17 @@
-# T04 보완 재개 완료
+# T05(#6) 최종 보존 — 고정 자연 G2 직접철3 인수 미달
+
+- 사용자 최신 지시: T05만 검증·PDF·커밋/푸시·이슈 절차까지 처리. 이전 push 금지는 이 요청으로 대체한다. 다른 티켓/T05A(#32) 구현은 하지 않는다. #6 고정 자연G2 직접철3 기준은 그대로여서 미달인 상태로 닫지 않는다. 이슈에 충족5항목과 미달G2를 보고한다.
+- main, 기준2188120. 최신 구현을 커밋·푸시하는 단계다(최종 commit ID는git log -1 및원격ref 확인). PR/merge는추가하지않는다. 최종#6은Open유지, 후속티켓자동착수금지.
+- 재개 후보 결함: final-3 G2에 도달155/미방문55 경로가 있는데 후보0이었다. 방향 대표 끝점을 고른 뒤 방문 끝점을 걸러 새 경로까지 잃었다. navigation.generate_movement_candidates가 미방문 끝점을 먼저 보존하도록 보완. 공개CLI 회귀RED→GREEN, 저장상태후보4개. 최종pytest78passed(18.72초)·strictmypy23·Node문법·diff통과.
+- 최종 실제G2: artifacts/issue-6/g2-route-fix/ g2.jsonl/results.json.64결정·1778틱·446.39초·철0·decision_limit·서버오류없음·paused/인증true·CLIexit1. 돌곡괭이1제공, 방문155·철관측0·경로완료39·0후보wait25. 공개같은높이연결성분155칸의미방문0도확인. 전체월드/12000틱전체불가능성주장아님. C4reset/observe일치·0틱·빈재고·체력20·검사/서버종료확인. **남은인수조건은고정G2직접철3**.
+- 보존근거 final-3/: 실제clock63/63(고유/준비63·상태동일·drift0), 정보26장면710.42초, 배치자원/빈재고 전체제작51결정/1702틱/413.17초. 원목4/조약돌11/철광석3직접획득·철괴3직접제련·철곡괭이1직접제작. 자연C4/모델성공이아니다. final-3 G2는수정전64/1687틱/철0기록으로분리한다.
+- control-final/: 도구/연료부족각1틱invalid·위험1틱중단. 제공철괴3/막대2의제작준비장면에서취소40틱보존/actor제외/trace0→새선택3틱제작, 총43틱·선택요청2·실행1·목표완료. 전체realtime인증아님. C4reset/종료통과.
+- bridge/clock/runtime는후보수정전후동일, 인증fingerprint6de2893387dc7971a1213cf939e056c07520edef6f6edfede0982b423e832804 유지. **시계63/정보26/전체제작재실행금지**. 기존실제감사공개32상태를새후보생성기로재생해저장후보ID/내용/순서/mask가32/32동일(candidate-replay.json). 새실제감사로표시하지않는다. 새G2manifest전체소스hash일치. 예전manifest의driver/navigation차이는문서화된변경이다.
+- 최신통합재계산g2-route-fix/evidence-recomputed.json, G2상세동폴더g2-recomputed.json. 사전실패/중단/final-1화로timeout/final-2설정거부는PROGRESS/원시에보존한다. 보고서때문에게임재실행금지.
+- 로컬reports/issue-006-T05-report.pdf와issue-006-T05-code-guide.pdf 두개만최신교체한다. /tmp/t05-reports.py(생성기),/tmp/t05-evidence.json(입력),/tmp/t05-recompute.py(재계산기) 사용.78검사·1778틱G2를반영한2쪽/3쪽PDF의추출/폰트포함을확인했다. 커밋/원격확인값으로Git메타를맞추고최종전페이지를렌더검수해링크공유한다. 모든중간물/tmp, reports는Git제외. 이작업때문에게임재실행금지.
+- models/API/PPO/본학습/최종평가/일반화/전체realtime/자연C4다이아미실행. 일부사망/배치/제공출력/동시드롭경계는mock/scripted. PC180시간재확정·증액없음. 하강/터널/S/T05A속도개선을추가하지않는다.
+
+## 아래는 이전 T04 완료 기록
 
 2026-11-05 사용자의 `continue`로 아래 중지 요청이 해제됐다. 남은 실제 감사·매크로·취소/재선택·기준 reset을 완료했고 코드 변경은 없다. 이 보완을 현재 main의 로컬 커밋으로 마무리한다. push/PR/merge/이슈종료/댓글은 요청되지 않았으며 실행하지 않는다. 최신 커밋 ID는 `git log -1`로 확인한다. #5는 조회 시 Open이다. 후속 #6/T05는 자동 착수하지 않는다.
 

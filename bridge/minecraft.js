@@ -11,6 +11,10 @@ const { Server } = require('./server')
 const mineflayer = require('mineflayer')
 const { Vec3 } = require('vec3')
 const { Terrain } = require('./terrain')
+const recipes = require('../src/mc_diamond/recipes.json')
+const fuels = { coal: 1600, charcoal: 1600, ...Object.fromEntries(recipes.filter(r => r.item.endsWith('_planks')).map(r => [r.item, 300])) }
+const furnaces = new Map()
+const furnaceInputs = new Map()
 const terrain = new Terrain()
 let history = []
 
@@ -48,6 +52,7 @@ async function fingerprint () {
   hash.update(process.version + java.stderr)
   hash.update(await server.runtimeHash())
   for (const file of [__filename, path.join(__dirname, 'server.js'), path.join(__dirname, 'terrain.js'),
+    path.join(__dirname, '../src/mc_diamond/recipes.json'),
     path.join(__dirname, '../src/mc_diamond/clock.py'), path.join(__dirname, 'package-lock.json'),
     ...['C4', 'G1', 'G2', 'G3', 'G4'].map(t => path.join(server.snapshots, t, 'snapshot.json'))]) {
     hash.update(await fsp.readFile(file))
@@ -77,7 +82,7 @@ async function connect () {
   connected = true
   current.on('itemDrop', entity => {
     const item = entity.getDroppedItem?.()
-    const target = item && minedTargets.find(target => target.block === item.name && target.drop_id === undefined &&
+    const target = item && minedTargets.find(target => (target.block === 'stone' ? 'cobblestone' : target.block) === item.name && target.drop_id === undefined &&
       activeTicks - target.tick <= 2 &&
       entity.position.distanceTo(new Vec3(...target.position).offset(0.5, 0.5, 0.5)) <= 2)
     if (target && !drops.has(entity.id) && item.count === 1) {
@@ -142,7 +147,7 @@ function vector (text) {
 
 function inventory () {
   const result = {}
-  for (const item of bot.inventory.items()) result[item.name] = (result[item.name] || 0) + item.count
+  for (const item of (bot.currentWindow || bot.inventory).items()) result[item.name] = (result[item.name] || 0) + item.count
   return result
 }
 
@@ -180,7 +185,9 @@ async function observation () {
     tool_durability: bot.heldItem && bot.heldItem.maxDurability ? bot.heldItem.maxDurability - (bot.heldItem.durabilityUsed || 0) : null,
     yaw: bot.entity.yaw, pitch: bot.entity.pitch, map_version: terrain.version,
     hidden_hazard_peek: false, visited: terrain.visited,
-    observed_map: terrain.cells(), drops: observedDrops, history }
+    observed_map: terrain.cells(), drops: observedDrops, history,
+    furnaces: [...furnaces.values()].filter(f => terrain.visible.has(f.position.join(',')) &&
+      terrain.memory.get(f.position.join(','))?.block === 'furnace') }
 }
 
 async function advance (ticks, walking = false) {
@@ -228,6 +235,8 @@ async function reset (payload) {
   pendingEvents = []
   minedTargets = []
   drops.clear()
+  furnaces.clear()
+  furnaceInputs.clear()
   acquisitionBaseline = inventory()
   clockTrials.clear()
   clockFingerprint = await fingerprint()
@@ -299,7 +308,7 @@ function event (kind, details = {}) {
 }
 
 function drainEvents () {
-  const held = drops.size ? inventory() : {}
+  const held = inventory()
   for (const [id, drop] of drops) {
     if (drop.target.confirmed && drop.collected && (held[drop.item] || 0) >= (acquisitionBaseline[drop.item] || 0) + drop.quantity) {
       pendingEvents.push(event('acquired', { item: drop.item, quantity: drop.quantity,
@@ -310,7 +319,24 @@ function drainEvents () {
   }
   const result = pendingEvents
   pendingEvents = []
+  acquisitionBaseline = held
   return result
+}
+
+function consumptionMatches (before, ingredients) {
+  const held = inventory()
+  return Object.entries(ingredients).every(([item, count]) => {
+    const picked = [...drops.values()].filter(d => d.item === item && d.collected && d.target.confirmed)
+      .reduce((n, d) => n + d.quantity, 0)
+    const spent = (before[item] || 0) - (held[item] || 0)
+    return spent <= count && spent >= count - picked
+  })
+}
+
+function recordConsumption (ingredients) {
+  for (const [item, count] of Object.entries(ingredients)) {
+    acquisitionBaseline[item] = Math.max(0, (acquisitionBaseline[item] || 0) - count)
+  }
 }
 
 function interruptReason (state, initial) {
@@ -335,7 +361,22 @@ async function executeMacro (candidate, recoveryWait = false) {
     ticks += await advance(1, true)
     observationIndex++
     state = await observation()
-    reason = interruptReason(state, candidate.action_kind === 'place_or_equip' ? { ...initial, tool: null } : initial)
+    reason = interruptReason(state, ['place_or_equip', 'craft_batch', 'furnace_load', 'furnace_collect'].includes(candidate.action_kind)
+      ? { ...initial, tool: null } : initial)
+  }
+  const operation = async (action, confirmed = () => true) => {
+    let settled = false
+    let failed = false
+    const pending = action().then(() => { settled = true }, () => { settled = failed = true })
+    while ((!settled || (!failed && !confirmed())) && !reason && ticks < limit) await tick()
+    if (!settled) {
+      if (bot.currentWindow) bot.closeWindow(bot.currentWindow)
+      await Promise.race([pending, sleep(5500)])
+      // A pending inventory transaction must never escape into the next selection.
+      if (!settled) { await pause(); fail('backend_error') }
+    }
+    if (failed && !reason) reason = 'operation_failed'
+    return !failed && confirmed()
   }
   if (candidate.action_kind === 'wait') {
     const allowed = exactKeys(candidate.params, []) && ([20, 100, 200].includes(candidate.max_ticks) ||
@@ -345,13 +386,144 @@ async function executeMacro (candidate, recoveryWait = false) {
     while (!reason && ticks < limit) await tick()
     if (!reason) reason = 'wait_completed'
     events.push(event('wait'))
+  } else if (candidate.action_kind === 'craft_batch') {
+    const { item, quantity, table: point } = candidate.params
+    const held = inventory()
+    const definition = recipes.find(r => r.item === item && Number.isInteger(quantity) && quantity >= 1 && quantity <= 8 &&
+      quantity % r.count === 0 && Object.entries(r.ingredients).every(([name, count]) => (held[name] || 0) >= count * quantity / r.count))
+    const publicTable = Array.isArray(point) && point.length === 3 && point.every(Number.isInteger) &&
+      terrain.visible.has(point.join(',')) && terrain.memory.get(point.join(','))?.block === 'crafting_table' &&
+      Math.hypot(...point.map((v, i) => v + 0.5 - state.position[i] - (i === 1 ? 1.62 : 0))) <= 4.5
+    const allowed = exactKeys(candidate.params, ['item', 'quantity', 'table']) && definition &&
+      (definition.table ? publicTable : point === null)
+    if (!reason && !allowed) { invalid = true; reason = 'invalid_craft' }
+    if (!reason) {
+      const table = definition.table ? bot.blockAt(new Vec3(...point), false) : null
+      const type = bot.registry.itemsByName[item]?.id
+      const recipe = type !== undefined && bot.recipesFor(type, null, quantity, table).find(r => r.result.count === definition.count &&
+        r.delta.filter(d => d.count < 0).length === Object.keys(definition.ingredients).length &&
+        r.delta.every(d => d.count >= 0 || definition.ingredients[bot.registry.items[d.id].name] === -d.count))
+      if (!recipe || (definition.table && table?.name !== 'crafting_table')) { invalid = true; reason = 'invalid_craft' }
+      else {
+        for (let n = 0; n < quantity / definition.count && !reason && ticks < limit; n++) {
+          const before = inventory()
+          const confirmed = () => (inventory()[item] || 0) - (before[item] || 0) === definition.count &&
+            consumptionMatches(before, definition.ingredients)
+          const success = await operation(() => bot.craft(recipe, 1, table), confirmed)
+          if (success) {
+            recordConsumption(definition.ingredients)
+            events.push(event('crafted', { item, quantity: definition.count }))
+          } else if (!reason) reason = 'craft_unconfirmed'
+        }
+        if (!reason) reason = events.filter(e => e.kind === 'crafted').reduce((n, e) => n + e.quantity, 0) === quantity
+          ? 'craft_completed' : 'macro_tick_limit'
+      }
+    }
+  } else if (['furnace_load', 'furnace_collect'].includes(candidate.action_kind)) {
+    const { position: point, quantity, item, fuel, fuel_quantity: fuelQuantity } = candidate.params
+    const loading = candidate.action_kind === 'furnace_load'
+    const held = inventory()
+    const allowed = exactKeys(candidate.params, loading ? ['position', 'quantity', 'item', 'fuel', 'fuel_quantity', 'map_version']
+      : ['position', 'quantity', 'map_version']) && Number.isInteger(quantity) && quantity >= 1 && quantity <= 8 &&
+      Array.isArray(point) && point.length === 3 && point.every(Number.isInteger) &&
+      terrain.visible.has(point.join(',')) && terrain.memory.get(point.join(','))?.block === 'furnace' &&
+      Math.hypot(...point.map((v, i) => v + 0.5 - state.position[i] - (i === 1 ? 1.62 : 0))) <= 4.5 &&
+      (!loading || (item === 'iron_ore' && Number.isInteger(fuelQuantity) && fuelQuantity >= 1 && fuelQuantity <= 8 &&
+        Object.hasOwn(fuels, fuel) && fuels[fuel] * fuelQuantity >= quantity * 200 &&
+        (held[item] || 0) >= quantity && (held[fuel] || 0) >= fuelQuantity))
+    if (!reason && !allowed) { invalid = true; reason = 'invalid_furnace' }
+    if (!reason) {
+      const block = bot.blockAt(new Vec3(...point), false)
+      let window
+      const key = point.join(',')
+      const remember = () => {
+        const input = window.inputItem(); const fuel = window.fuelItem(); const output = window.outputItem()
+        furnaces.set(key, { position: point, input_item: input?.name || null, input_count: input?.count || 0,
+          fuel_item: fuel?.name || null, fuel_count: fuel?.count || 0,
+          output_item: output?.name || null, output_count: output?.count || 0, last_observed_tick: activeTicks })
+      }
+      if (block?.name !== 'furnace') { invalid = true; reason = 'invalid_furnace' }
+      else try {
+        await operation(async () => { window = await bot.openFurnace(block) })
+        if (window) {
+          if (loading && !reason) {
+            if (window.inputItem() || window.fuelItem() || window.outputItem()) { invalid = true; reason = 'furnace_busy' }
+            else {
+              const fuelBefore = inventory()
+              if (await operation(() => window.putFuel(bot.registry.itemsByName[fuel].id, null, fuelQuantity),
+                () => consumptionMatches(fuelBefore, { [fuel]: fuelQuantity }))) {
+                recordConsumption({ [fuel]: fuelQuantity })
+                events.push(event('furnace_loaded', { item: fuel, quantity: fuelQuantity, position: point }))
+              }
+              if (!reason && ticks < limit) {
+                const inputBefore = inventory()
+                if (await operation(() => window.putInput(bot.registry.itemsByName[item].id, null, quantity),
+                  () => consumptionMatches(inputBefore, { [item]: quantity }))) {
+                  recordConsumption({ [item]: quantity })
+                  furnaceInputs.set(key, (furnaceInputs.get(key) || 0) + quantity)
+                  events.push(event('furnace_loaded', { item, quantity, position: point }))
+                }
+              }
+              if (!reason) reason = events.some(e => e.kind === 'furnace_loaded' && e.item === item) ? 'furnace_loaded' : 'macro_tick_limit'
+            }
+          } else if (!loading && !reason) {
+            const output = window.outputItem()
+            if (!output || output.name !== 'iron_ingot' || output.count < quantity) { reason = 'output_not_ready' }
+            else {
+              const before = inventory().iron_ingot || 0
+              const success = await operation(async () => {
+                await bot.transfer({ window, itemType: bot.registry.itemsByName.iron_ingot.id, metadata: null, count: quantity,
+                  sourceStart: 2, sourceEnd: 3, destStart: window.inventoryStart, destEnd: window.inventoryEnd })
+                await bot._syncWindow(window)
+              }, () => (inventory().iron_ingot || 0) - before === quantity)
+              if (success && (inventory().iron_ingot || 0) - before === quantity) {
+                events.push(event('furnace_collected', { item: 'iron_ingot', quantity, position: point }))
+                const owned = Math.min(quantity, furnaceInputs.get(key) || 0)
+                if (owned) {
+                  events.push(event('smelted', { item: 'iron_ingot', quantity: owned, position: point }))
+                  furnaceInputs.set(key, furnaceInputs.get(key) - owned)
+                }
+                if (!reason) reason = 'furnace_collected'
+              } else if (!reason) reason = 'collect_unconfirmed'
+            }
+          }
+        }
+      } finally {
+        if (window) { remember(); bot.closeWindow(window) }
+      }
+    }
   } else if (candidate.action_kind === 'place_or_equip') {
-    const item = exactKeys(candidate.params, ['item']) && bot.inventory.items().find(item =>
-      item.name === candidate.params.item && /^(wooden|stone|iron|golden|diamond|netherite)_axe$/.test(item.name))
+    const placing = Object.hasOwn(candidate.params, 'position')
+    const point = candidate.params.position
+    const floor = placing && Array.isArray(point) && point.length === 3 && point.every(Number.isInteger)
+      ? [point[0], point[1] - 1, point[2]] : null
+    const allowed = placing ? exactKeys(candidate.params, ['item', 'position', 'map_version']) &&
+      ['crafting_table', 'furnace'].includes(candidate.params.item) && floor &&
+      terrain.visible.has(point.join(',')) && terrain.visible.has(floor.join(',')) &&
+      terrain.memory.get(point.join(','))?.block === 'air' && terrain.memory.get(floor.join(','))?.support &&
+      !terrain.memory.get(floor.join(','))?.hazard &&
+      Math.hypot(...point.map((v, i) => v + 0.5 - state.position[i] - (i === 1 ? 1.62 : 0))) <= 4.5 &&
+      !(Math.abs(point[0] + 0.5 - state.position[0]) < 0.8 && Math.abs(point[2] + 0.5 - state.position[2]) < 0.8 &&
+        point[1] < state.position[1] + 1.8 && point[1] + 1 > state.position[1])
+      : exactKeys(candidate.params, ['item']) && /^(wooden|stone|iron|golden|diamond|netherite)_(axe|pickaxe)$/.test(candidate.params.item)
+    const item = allowed && bot.inventory.items().find(item => item.name === candidate.params.item && item.count > 0)
     if (!reason && item) {
-      await bot.equip(item, 'hand')
-      events.push(event('equipped', { item: item.name, quantity: 1 }))
-      reason = 'equip_completed'
+      if (await operation(() => bot.equip(item, 'hand'))) {
+        if (!placing) {
+          events.push(event('equipped', { item: item.name, quantity: 1 }))
+          if (!reason) reason = 'equip_completed'
+        } else if (!reason && ticks < limit) {
+          const before = inventory()[item.name] || 0
+          const success = await operation(() => bot.placeBlock(bot.blockAt(new Vec3(...floor), false), new Vec3(0, 1, 0)))
+          // Block acknowledgement can arrive before the matching inventory update.
+          while (success && !reason && ticks < limit && (inventory()[item.name] || 0) === before) await tick()
+          state = await observation()
+          if (success && terrain.memory.get(point.join(','))?.block === item.name && before - (inventory()[item.name] || 0) === 1) {
+            events.push(event('placed', { item: item.name, quantity: 1, position: point }))
+            if (!reason) reason = 'place_completed'
+          } else if (!reason) reason = 'place_unconfirmed'
+        }
+      }
     } else if (!reason) { reason = 'invalid_equipment'; invalid = true }
   } else if (candidate.action_kind === 'mine_visible_cluster') {
     const { blocks, block, map_version: mapVersion } = candidate.params
@@ -360,7 +532,11 @@ async function executeMacro (candidate, recoveryWait = false) {
       terrain.memory.get(point.join(','))?.block === block &&
       Math.hypot(point[0] + 0.5 - state.position[0], point[2] + 0.5 - state.position[2]) <= 1.8 &&
       Math.hypot(point[0] + 0.5 - state.position[0], point[1] + 0.5 - state.position[1] - 1.62, point[2] + 0.5 - state.position[2]) <= 4.5
-    const allowed = exactKeys(candidate.params, ['blocks', 'block', 'map_version']) && typeof block === 'string' && /_log$/.test(block) &&
+    const pick = bot.heldItem?.name
+    const toolAllowed = /_log$/.test(block) || (block === 'stone' && /^(wooden|stone|iron|golden|diamond|netherite)_pickaxe$/.test(pick)) ||
+      (block === 'iron_ore' && /^(stone|iron|diamond|netherite)_pickaxe$/.test(pick))
+    const allowed = exactKeys(candidate.params, ['blocks', 'block', 'map_version']) && typeof block === 'string' &&
+      (/_log$/.test(block) || ['stone', 'iron_ore'].includes(block)) && toolAllowed &&
       mapVersion === initial.map_version && Array.isArray(blocks) && blocks.length >= 1 && blocks.length <= 8 &&
       new Set(blocks.map(p => JSON.stringify(p))).size === blocks.length && blocks.every(reachable) &&
       blocks.every((p, i) => i === 0 || blocks.slice(0, i).some(q => p.reduce((sum, v, axis) => sum + Math.abs(v - q[axis]), 0) === 1))
@@ -432,7 +608,8 @@ async function executeMacro (candidate, recoveryWait = false) {
   history = [...history.slice(-15), candidate.action_kind + ':' + reason]
   state = await observation()
   events.push(...drainEvents())
-  if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed'].includes(reason)) events.push(event('stopped'))
+  if (invalid || ['output_not_ready', 'operation_failed', 'craft_unconfirmed', 'collect_unconfirmed', 'place_unconfirmed'].includes(reason)) events.push(event('failed'))
+  if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed', 'craft_completed', 'place_completed', 'furnace_loaded', 'furnace_collected'].includes(reason)) events.push(event('stopped'))
   return stepResult(candidate, started, ticks, state, events, reason,
     { invalid, path: pathTaken, distanceMoved: distance })
 }
@@ -530,7 +707,9 @@ async function informationFixture (payload) {
   if (!(exactKeys(payload, ['variant', 'exposed']) || exactKeys(payload, ['variant', 'exposed', 'scope']) ||
     exactKeys(payload, ['variant', 'exposed', 'scope', 'episode_id', 'attempt_id'])) ||
     !['ore', 'lava'].includes(payload.variant) || typeof payload.exposed !== 'boolean' ||
-    (Object.hasOwn(payload, 'scope') && !['wood', 'wood_tool', 'wood_break', 'wood_hazard', 'wood_drop', 'empty'].includes(payload.scope)) ||
+    (Object.hasOwn(payload, 'scope') && !['wood', 'wood_tool', 'wood_break', 'wood_hazard', 'wood_drop', 'empty',
+      'production', 'production_no_tool', 'production_no_fuel', 'production_hazard', 'iron',
+      'production_craft', 'production_place', 'production_furnace'].includes(payload.scope)) ||
     (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
   await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
   const x = Math.floor(bot.entity.position.x); const z = Math.floor(bot.entity.position.z); const y = 100
@@ -558,6 +737,39 @@ async function informationFixture (payload) {
   if (payload.scope === 'empty') {
     await server.command(`fill ${x - 1} ${y} ${z - 1} ${x + 1} ${y + 2} ${z + 1} minecraft:stone`)
     await server.command(`fill ${x} ${y} ${z} ${x} ${y + 1} ${z} minecraft:air`)
+  }
+  if (payload.scope === 'production') {
+    await server.command('clear ResearchBot')
+    await server.command(`fill ${x + 1} ${y} ${z - 1} ${x + 1} ${y + 3} ${z - 1} minecraft:oak_log`)
+    await server.command(`fill ${x - 2} ${y} ${z - 2} ${x - 2} ${y + 2} ${z + 2} minecraft:stone`)
+    await server.command(`fill ${x + 1} ${y} ${z + 1} ${x + 1} ${y + 2} ${z + 1} minecraft:iron_ore`)
+  }
+  if (payload.scope === 'iron' || payload.scope === 'production_no_tool') {
+    await server.command('clear ResearchBot')
+    if (payload.scope === 'iron') await server.command('replaceitem entity ResearchBot weapon.mainhand minecraft:stone_pickaxe')
+    await server.command(`fill ${x + 1} ${y} ${z} ${x + 1} ${y + 2} ${z} minecraft:iron_ore`)
+  }
+  if (['production_craft', 'production_place'].includes(payload.scope)) {
+    await server.command('clear ResearchBot')
+    await server.command('give ResearchBot minecraft:iron_ingot 3')
+    await server.command('give ResearchBot minecraft:stick 2')
+    if (payload.scope === 'production_craft') await server.command(`setblock ${x + 1} ${y} ${z} minecraft:crafting_table`)
+    else await server.command('give ResearchBot minecraft:crafting_table 1')
+  }
+  if (payload.scope === 'production_furnace') {
+    await server.command('clear ResearchBot')
+    await server.command('give ResearchBot minecraft:iron_ore 1')
+    await server.command('give ResearchBot minecraft:coal 1')
+    await server.command(`setblock ${x + 1} ${y} ${z} minecraft:furnace`)
+  }
+  if (['production_no_fuel', 'production_hazard'].includes(payload.scope)) {
+    await server.command('clear ResearchBot')
+    await server.command('give ResearchBot minecraft:iron_ore 3')
+    await server.command(`setblock ${x + 1} ${y} ${z} minecraft:furnace`)
+    if (payload.scope === 'production_hazard') {
+      await server.command('give ResearchBot minecraft:coal 1')
+      await server.command(`setblock ${x} ${y - 1} ${z + 1} minecraft:lava`)
+    }
   }
   await server.command(`tp ResearchBot ${x + 0.5} ${y} ${z + 0.5}`)
   await sleep(150)

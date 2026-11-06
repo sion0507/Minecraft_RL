@@ -269,6 +269,17 @@ for line in admin:
   o.update(drops=[{'entity_id':7,'item':'oak_log','quantity':1,'position':o['position']}])
  if p.get('scope')=='empty':
   o['observed_map']=[]
+ if p.get('scope') in ['production_craft','production_place','production_furnace','iron']:
+  scope=p['scope']
+  o.update(inventory={'iron_ingot':3,'stick':2},observed_map=[])
+  if scope=='production_craft': o['observed_map']=[{'block':'crafting_table','position':[1.,64.,0.],'support':True}]
+  if scope=='production_place':
+   o['inventory']['crafting_table']=1
+   o['observed_map']=[{'block':'air','position':[1.,64.,0.],'passable':True},{'block':'stone','position':[1.,63.,0.],'support':True}]
+  if scope=='iron':
+   o.update(inventory={'stone_pickaxe':1},tool='stone_pickaxe',observed_map=[{'block':'iron_ore','position':[1.,64.,0.],'support':True}])
+  if scope=='production_furnace':
+   o.update(inventory={'iron_ore':1,'coal':1},observed_map=[{'block':'furnace','position':[1.,64.,0.],'support':True}])
  r=json.loads(sys.stdin.readline());reply(r,o)
  if not p['exposed']:
   r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];ticks=int(sys.argv[1])
@@ -294,6 +305,22 @@ for line in admin:
     n.update(inventory={'oak_log':1},drops=[])
     result['events'].append({'kind':'acquired','item':'oak_log','quantity':1,'source':'minecraft'})
   if p.get('scope')=='empty' and sys.argv[2]=='1': result['events']=[]
+  if p.get('scope') in ['production_craft','production_place','production_furnace','iron']:
+   for index in range(3 if p['scope']=='production_furnace' else 1):
+    if index:
+     r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];o=n
+     n={**o,'obs_id':'obs-'+str(index+1)}
+    ticks=200 if c['action_kind']=='wait' else 1
+    kind={'craft_batch':'crafted','place_or_equip':'placed','furnace_load':'furnace_loaded','wait':'wait','furnace_collect':'smelted','mine_visible_cluster':'acquired'}[c['action_kind']]
+    reason={'crafted':'craft_completed','placed':'place_completed','furnace_loaded':'furnace_loaded','wait':'wait_completed','smelted':'furnace_collected','acquired':'cluster_completed'}[kind]
+    item={'crafted':'iron_pickaxe','placed':'crafting_table','furnace_loaded':'iron_ore','wait':None,'smelted':'iron_ingot','acquired':'iron_ore'}[kind]
+    n.update(active_ticks=o['active_ticks']+ticks,remaining_ticks=o['remaining_ticks']-ticks,position=o['position'])
+    if kind in ['crafted','smelted','acquired']: n['inventory']={**o['inventory'],item:1}
+    if p['scope']=='production_furnace':
+     n['furnaces']=[{'position':[1.,64.,0.],'input_item':'iron_ore','input_count':1 if index==0 else 0,'fuel_item':None,'fuel_count':0,'output_item':'iron_ingot' if index==1 else None,'output_count':1 if index==1 else 0,'last_observed_tick':n['active_ticks'] if index!=1 else o['active_ticks']}]
+    result.update(observation=n,actual_ticks=ticks,path=[],reason=reason,source_obs_id=o['obs_id'],stop_evidence=[n['obs_id'],reason],distance_moved=0.,events=[{'kind':kind,'item':item,'quantity':1 if item else 0,'source':'minecraft'}])
+    reply(r,result)
+   continue
   reply(r,result)
 ''', encoding="utf-8")
     config = yaml.safe_load(Path("configs/minecraft.yaml").read_text())
@@ -305,6 +332,8 @@ for line in admin:
     expected = actual_ticks == 20 and not missing_events
     assert result.returncode == (0 if expected else 1), result.stderr
     assert records(result)[-1]["data"]["information_verified"] is expected
+    if expected:
+        assert {"craft_batch", "facility_place", "furnace_load", "furnace_collect", "iron_mining"} <= set(records(result)[-1]["data"]["scope"])
 
 
 def test_live_bridge_rejects_policy_administration_before_starting_server() -> None:

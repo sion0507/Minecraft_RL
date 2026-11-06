@@ -10,9 +10,14 @@ from .schema import Candidate, CandidateSet, Goal, Observation
 
 
 def generate_wood_candidates(observation: Observation, goal: Goal) -> CandidateSet:
+    return generate_resource_candidates(observation, goal)
+
+
+def generate_resource_candidates(observation: Observation, goal: Goal) -> CandidateSet:
     candidates: list[Candidate] = []
     remaining = goal.quantity - observation.inventory.get(goal.target, 0)
-    if not observation.remaining_ticks or remaining <= 0 or not goal.target.endswith("_log"):
+    block = "stone" if goal.target == "cobblestone" else goal.target
+    if not observation.remaining_ticks or remaining <= 0 or not (block.endswith("_log") or block in {"stone", "iron_ore"}):
         return CandidateSet(candidates=[], mask=[])
 
     def add(kind: Literal["place_or_equip", "mine_visible_cluster", "move_observed", "wait"],
@@ -37,7 +42,7 @@ def generate_wood_candidates(observation: Observation, goal: Goal) -> CandidateS
             else:
                 add("wait", {}, f"Wait for observed {drop.item} pickup")
             return CandidateSet(candidates=candidates, mask=[True] * len(candidates))
-    logs = sorted({tuple(cell.position) for cell in observation.observed_map if cell.block == goal.target and cell.visible},
+    logs = sorted({tuple(cell.position) for cell in observation.observed_map if cell.block == block and cell.visible},
                   key=lambda p: (math.dist(p, observation.position), p))
     if not logs:
         moves = generate_movement_candidates(observation)
@@ -56,8 +61,13 @@ def generate_wood_candidates(observation: Observation, goal: Goal) -> CandidateS
                     and math.dist([v + 0.5 for v in p], eye) <= 4.5
                     and p[1] >= math.floor(observation.position[1]))
         if close(target):
-            axes = [name for name in ["netherite_axe", "diamond_axe", "iron_axe", "stone_axe", "wooden_axe", "golden_axe"]
+            tools = (["netherite_axe", "diamond_axe", "iron_axe", "stone_axe", "wooden_axe", "golden_axe"] if block.endswith("_log")
+                     else ["netherite_pickaxe", "diamond_pickaxe", "iron_pickaxe", "stone_pickaxe"] +
+                     (["wooden_pickaxe", "golden_pickaxe"] if block == "stone" else []))
+            axes = [name for name in tools
                     if observation.inventory.get(name, 0)]
+            if not block.endswith("_log") and not axes:
+                continue
             if axes and observation.tool != axes[0]:
                 add("place_or_equip", {"item": axes[0]}, f"Equip {axes[0]}")
                 break
@@ -71,7 +81,7 @@ def generate_wood_candidates(observation: Observation, goal: Goal) -> CandidateS
             for count in sorted({1, len(cluster)}):
                 if len(candidates) >= 8:
                     break
-                add("mine_visible_cluster", {"block": goal.target, "blocks": [list(p) for p in cluster[:count]],
+                add("mine_visible_cluster", {"block": block, "blocks": [list(p) for p in cluster[:count]],
                                              "map_version": observation.map_version},
                     f"Mine {count} exposed {goal.target} at {list(target)} and collect its drops")
         else:

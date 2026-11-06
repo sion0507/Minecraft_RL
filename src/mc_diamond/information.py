@@ -8,6 +8,7 @@ from typing import Any
 from .episode import emit
 from .navigation import generate_movement_candidates
 from .macros import generate_wood_candidates
+from .production import generate_production_candidates
 from .rpc import EpisodeError, RpcSession
 from .schema import Candidate, ErrorInfo, Goal
 
@@ -171,13 +172,63 @@ def audit_information(session: RpcSession) -> bool:
                     "steps": len(steps), "actual_ticks": sum(row["step"]["actual_ticks"] for row in steps)})
             if macro_pair[0] != macro_pair[1]:
                 raise ValueError(f"Hidden variant changed {scope} policy evidence")
+        for scope in ["production_craft", "production_place", "production_furnace", "iron"]:
+            production_pair: list[list[dict[str, Any]]] = []
+            goal = Goal(goal_id="information-production", kind="smelt" if scope == "production_furnace" else
+                        "collect" if scope == "iron" else "craft",
+                        target="iron_ingot" if scope == "production_furnace" else "iron_ore" if scope == "iron" else "iron_pickaxe",
+                        quantity=1)
+            expected_event = {"production_craft": "crafted", "production_place": "placed",
+                              "production_furnace": "smelted", "iron": "acquired"}[scope]
+            for variant in ["ore", "lava"]:
+                prepared = session._call("information_fixture", {"variant": variant, "exposed": False, "scope": scope}, admin=True)
+                if prepared.get("fixture_ready") is not True:
+                    raise ValueError("Production fixture was not verified")
+                observation = session.policy().observe()
+                steps = []
+                for index in range(8 if scope == "production_furnace" else 1):
+                    candidates = generate_production_candidates(observation, goal)
+                    emit("information_production_observation", observation)
+                    emit("information_production_candidates", candidates)
+                    if not candidates.candidates:
+                        raise ValueError("Production candidate absent")
+                    candidate = candidates.candidates[0]
+                    step = session.policy().step(candidate)
+                    emit("information_production_step", step)
+                    if (step.invalid or step.cancelled or step.terminated or not step.stable_boundary
+                            or step.clock_mode != "paused" or not step.pause_verified
+                            or not 1 <= step.actual_ticks <= candidate.max_ticks
+                            or step.source_obs_id != observation.obs_id
+                            or step.stop_evidence != [step.observation.obs_id, step.reason]
+                            or step.map_version != step.observation.map_version
+                            or step.observation.active_ticks != observation.active_ticks + step.actual_ticks
+                            or step.observation.remaining_ticks != observation.remaining_ticks - step.actual_ticks
+                            or not step.events or any(e.source != "minecraft" for e in step.events)):
+                        raise ValueError("Production evidence mismatch")
+                    steps.append(policy_signature({"observation": observation.model_dump(mode="json"),
+                        "candidates": candidates.model_dump(mode="json"), "selected": candidate.model_dump(mode="json"),
+                        "step": step.model_dump(mode="json")}))
+                    observation = step.observation
+                    if any(e.kind == expected_event and e.quantity == 1 for e in step.events):
+                        break
+                else:
+                    raise ValueError("Production direct event absent")
+                if scope == "production_furnace" and not any(row["selected"]["action_kind"] == "furnace_load" for row in steps):
+                    raise ValueError("Furnace loading absent")
+                production_pair.append(steps)
+                evidence.append({"scope": scope, "exposed": False, "variant": variant,
+                    "input_sha256": hashlib.sha256(json.dumps(steps, sort_keys=True).encode()).hexdigest(),
+                    "steps": len(steps), "actual_ticks": sum(row["step"]["actual_ticks"] for row in steps)})
+            if production_pair[0] != production_pair[1]:
+                raise ValueError(f"Hidden variant changed {scope} policy evidence")
     except ValueError:
         error = ErrorInfo(code="invalid_step", message="Information audit evidence mismatch")
     except EpisodeError as failure:
         error = failure.error
     emit("information_summary", {"information_verified": error is None,
          "scope": ["observation", "move_observed", "mine_visible_cluster", "place_or_equip", "wait20", "wait100", "wait200",
-                   "drop_pickup", "independent_drop_wait", "zero_candidates"], "hidden_hazard_peek": False,
+                   "drop_pickup", "independent_drop_wait", "zero_candidates", "craft_batch", "facility_place",
+                   "furnace_load", "furnace_collect", "iron_mining"], "hidden_hazard_peek": False,
          "trials": evidence, "error": error.model_dump(mode="json") if error else None,
          "wall_seconds": time.monotonic() - started})
     return error is None

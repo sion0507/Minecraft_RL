@@ -1,0 +1,9 @@
+backend: rpc
+command: [node, bridge/minecraft.js, --task, C4]
+rpc_timeout_seconds: 180.0
+max_decisions: 128
+goal:
+  goal_id: smoke-iron-pickaxe
+  kind: craft
+  target: iron_pickaxe
+  quantity: 1

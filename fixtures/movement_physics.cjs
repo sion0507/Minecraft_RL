@@ -16,7 +16,7 @@ async function run (floorName, invalid = false) {
   const bot = {
     entity: { position: new Vec3(0.5, 64, 0.5), velocity: new Vec3(invalid ? 0.1 : 0, -0.0784, 0),
       onGround: true, yaw: -Math.PI / 2, pitch: 0, effects: {} },
-    jumpTicks: 0, jumpQueued: false, fireworkRocketDuration: 0, version: '1.16.5', inventory: { slots: [] },
+    jumpTicks: 0, jumpQueued: false, fireworkRocketDuration: 0, version: '1.16.5', inventory: { slots: [], items: () => [] },
     setControlState (name, value) { control[name] = value },
     async lookAt (point) { const delta = point.minus(this.entity.position); this.entity.yaw = Math.atan2(-delta.x, -delta.z) },
     blockAt (point) { return world.getBlock(point) }

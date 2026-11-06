@@ -29,6 +29,17 @@ class ObservedDrop(Contract):
     position: list[float] = Field(min_length=3, max_length=3)
 
 
+class FurnaceState(Contract):
+    position: list[float] = Field(min_length=3, max_length=3)
+    input_item: str | None
+    input_count: Count
+    fuel_item: str | None
+    fuel_count: Count
+    output_item: str | None
+    output_count: Count
+    last_observed_tick: Count
+
+
 class Observation(Contract):
     episode_id: Identifier
     attempt_id: Identifier
@@ -54,11 +65,12 @@ class Observation(Contract):
     visited: list[list[float]] = Field(default_factory=list)
     hidden_hazard_peek: Literal[False] = False
     drops: list[ObservedDrop] = Field(default_factory=list)
+    furnaces: list[FurnaceState] = Field(default_factory=list)
 
 
 class Goal(Contract):
     goal_id: Identifier
-    kind: Literal["collect"]
+    kind: Literal["collect", "craft", "smelt"]
     target: Identifier
     quantity: Positive
     source: Literal["fixed"] = "fixed"
@@ -112,7 +124,7 @@ class SelectionResult(Contract):
 
 
 class Event(Contract):
-    kind: Literal["acquired", "wait", "moved", "stopped", "mined", "equipped", "failed"]
+    kind: Literal["acquired", "wait", "moved", "stopped", "mined", "equipped", "failed", "crafted", "placed", "furnace_loaded", "furnace_collected", "smelted"]
     item: str | None = None
     quantity: Count = 0
     source: Literal["mock", "minecraft"]
@@ -190,6 +202,10 @@ class EpisodeSummary(Contract):
     actor_transitions: Literal[0] = 0
     reward_total: float
     reward_kind: Literal["smoke_acquisition_count"] = "smoke_acquisition_count"
+    provided_inventory: dict[str, Count] = Field(default_factory=dict)
+    direct_crafted: dict[str, Count] = Field(default_factory=dict)
+    direct_smelted: dict[str, Count] = Field(default_factory=dict)
+    direct_acquired: dict[str, Count] = Field(default_factory=dict)
 
 
 class RpcRequest(Contract):
@@ -214,7 +230,7 @@ class EpisodeConfig(Contract):
     backend: Literal["mock", "rpc"] = "mock"
     fixture: str | None = None
     command: list[str] | None = None
-    rpc_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    rpc_timeout_seconds: float = Field(default=5.0, gt=0, le=180)
     max_decisions: Positive = 8
     goal: Goal
 
