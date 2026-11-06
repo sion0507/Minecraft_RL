@@ -1,5 +1,17 @@
 # 실행 기록
 
+## 2026-11-06 — 개정 T05 완료·T05A 착수 가능 (구현 미착수)
+
+**완료:** 사용자 승인으로 개정한 T05 인수7항목을 충족했다. 인수 책임 문서 커밋 `f16969647cd5c2f9cb993afe20d03272de190adb`를main/origin에 푸시하고 실제원격해시 일치를 확인했다. [#6 완료 댓글](https://github.com/sion0507/Minecraft_RL/issues/6#issuecomment-6683924522)을 남기고 #6을2026-11-06T11:38:26Z에Closed 처리했다. PR/merge는 수행하지 않았다. 이 완료 상태 기록도 별도 문서 커밋으로 보존하며 실행 코드는ff75f36과 동일하다.
+
+**자연 G2는 여전히 미달이다.** 유효 기준선64결정/1778틱/철 관측·획득0·정지 인증true를 보존했고, 제외 단차의64/150틱/철0·미인증 결과와 구분했다. 성공으로 체크하지 않았으며 같은snapshot/시작점/돌곡괭이/10분에서 철 발견→적절한 도구 파괴→해당 드롭 직접 획득3의 최종 통합 책임은#8이다. #7은 기존G3와별도G2접근 확인을 맡는다.
+
+[#32](https://github.com/sion0507/Minecraft_RL/issues/32)는Open/ready-for-agent이며 실제blocked_by 조회에서 유일한 선행#6이Closed임을 확인했다. **다음 이슈 T05A에 착수해도 되는 상태다. 이번에는 구현·advance 계측·속도 개선을 시작하지 않았다.** #7/#8은Open/미구현이고 기존선행그래프를 유지한다. 기존실패회귀·최종코드63조건재인증·정보감사·관련T04/T05회귀 조건은모든본문/PLAN에 반영했다.
+
+보고서 `reports/issue-006-T05-report.pdf`2쪽과 코드가이드 `reports/issue-006-T05-code-guide.pdf`3쪽을 최신교체했다. 실제/mock/미인증/미실행·G2미달이관·제외코드·구현ff75f36/인수문서f169696·commit/push/merge/종료/ready 상태를 구분했다. 한글추출·대체문자 없음·모든사용글꼴embedded/subset/Unicode·최종5페이지렌더 가독성을 확인했다. 코드가이드는 파일/함수/시작줄·확인할로직·SHA256을 제공한다. PDF/원시/백업은Git제외,생성중간물은/tmp이며 게임재실행은없다.
+
+남은 위험: 자연G2철3 성공 가능성과 굴착 필요성은 미입증이다. 단차 실험은슬라임거리상한/인증미완료로제외했으며향후채택시별도교정/검증이필요하다. T05A는속도만개선하므로탐색문제해결을보장하지않는다. 모델/API/학습/평가·연구조건/예산변경은미실행이다. 아래 Open/종료전/미완료 문구는각게시·검증시점의 이력이다.
+
 ## 2026-11-06 — 사용자 승인에 따른 인수 재배치·최종화
 
 **현행 판단:** 자연 고정 G2 철3은 미달이며 성공으로 바꾸지 않는다. 사용자가 T05를 제작·제련·노출 철 직접 채굴/획득 연결과 검증으로 정리하고 G2를 후속 통합 인수로 이관하도록 승인했다. PLAN §5.2.1/PRD/#1/#6/#7/#8/#32를 이 기준으로 맞춘다. 아래의 #6 Open 유지·종료 금지 문구는 변경 전 이력이며 이 승인으로 대체된다. T05는 개정 기준 충족·커밋/푸시·GitHub 확인 뒤에만 완료하며 T05A 구현은 이번에 시작하지 않는다.
@@ -25,7 +37,7 @@ T05A는 #6 개정 범위 완료 뒤에만 착수하며 기존 G2 실패를 회�
 
 GitHub 반영 확인: #1/#6/#7/#8/#32 본문과 변경 댓글을 게시 후 다시 조회해 준비한 원문과 모두 일치함을 확인했다. #6 개정 인수7항목 체크, 자연 G2는 별도 미달·#8 이관 문구로 보존, #7/#8/#32 구현 항목은 미체크다. 실제 선행은 #6←#5(Closed), #32←#6(Open), #7←#5(Closed)/#32(Open), #8←#7(Open)로 기존 그래프와 일치했고 역의존은 없다. 재계산·게시 교차확인 결과는 로컬 acceptance-reallocation-check.json에 보존했다. 독립 Spec 지적0, Standards hard breach0·명확성1건(PRD/#1 과거 미검증 문단)을 해소했다.
 
-변경 댓글: [#1](https://github.com/sion0507/Minecraft_RL/issues/1#issuecomment-6683790490), [#6](https://github.com/sion0507/Minecraft_RL/issues/6#issuecomment-6683803025), [#7](https://github.com/sion0507/Minecraft_RL/issues/7#issuecomment-6683827942), [#8](https://github.com/sion0507/Minecraft_RL/issues/8#issuecomment-6683839319), [#32](https://github.com/sion0507/Minecraft_RL/issues/32#issuecomment-6683846771). 댓글 게시의 첫 sandbox 네트워크 실패는 권한 실행으로 재시도했고 게시 후 원문을 확인했다. #6은 현재 완료 처리 전 Open이며 PDF·커밋/푸시·원격 확인 뒤에만 닫는다.
+변경 댓글: [#1](https://github.com/sion0507/Minecraft_RL/issues/1#issuecomment-6683790490), [#6](https://github.com/sion0507/Minecraft_RL/issues/6#issuecomment-6683803025), [#7](https://github.com/sion0507/Minecraft_RL/issues/7#issuecomment-6683827942), [#8](https://github.com/sion0507/Minecraft_RL/issues/8#issuecomment-6683839319), [#32](https://github.com/sion0507/Minecraft_RL/issues/32#issuecomment-6683846771). 댓글 게시의 첫 sandbox 네트워크 실패는 권한 실행으로 재시도했고 게시 후 원문을 확인했다. 당시 #6은 완료 처리 전 Open이었고, 커밋/푸시·원격 확인 뒤 최상단 완료 기록과 같이 닫았다.
 
 게시·최종 문서·PDF 검수와 Git 상태는 아래 완료 확인에 기록한다. 모델/API/PPO/학습/평가·PC180시간 증액·T05A 구현은 하지 않는다. reports 두 PDF는 최신 교체하되 로컬 전용/Git 제외이며 보고서 때문에 게임을 실행하지 않는다.
 
