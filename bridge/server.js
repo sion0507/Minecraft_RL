@@ -54,6 +54,8 @@ class Server {
     const properties = await fs.readFile(path.join(this.root, 'server.properties'), 'utf8')
     if (!/^server-ip=127\.0\.0\.1$/m.test(properties)) throw new Error('Loopback binding required')
     if (!/^allow-flight=true$/m.test(properties)) throw new Error('Paused server needs allow-flight=true to avoid frozen airborne timeouts')
+    this.port = Number(properties.match(/^server-port=(\d+)$/m)?.[1] || 25565)
+    if (!Number.isInteger(this.port) || this.port < 1 || this.port > 65535) throw new Error('Invalid server port')
     // Kernel lease is released on crashes; PID files cannot safely provide that guarantee.
     this.lease = spawn('flock', ['-n', '-F', path.join(this.root, '.mc-diamond-owner'), process.execPath,
       '-e', 'process.stdout.write("locked\\n");process.stdin.resume()'], { stdio: ['pipe', 'pipe', 'ignore'] })
@@ -123,6 +125,37 @@ class Server {
     const match = output.match(/The time is (\d+)/)
     if (!match) throw new Error('Server tick query failed')
     return Number(match[1])
+  }
+
+  async step (client, ticks) {
+    if (!this.process || this.process.exitCode !== null || !Number.isInteger(ticks) || ticks < 1 || ticks > 400) throw new Error('Server step unavailable')
+    const nonce = randomUUID()
+    const child = this.process
+    return await new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeout)
+        client.removeListener('custom_payload', receive)
+        client.removeListener('end', failed)
+        child.removeListener('exit', failed)
+      }
+      const failed = () => { cleanup(); reject(new Error('Server/client exited during tick')) }
+      const receive = packet => {
+        if (packet.channel !== 'mcdiamond:tick') return
+        const fields = packet.data.toString('utf8').split(' ')
+        if (fields[0] !== nonce) return
+        cleanup()
+        const before = Number(fields[1]); const after = Number(fields[2])
+        if (fields.length !== 3 || !fields.slice(1).every(s => /^\d+$/.test(s)) ||
+          !Number.isSafeInteger(before) || !Number.isSafeInteger(after) || after < before) {
+          reject(new Error('Invalid server tick receipt'))
+        } else resolve({ before, after })
+      }
+      const timeout = setTimeout(() => { cleanup(); reject(new Error('Tick step timeout')) }, ticks * 50 + 5000)
+      client.on('custom_payload', receive)
+      client.once('end', failed)
+      child.once('exit', failed)
+      child.stdin.write('mcdiamond_step ' + ticks + ' ' + nonce + '\n')
+    })
   }
 
   async stop () {

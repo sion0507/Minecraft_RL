@@ -63,7 +63,7 @@ async function fingerprint () {
 }
 
 async function connect () {
-  bot = mineflayer.createBot({ host: '127.0.0.1', port: 25565, username: 'ResearchBot', version: '1.16.5', auth: 'offline', physicsEnabled: false, logErrors: false })
+  bot = mineflayer.createBot({ host: '127.0.0.1', port: server.port || 25565, username: 'ResearchBot', version: '1.16.5', auth: 'offline', physicsEnabled: false, logErrors: false })
   const current = bot
   connected = false
   const lost = () => { connected = false }
@@ -193,29 +193,28 @@ async function observation () {
 async function advance (ticks, walking = false) {
   if (!bot || !connected) fail('backend_error')
   if (!Number.isInteger(ticks) || ticks < 1 || ticks > 400 || !frozen) fail('invalid_request')
-  const before = await server.gameTime()
   let clientTicks = 0
+  let actual
   const limitPhysics = () => { if (++clientTicks >= ticks) bot.physicsEnabled = false }
   if (walking) bot.on('physicsTick', limitPhysics)
   bot.physicsEnabled = previousPhysics
   try {
-    await server.command('tick step ' + ticks)
-    const deadline = performance.now() + ticks * 50 + 5000
-    let after
-    do {
-      await sleep(50)
-      after = await server.gameTime()
+    // The receipt follows this tick's state packets on the same client connection.
+    const receipt = await server.step(bot._client, ticks)
+    actual = receipt.after - receipt.before
+    activeTicks += actual
+    if (actual !== ticks) throw new Error('Unexpected server tick duration')
+    const deadline = performance.now() + 5000
+    while (walking && bot.health > 0 && clientTicks < ticks) {
+      await sleep(1)
       if (performance.now() > deadline) throw new Error('Tick step timeout')
-    } while (after - before < ticks || (walking && bot.health > 0 && clientTicks < ticks))
+    }
   } finally {
     if (walking) bot.removeListener('physicsTick', limitPhysics)
     bot.clearControlStates()
     bot.physicsEnabled = false
   }
   if (!walking) await sleep(150)
-  const actual = (await server.gameTime()) - before
-  activeTicks += actual
-  if (actual !== ticks) throw new Error('Unexpected server tick duration')
   return actual
 }
 

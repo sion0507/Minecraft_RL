@@ -75,7 +75,7 @@ RPC backend는 `--admin-fd <fd>`로 전달받은 파이프에서 reset·snapshot
 
 이 작업공간에는 사용자의 EULA 동의 후 Minecraft 1.16.5, Fabric Loader 0.16.14, Carpet 1.4.44를 `worlds/server/`에 설치했습니다. Java 21.0.12.1·Node 24.20.0·Mineflayer 4.39.0에서 실제 연결을 확인했습니다. Linux의 `flock`으로 서버 디렉터리 사용을 잠급니다. 출처와 정확한 해시는 `third_party/README.md` 및 로컬 `worlds/server/installation.json`에 있습니다.
 
-서버는 `127.0.0.1:25565`에서만 열리며 로컬 봇은 `auth: offline`을 사용합니다. 계정 로그인·비밀번호·토큰은 사용하지 않습니다. Microsoft 계정 인증이나 공개 서버 운영을 검증한 결과가 아닙니다.
+서버는 loopback에서만 열리며 기본 포트는 `25565`입니다. 봇은 해당 서버의 `server.properties`의 `server-port`를 읽습니다. 별도 worktree의 동시 검증은 runtime/snapshot 복사본과 서로 다른 포트를 사용합니다(T05A 검증은 `25566`). 로컬 봇은 `auth: offline`이며 계정 로그인·비밀번호·토큰을 사용하지 않습니다. Microsoft 계정 인증이나 공개 서버 운영을 검증한 결과가 아닙니다.
 
 `worlds/server/server.properties`의 `allow-flight=true`가 필요합니다. 정지된 공중 상태를 서버의 벽시계 기반 비행 추방으로 오인하지 않게 하는 설정이며 Survival 플레이어에게 비행 능력을 지급하지 않습니다. backend는 누락 시 시작을 거부하고, 이 값도 시계 fingerprint에 포함합니다.
 
@@ -84,6 +84,25 @@ Carpet freeze만으로는 침수 중 플레이어 산소가 계속 줄었습니�
 ```bash
 python3 bridge/pausemod/build.py
 ```
+
+T05A의 `advance`에는 이 빌드에 포함된 관리자 전용 `mcdiamond_step`이 필요합니다.
+이 명령만 서버 실행 큐로 전달하고 Carpet의 정상 20틱/초 step을 요청합니다.
+틱 종료 후 블록·개체·인벤토리 패킷에 이어 같은 연결로 nonce와 전후 게임 틱을
+보냅니다. bridge는 그 수신과 보행의 클라이언트 물리 틱을 기다린 뒤 매 틱 관측하며,
+일치하지 않는 틱은 실제 경과량을 보존하고 실패합니다. 결정 경계 pause 검사는 유지합니다.
+정책 RPC에는 콘솔 명령이나 이 확인 패킷을 제공하지 않습니다. 이전 확장 jar와
+인증서를 재사용하지 말고 새로 빌드한 뒤 63조건을 인증해야 합니다.
+
+고정 관리자 장면(wait20/100/200 각3회)의 처리량은 새 출력 폴더에서 측정합니다.
+자연 과제 성공이나 모델/PPO 처리량의 검증은 아닙니다. 최종 로그 회귀는
+`--logs <JSONL 경로들>`로 같은 `벽시계=a×결정수+b×틱수` 식을 사용합니다.
+
+```bash
+uv run python tools/measure_t05a.py --output artifacts/t05a-timing-new
+```
+
+T05A 최종 코드를 T06 브랜치에 통합한 뒤에는 T06의 최종 fingerprint로
+63조건·정보 감사·관련 회귀를 다시 확인해야 합니다. T05A 인증을 승계하지 않습니다.
 
 최초 snapshot이 없는 새 설치에서만 `uv run mc-diamond prepare-world --config configs/minecraft.yaml`을 실행합니다. 기존 snapshot 덮어쓰기는 거부합니다. 이 작업공간은 C4/G1–G4를 이미 준비했습니다. 단일 자연 월드의 시드와 지상 spawn을 광석 조사 전에 정했고, G2/G3/G4의 도구 지급과 G4의 고정 지하 준비 공간은 관리자 준비로 기록했습니다. 월드·snapshot·실행 산출물은 Git에서 제외합니다.
 
