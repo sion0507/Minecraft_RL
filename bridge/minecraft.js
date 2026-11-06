@@ -339,9 +339,9 @@ function recordConsumption (ingredients) {
   }
 }
 
-function interruptReason (state, initial) {
+function interruptReason (state, initial, transit = null) {
   if (state.health <= 0) return 'death'
-  if (terrain.danger(state) || state.health < initial.health || state.oxygen < initial.oxygen) return 'observed_hazard'
+  if (terrain.danger(state, transit) || state.health < initial.health || state.oxygen < initial.oxygen) return 'observed_hazard'
   if (initial.tool && (state.tool !== initial.tool || state.tool_durability === 0)) return 'tool_broken'
   return null
 }
@@ -356,13 +356,47 @@ async function executeMacro (candidate, recoveryWait = false) {
   let invalid = false
   let distance = 0
   let pathTaken = []
+  let transit = null
+  let watch = () => null
   const events = []
   const tick = async () => {
     ticks += await advance(1, true)
     observationIndex++
     state = await observation()
     reason = interruptReason(state, ['place_or_equip', 'craft_batch', 'furnace_load', 'furnace_collect'].includes(candidate.action_kind)
-      ? { ...initial, tool: null } : initial)
+      ? { ...initial, tool: null } : initial, transit) || watch()
+  }
+  const dig = async (point, block, valid) => {
+    // Only the selected, currently exposed cell is read. No Mineflayer raycast/neighbour search.
+    const target = bot.blockAt(new Vec3(...point), false)
+    if (!target || target.name !== block) { reason = 'block_changed'; return false }
+    const required = Math.ceil(bot.digTime(target) / 50)
+    if (!Number.isFinite(required) || required > 400) { reason = 'dig_failed'; return false }
+    await bot.lookAt(new Vec3(...point).offset(0.5, 0.5, 0.5), true)
+    const packet = { location: new Vec3(...point), face: 1 }
+    bot._client.write('block_dig', { ...packet, status: 0 })
+    try {
+      for (let elapsed = 0; elapsed < required && ticks < limit && !reason; elapsed++) {
+        bot.swingArm()
+        await tick()
+        if (!reason && !valid()) reason = 'block_changed'
+      }
+      if (reason || ticks >= limit) return false
+      const broken = { block, position: point, tick: activeTicks, confirmed: false }
+      minedTargets = minedTargets.filter(target => activeTicks - target.tick <= 2)
+      minedTargets.push(broken)
+      bot._client.write('block_dig', { ...packet, status: 2 })
+      await tick()
+      if (terrain.memory.get(point.join(','))?.block === 'air') {
+        broken.confirmed = true
+        events.push(event('mined', { item: block, quantity: 1, position: point }))
+        return true
+      }
+      if (!reason) reason = 'dig_failed'
+      return false
+    } finally {
+      bot._client.write('block_dig', { ...packet, status: 1 })
+    }
   }
   const operation = async (action, confirmed = () => true) => {
     let settled = false
@@ -383,9 +417,16 @@ async function executeMacro (candidate, recoveryWait = false) {
       candidate.max_ticks === Math.min(20, budget - activeTicks) || (recoveryWait && candidate.max_ticks <= 20))
     invalid = !allowed
     if (!allowed) reason = 'invalid_wait'
-    while (!reason && ticks < limit) await tick()
+    let holding = terrain.stable(state)
+    while (!reason && ticks < limit) {
+      await tick()
+      holding &&= terrain.stable(state)
+    }
     if (!reason) reason = 'wait_completed'
     events.push(event('wait'))
+    if (holding && !recoveryWait && reason === 'wait_completed' && ticks >= 20) {
+      events.push(event('safe_hold', { quantity: ticks, position: state.position }))
+    }
   } else if (candidate.action_kind === 'craft_batch') {
     const { item, quantity, table: point } = candidate.params
     const held = inventory()
@@ -545,35 +586,7 @@ async function executeMacro (candidate, recoveryWait = false) {
     for (const point of allowed ? blocks : []) {
       if (reason || ticks >= limit) break
       if (!reachable(point)) { reason = 'block_changed'; break }
-      // Only the selected, currently exposed cell is read. No Mineflayer raycast/neighbour search.
-      const target = bot.blockAt(new Vec3(...point), false)
-      if (!target || target.name !== block) { reason = 'block_changed'; break }
-      const required = Math.ceil(bot.digTime(target) / 50)
-      if (!Number.isFinite(required) || required < 1) { reason = 'dig_failed'; break }
-      await bot.lookAt(new Vec3(...point).offset(0.5, 0.5, 0.5), true)
-      const packet = { location: new Vec3(...point), face: 1 }
-      bot._client.write('block_dig', { ...packet, status: 0 })
-      try {
-        for (let elapsed = 0; elapsed < required && ticks < limit && !reason; elapsed++) {
-          bot.swingArm()
-          await tick()
-          if (!reason && !reachable(point)) reason = 'block_changed'
-        }
-        if (!reason && ticks < limit) {
-          const broken = { block, position: point, tick: activeTicks, confirmed: false }
-          minedTargets = minedTargets.filter(target => activeTicks - target.tick <= 2)
-          minedTargets.push(broken)
-          bot._client.write('block_dig', { ...packet, status: 2 })
-          await tick()
-          if (terrain.memory.get(point.join(','))?.block === 'air') {
-            broken.confirmed = true
-            events.push(event('mined', { item: block, quantity: 1, position: point }))
-            mined.push(point)
-          } else if (!reason) reason = 'dig_failed'
-        }
-      } finally {
-        bot._client.write('block_dig', { ...packet, status: 1 })
-      }
+      if (await dig(point, block, () => reachable(point))) mined.push(point)
     }
     if (!reason && allowed && mined.length < blocks.length) reason = 'macro_tick_limit'
     if (!reason && mined.length) {
@@ -594,6 +607,106 @@ async function executeMacro (candidate, recoveryWait = false) {
       for (let n = 0; n < 20 && !reason && ticks < limit; n++) await tick()
     }
     if (!reason) reason = 'cluster_completed'
+  } else if (candidate.action_kind === 'stair_down') {
+    const { direction, stairs, stop_blocks: stopBlocks } = candidate.params
+    const allowed = exactKeys(candidate.params, ['direction', 'stairs', 'stop_blocks', 'map_version']) &&
+      Array.isArray(direction) && direction.length === 2 && direction.every(Number.isInteger) &&
+      Math.abs(direction[0]) + Math.abs(direction[1]) === 1 && [1, 2, 3, 4].includes(stairs) &&
+      Array.isArray(stopBlocks) && stopBlocks.includes('diamond_ore') &&
+      stopBlocks.every(block => typeof block === 'string' && block.endsWith('_ore')) && /_pickaxe$/.test(initial.tool)
+    if (!reason && !allowed) { invalid = true; reason = 'invalid_stair' }
+    let planned = []
+    let pending = null
+    let completed = 0
+    const known = new Set(allowed ? [...terrain.memory.values()].filter(c => stopBlocks.includes(c.block)).map(c => c.position.join(',')) : [])
+    if (allowed) watch = () => {
+      const exposure = terrain.hazardNear(planned) ?? [...terrain.memory.values()].find(c => stopBlocks.includes(c.block) && !known.has(c.position.join(',')))
+      if (!exposure) return null
+      if (!known.has(exposure.position.join(','))) {
+        known.add(exposure.position.join(','))
+        events.push(event('exposed', { item: exposure.block, position: exposure.position }))
+      }
+      return exposure.hazard ? 'observed_hazard' : 'ore_exposed'
+    }
+    const settle = async () => { for (let n = 0; n < 12 && !reason && ticks < limit && !terrain.stable(state); n++) await tick() }
+    const landed = () => {
+      if (!pending || Math.floor(state.position[1]) !== pending[1] || !terrain.stable(state)) return false
+      events.push(event('descended', { quantity: 1, position: pending }))
+      pathTaken.push(pending)
+      completed++
+      pending = transit = null
+      return true
+    }
+    while (allowed && !reason && completed < stairs && ticks < limit) {
+      await settle()
+      if (reason || ticks >= limit) break
+      const [x, y, z] = state.position.map(Math.floor)
+      const [nextX, nextZ] = [x + direction[0], z + direction[1]]
+      const column = [y + 1, y, y - 1].map(height => [nextX, height, nextZ])
+      const floor = [nextX, y - 2, nextZ]
+      planned = [...column, floor]
+      reason = watch()
+      // Top-down: only a cut cell can expose the one under it, so nothing is judged unseen.
+      while (!reason && ticks < limit) {
+        const point = column.find(p => !terrain.memory.get(p.join(','))?.passable)
+        if (!point) break
+        const id = point.join(',')
+        const cell = terrain.memory.get(id)
+        if (!cell || !terrain.visible.has(id)) reason = 'cell_unobserved'
+        else if (stopBlocks.includes(cell.block)) reason = 'ore_in_path'
+        else if (!await dig(point, cell.block, () => terrain.visible.has(id) && terrain.memory.get(id)?.block === cell.block) &&
+          reason === 'block_changed') {
+          // Falling gravel can refill or hide a cut cell; re-judge from the top on a new observation.
+          reason = null
+          await tick()
+        }
+      }
+      const target = [nextX + 0.5, y - 1, nextZ + 0.5]
+      let arrived = false
+      let idle = 0
+      while (!reason && ticks < limit) {
+        const below = terrain.memory.get(floor.join(','))
+        if (!pending && !below) {
+          // The ledge can hide the floor; inertia is ~0.2 block, so nudge one tick at a time.
+          if (terrain.stable(state)) {
+            const along = (state.position[0] - x - 0.5) * direction[0] + (state.position[2] - z - 0.5) * direction[1]
+            if (along >= 0.45) { reason = 'floor_unobserved'; break }
+            await bot.lookAt(new Vec3(target[0], state.position[1] + bot.entity.eyeHeight, target[2]), true)
+            bot.setControlState('forward', true)
+          }
+          await tick()
+          continue
+        }
+        if (!pending) {
+          if (!below.support) { reason = 'unsafe_floor'; break }
+          pending = target
+          transit = [nextX, y, nextZ].join(',')
+        }
+        arrived ||= Math.hypot(target[0] - state.position[0], target[2] - state.position[2]) < 0.15
+        if (arrived && landed()) break
+        if (!arrived) {
+          await bot.lookAt(new Vec3(target[0], state.position[1] + bot.entity.eyeHeight, target[2]), true)
+          bot.setControlState('forward', true)
+        }
+        const previous = state.position
+        await tick()
+        const travelled = Math.hypot(...state.position.map((value, axis) => value - previous[axis]))
+        distance += travelled
+        idle = travelled < 0.001 ? idle + 1 : 0
+        if (idle >= 20) reason = 'no_progress'
+      }
+    }
+    if (allowed) {
+      // A stop still ends on the ground when no observed danger forbids waiting for it.
+      const outcome = reason
+      if (!terrain.danger(state, transit)) {
+        reason = null
+        await settle()
+        reason = reason || outcome
+      }
+      landed()
+      if (!reason) reason = completed === stairs ? 'stairs_completed' : 'macro_tick_limit'
+    }
   } else {
     invalid = true
     reason = 'unsupported_action'
@@ -609,7 +722,7 @@ async function executeMacro (candidate, recoveryWait = false) {
   state = await observation()
   events.push(...drainEvents())
   if (invalid || ['output_not_ready', 'operation_failed', 'craft_unconfirmed', 'collect_unconfirmed', 'place_unconfirmed'].includes(reason)) events.push(event('failed'))
-  if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed', 'craft_completed', 'place_completed', 'furnace_loaded', 'furnace_collected'].includes(reason)) events.push(event('stopped'))
+  if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed', 'craft_completed', 'place_completed', 'furnace_loaded', 'furnace_collected', 'stairs_completed'].includes(reason)) events.push(event('stopped'))
   return stepResult(candidate, started, ticks, state, events, reason,
     { invalid, path: pathTaken, distanceMoved: distance })
 }
@@ -709,7 +822,8 @@ async function informationFixture (payload) {
     !['ore', 'lava'].includes(payload.variant) || typeof payload.exposed !== 'boolean' ||
     (Object.hasOwn(payload, 'scope') && !['wood', 'wood_tool', 'wood_break', 'wood_hazard', 'wood_drop', 'empty',
       'production', 'production_no_tool', 'production_no_fuel', 'production_hazard', 'iron',
-      'production_craft', 'production_place', 'production_furnace'].includes(payload.scope)) ||
+      'production_craft', 'production_place', 'production_furnace', 'stair', 'stair_exposed', 'stair_coal', 'stair_floor',
+      'stair_gap', 'stair_break', 'stair_limit', 'stair_budget', 'stair_no_tool', 'stair_gravel', 'stair_hold'].includes(payload.scope)) ||
     (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
   await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
   const x = Math.floor(bot.entity.position.x); const z = Math.floor(bot.entity.position.z); const y = 100
@@ -717,9 +831,14 @@ async function informationFixture (payload) {
   await server.command(`fill ${x - 9} ${y - 1} ${z - 9} ${x + 9} ${y + 6} ${z + 9} minecraft:air`)
   await server.command(`fill ${x - 9} ${y - 1} ${z - 9} ${x + 9} ${y - 1} ${z + 9} minecraft:stone`)
   await server.command(`fill ${x + 3} ${y} ${z - 8} ${x + 3} ${y + 5} ${z + 8} minecraft:stone`)
-  const target = payload.variant === 'ore' ? 'diamond_ore' : 'lava'
-  await server.command(`setblock ${x + 4} ${y} ${z} minecraft:${target}`)
-  const verified = await server.command(`execute if block ${x + 4} ${y} ${z} minecraft:${target} run say fixture_target_ok`)
+  const stair = payload.scope?.startsWith('stair')
+  // Rock east of the bot: every corridor cell stays hidden until the cell before it is cut.
+  if (stair) await server.command(`fill ${x + 1} ${y - 9} ${z - 8} ${x + 9} ${y + 5} ${z + 8} minecraft:stone`)
+  const target = payload.scope === 'stair_coal' ? 'coal_ore' : payload.variant === 'ore' ? 'diamond_ore' : 'lava'
+  const cell = ['stair_exposed', 'stair_coal'].includes(payload.scope) ? `${x + 3} ${y - 1} ${z}`
+    : payload.scope === 'stair_floor' ? `${x + 2} ${y - 3} ${z}` : `${x + 4} ${y} ${z}`
+  await server.command(`setblock ${cell} minecraft:${target}`)
+  const verified = await server.command(`execute if block ${cell} minecraft:${target} run say fixture_target_ok`)
   if (!verified.includes('fixture_target_ok')) fail('backend_error')
   if (payload.exposed) await server.command(`fill ${x + 3} ${y} ${z} ${x + 3} ${y + 2} ${z} minecraft:air`)
   else {
@@ -771,6 +890,16 @@ async function informationFixture (payload) {
       await server.command(`setblock ${x} ${y - 1} ${z + 1} minecraft:lava`)
     }
   }
+  if (stair) {
+    await server.command('clear ResearchBot')
+    const pick = payload.scope === 'stair_break' ? 'iron_pickaxe{Damage:249}' : payload.scope === 'stair_limit' ? 'stone_pickaxe' : 'iron_pickaxe'
+    if (payload.scope !== 'stair_no_tool') await server.command(`replaceitem entity ResearchBot weapon.mainhand minecraft:${pick} 1`)
+    if (payload.scope === 'stair_limit') await server.command(`fill ${x + 1} ${y - 5} ${z - 1} ${x + 5} ${y + 1} ${z + 1} minecraft:iron_block`)
+    if (payload.scope === 'stair_gap') await server.command(`fill ${x + 1} ${y - 3} ${z} ${x + 1} ${y - 2} ${z} minecraft:air`)
+    if (payload.scope === 'stair_gravel') await server.command(`fill ${x + 1} ${y + 1} ${z} ${x + 1} ${y + 3} ${z} minecraft:gravel`)
+    // Water reaches the bot only after the hold has begun: a real hazard a calm wait must not hide.
+    if (payload.scope === 'stair_hold') await server.command(`setblock ${x - 4} ${y} ${z} minecraft:water`)
+  }
   await server.command(`tp ResearchBot ${x + 0.5} ${y} ${z + 0.5}`)
   await sleep(150)
   await bot.look(0, 0, true)
@@ -794,6 +923,7 @@ async function informationFixture (payload) {
   }
   history = []
   activeTicks = observationIndex = 0
+  if (payload.scope === 'stair_budget') activeTicks = budget - 30
   return { fixture_ready: true, setup_ticks: setupTicks }
 }
 

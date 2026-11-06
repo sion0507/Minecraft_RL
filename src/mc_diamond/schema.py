@@ -70,7 +70,7 @@ class Observation(Contract):
 
 class Goal(Contract):
     goal_id: Identifier
-    kind: Literal["collect", "craft", "smelt"]
+    kind: Literal["collect", "craft", "smelt", "descend"]
     target: Identifier
     quantity: Positive
     source: Literal["fixed"] = "fixed"
@@ -124,7 +124,8 @@ class SelectionResult(Contract):
 
 
 class Event(Contract):
-    kind: Literal["acquired", "wait", "moved", "stopped", "mined", "equipped", "failed", "crafted", "placed", "furnace_loaded", "furnace_collected", "smelted"]
+    kind: Literal["acquired", "wait", "moved", "stopped", "mined", "equipped", "failed", "crafted", "placed", "furnace_loaded", "furnace_collected", "smelted",
+                  "descended", "exposed", "safe_hold"]
     item: str | None = None
     quantity: Count = 0
     source: Literal["mock", "minecraft"]

@@ -1,0 +1,9 @@
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G3]
+rpc_timeout_seconds: 180.0
+max_decisions: 128
+goal:
+  goal_id: g3-descend
+  kind: descend
+  target: safe_mining_zone
+  quantity: 1

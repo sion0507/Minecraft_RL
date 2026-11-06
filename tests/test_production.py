@@ -137,8 +137,6 @@ def test_cli_explores_unvisited_routes_when_farthest_endpoint_was_visited(tmp_pa
             for x in range(5) for y, block in [(63, "stone"), (64, "air"), (65, "air")]])
     _, output = run_production(tmp_path, fixture, target="iron_ore", kind="collect", quantity=3)
     saved = next(row["data"] for row in output if row["type"] == "candidates")
-    assert saved["candidates"], "A visited endpoint must not hide other unexplored routes"
-    assert saved["mask"] == [True]
-    candidate = saved["candidates"][0]
-    assert candidate["action_kind"] == "move_observed"
-    assert [float(int(v // 1)) for v in candidate["params"]["path"][-1]] not in fixture["initial"]["visited"]
+    moves = [c for c in saved["candidates"] if c["action_kind"] == "move_observed"]
+    assert moves, "A visited endpoint must not hide other unexplored routes"
+    assert all([float(int(v // 1)) for v in c["params"]["path"][-1]] not in fixture["initial"]["visited"] for c in moves)

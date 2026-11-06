@@ -1,6 +1,7 @@
 """Shared smoke execution flow. Research rewards and actors are subsequent work."""
 
 import json
+import math
 import time
 from collections.abc import Callable
 from typing import Literal
@@ -8,11 +9,12 @@ from typing import Literal
 from pydantic import BaseModel, ValidationError
 
 from .rpc import EpisodeError, PolicyEnvironment
-from .navigation import generate_movement_candidates
+from .navigation import SAFE_BAND, generate_descent_candidates, generate_movement_candidates
 from .macros import generate_wood_candidates
 from .production import generate_production_candidates
 from .schema import (
     Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Event, Goal, MacroEvidence, Observation, SelectionResult,
+    StepResult,
 )
 
 
@@ -31,9 +33,18 @@ def generate_candidates(observation: Observation, goal: Goal) -> CandidateSet:
     return CandidateSet(candidates=candidates, mask=[True] * len(candidates))
 
 
+def descent_completed(step: StepResult) -> bool:
+    """Iron pickaxe held through one uninterrupted 20-tick hold on observed ground at y=5-12."""
+    return (SAFE_BAND[0] <= math.floor(step.observation.position[1]) <= SAFE_BAND[1]
+            and step.stable_boundary and not step.invalid and not step.cancelled
+            and step.observation.inventory.get("iron_pickaxe", 0) >= 1
+            and any(event.kind == "safe_hold" and event.quantity >= 20 for event in step.events))
+
+
 def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 reset: Callable[[], Observation], episode_id: str, attempt_id: str,
-                *, movement: bool = False, macros: bool = False) -> EpisodeSummary:
+                *, movement: bool = False, macros: bool = False,
+                select: Callable[[CandidateSet], Candidate] = lambda saved: saved.candidates[0]) -> EpisodeSummary:
     started = time.monotonic()
     active_ticks = decisions = 0
     selection_requests = cancelled_selections = 0
@@ -70,10 +81,11 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 truncated, reason = True, "active_tick_limit"
                 break
             saved = (generate_movement_candidates(observation) if movement else
-                     (generate_wood_candidates(observation, config.goal) if config.goal.target.endswith("_log") else
+                     (generate_descent_candidates(observation) if config.goal.kind == "descend" else
+                      generate_wood_candidates(observation, config.goal) if config.goal.target.endswith("_log") else
                       generate_production_candidates(observation, config.goal)) if macros else generate_candidates(observation, config.goal))
             emit("candidates", saved)
-            candidate = saved.candidates[0] if saved.candidates else Candidate(
+            candidate = select(saved) if saved.candidates else Candidate(
                 candidate_id=f"{observation.obs_id}:wait", action_kind="wait", params={},
                 max_ticks=min(20, observation.remaining_ticks), stop_rule_id="no_candidates",
                 source_obs_id=observation.obs_id, description="Wait when no candidate is available",
@@ -155,11 +167,14 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                             "trace_mask": 0 if step.cancelled else 1,
                             "actor_exclusion_reason": "cancelled" if step.cancelled else "no_candidates" if not saved.candidates
                             else "single_candidate" if len(saved.candidates) == 1 else "smoke_selector"})
-            completion_kind = {"collect": "acquired", "craft": "crafted", "smelt": "smelted"}[config.goal.kind]
-            acquired_target += sum(event.quantity for event in step.events
-                                   if event.kind == completion_kind and event.item == config.goal.target)
-            completed = (not step.invalid and acquired_target > 0
-                         and step.observation.inventory.get(config.goal.target, 0) >= config.goal.quantity)
+            if config.goal.kind == "descend":
+                completed = descent_completed(step)
+            else:
+                completion_kind = {"collect": "acquired", "craft": "crafted", "smelt": "smelted"}[config.goal.kind]
+                acquired_target += sum(event.quantity for event in step.events
+                                       if event.kind == completion_kind and event.item == config.goal.target)
+                completed = (not step.invalid and acquired_target > 0
+                             and step.observation.inventory.get(config.goal.target, 0) >= config.goal.quantity)
             terminated, truncated, invalid, reason = step.terminated, step.truncated, step.invalid, step.reason
             observation = step.observation
             if terminated or truncated or invalid:

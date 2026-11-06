@@ -136,6 +136,15 @@ uv run python tools/verify_t05.py --output artifacts/t05-new clock information p
 
 `production_no_tool`·`production_no_fuel`·`production_hazard`는 전제조건/위험 진단용이며, 실행기의 `boundaries` 검사가 해당 행동을 명시적으로 선택해 거부·실제 시간·취소/재선택을 검사합니다. `iron`은 제공된 돌 곡괭이와 배치 철광석 진단입니다. fixture 없는 `configs/g2.yaml`만 고정 자연 G2 snapshot에서 시작하고 활성 상한 12,000틱을 유지합니다. 관리자 지원 진단을 자연 G2나 C4 성공으로 합치지 않습니다. 검사기는 G2 직접 철광석 3개 획득이 없으면 실패하며 최종 기준 C4 reset을 시도합니다. 매번 새 출력 경로를 사용합니다.
 
+하강 진단은 다음 명령을 사용합니다. `stair_down`은 선택한 방향으로 최대 4계단·400틱을 내려가며, 위 칸을 파야 아래 칸이 보이므로 숨은 공간을 미리 조회하지 않습니다. G3는 철 곡괭이 보유·y=5–12 관측 안전 지면·20틱 유지(`safe_hold`)로 완료합니다.
+
+```bash
+uv run mc-diamond smoke-macros --config configs/g3.yaml
+uv run python tools/verify_t06.py --output artifacts/t06-new clock information stairs g3 g2 g2-directions
+```
+
+`stairs`는 관리자 장면이며 자연 과제 결과가 아닙니다. `g2`·`g2-directions`는 고정 G2의 접근 가능성·철 노출·실패 구간 진단이고, 자연 철3 직접 획득은 T07 #8의 인수 조건이므로 미달해도 이 검사의 실패로 합치지 않습니다. 시계 인증 전의 실행은 `pause_verified=false`인 사전 검사입니다.
+
 ## 문서
 
 | 문서 | 내용 |
