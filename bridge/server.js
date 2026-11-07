@@ -55,7 +55,7 @@ class Server {
     if (!/^server-ip=127\.0\.0\.1$/m.test(properties)) throw new Error('Loopback binding required')
     if (!/^allow-flight=true$/m.test(properties)) throw new Error('Paused server needs allow-flight=true to avoid frozen airborne timeouts')
     this.port = Number(properties.match(/^server-port=(\d+)$/m)?.[1] || 25565)
-    if (!Number.isInteger(this.port) || this.port < 1 || this.port > 65535) throw new Error('Invalid server port')
+    if (this.port < 1 || this.port > 65535) throw new Error('Invalid server port')
     // Kernel lease is released on crashes; PID files cannot safely provide that guarantee.
     this.lease = spawn('flock', ['-n', '-F', path.join(this.root, '.mc-diamond-owner'), process.execPath,
       '-e', 'process.stdout.write("locked\\n");process.stdin.resume()'], { stdio: ['pipe', 'pipe', 'ignore'] })

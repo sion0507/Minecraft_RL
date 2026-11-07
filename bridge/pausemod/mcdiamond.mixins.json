@@ -3,6 +3,6 @@
   "package": "mcdiamond.mixin",
   "compatibilityLevel": "JAVA_8",
   "mixins": ["PlayerPause", "MovementPause", "TickReceipt", "AdminStep",
-    "ChunkStorageAccess", "EntityTrackerAccess", "TickStateAccess", "StepPayloadAccess", "ClientStep"],
+    "ChunkStorageAccess", "EntityTrackerAccess", "TickStateAccess", "StepPayloadAccess", "ClientStep", "TickWaitAccess"],
   "injectors": {"defaultRequire": 1}
 }

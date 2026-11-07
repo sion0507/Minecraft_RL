@@ -18,10 +18,11 @@ import carpet.fakes.ThreadedAnvilChunkStorageInterface;
 import mcdiamond.mixin.ChunkStorageAccess;
 import mcdiamond.mixin.EntityTrackerAccess;
 import mcdiamond.mixin.TickStateAccess;
+import mcdiamond.mixin.TickWaitAccess;
 
-/** Own extension: load snapshots without advancing them before the first request. */
+/** Own extension: load snapshots frozen, then run administrator-authorized ticks that end in a client receipt. */
 public final class PauseExtension implements ModInitializer, CarpetExtension {
-    private static String pending;
+    private static String stepNonce;
     private static long before;
     private static int ticks;
     private static boolean armed;
@@ -34,12 +35,12 @@ public final class PauseExtension implements ModInitializer, CarpetExtension {
             .then(class_2170.method_9244("ticks", IntegerArgumentType.integer(1, 400))
             .then(class_2170.method_9244("nonce", StringArgumentType.word()).executes(context -> {
                 String nonce = StringArgumentType.getString(context, "nonce");
-                if (pending != null || !TickSpeed.deeplyFrozen() ||
+                if (stepNonce != null || !TickSpeed.deeplyFrozen() ||
                     !nonce.matches("[0-9a-f-]{36}")) return 0;
                 net.minecraft.class_3222 player = context.getSource().method_9211().method_3760().method_14566("ResearchBot");
                 if (player == null) return 0;
                 ticks = IntegerArgumentType.getInteger(context, "ticks");
-                pending = nonce;
+                stepNonce = nonce;
                 stepPlayer = player;
                 armed = false;
                 player.field_13987.method_14364(new class_2658(new class_2960("mcdiamond:step_ready"),
@@ -49,19 +50,26 @@ public final class PauseExtension implements ModInitializer, CarpetExtension {
     }
 
     public static void confirmInput(net.minecraft.class_3222 player, String nonce) {
-        if (player != stepPlayer || pending == null || !pending.equals(nonce) || armed || !TickSpeed.deeplyFrozen()) return;
+        if (player != stepPlayer || stepNonce == null || !stepNonce.equals(nonce) || armed || !TickSpeed.deeplyFrozen()) return;
         before = player.field_13995.method_30002().method_8510();
         armed = true;
         TickSpeed.add_ticks_to_run_in_pause(ticks);
+        // The client 50ms physics timer and the server tick timer drift; when their phases
+        // meet, this confirmation misses the tick and the step costs 100ms. Tick now instead:
+        // that physics timer still limits active ticks to 20 per second.
+        long now = net.minecraft.class_156.method_658();
+        TickWaitAccess wait = (TickWaitAccess) player.field_13995;
+        wait.mcdiamondTickReference(now);
+        wait.mcdiamondNextTick(now);
     }
 
     public static void completedTick(MinecraftServer server) {
-        if (pending == null || !armed) return;
+        if (stepNonce == null || !armed) return;
         long after = server.method_30002().method_8510();
         if (after - before < ticks) return;
-        byte[] receipt = (pending + " " + before + " " + after).getBytes(StandardCharsets.UTF_8);
+        byte[] receipt = (stepNonce + " " + before + " " + after).getBytes(StandardCharsets.UTF_8);
         net.minecraft.class_3222 recipient = stepPlayer;
-        pending = null;
+        stepNonce = null;
         stepPlayer = null;
         armed = false;
         // Vanilla broadcasts before simulation; flush late changes without another tick.

@@ -63,7 +63,7 @@ async function fingerprint () {
 }
 
 async function connect () {
-  bot = mineflayer.createBot({ host: '127.0.0.1', port: server.port || 25565, username: 'ResearchBot', version: '1.16.5', auth: 'offline', physicsEnabled: false, logErrors: false })
+  bot = mineflayer.createBot({ host: '127.0.0.1', port: server.port, username: 'ResearchBot', version: '1.16.5', auth: 'offline', physicsEnabled: false, logErrors: false })
   const current = bot
   connected = false
   const lost = () => { connected = false }
