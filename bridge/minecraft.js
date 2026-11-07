@@ -63,7 +63,7 @@ async function fingerprint () {
 }
 
 async function connect () {
-  bot = mineflayer.createBot({ host: '127.0.0.1', port: 25565, username: 'ResearchBot', version: '1.16.5', auth: 'offline', physicsEnabled: false, logErrors: false })
+  bot = mineflayer.createBot({ host: '127.0.0.1', port: server.port, username: 'ResearchBot', version: '1.16.5', auth: 'offline', physicsEnabled: false, logErrors: false })
   const current = bot
   connected = false
   const lost = () => { connected = false }
@@ -193,29 +193,28 @@ async function observation () {
 async function advance (ticks, walking = false) {
   if (!bot || !connected) fail('backend_error')
   if (!Number.isInteger(ticks) || ticks < 1 || ticks > 400 || !frozen) fail('invalid_request')
-  const before = await server.gameTime()
   let clientTicks = 0
+  let actual
   const limitPhysics = () => { if (++clientTicks >= ticks) bot.physicsEnabled = false }
   if (walking) bot.on('physicsTick', limitPhysics)
   bot.physicsEnabled = previousPhysics
   try {
-    await server.command('tick step ' + ticks)
-    const deadline = performance.now() + ticks * 50 + 5000
-    let after
-    do {
-      await sleep(50)
-      after = await server.gameTime()
-      if (performance.now() > deadline) throw new Error('Tick step timeout')
-    } while (after - before < ticks || (walking && bot.health > 0 && clientTicks < ticks))
+    const deadline = performance.now() + 5000
+    while (walking && bot.health > 0 && clientTicks < ticks) {
+      await sleep(1)
+      if (performance.now() > deadline) throw new Error('Client physics timeout')
+    }
+    // The receipt follows this tick's state packets on the same client connection.
+    const receipt = await server.step(bot._client, ticks)
+    actual = receipt.after - receipt.before
+    activeTicks += actual
+    if (actual !== ticks) throw new Error('Unexpected server tick duration')
   } finally {
     if (walking) bot.removeListener('physicsTick', limitPhysics)
     bot.clearControlStates()
     bot.physicsEnabled = false
   }
   if (!walking) await sleep(150)
-  const actual = (await server.gameTime()) - before
-  activeTicks += actual
-  if (actual !== ticks) throw new Error('Unexpected server tick duration')
   return actual
 }
 
@@ -365,17 +364,24 @@ async function executeMacro (candidate, recoveryWait = false) {
       ? { ...initial, tool: null } : initial)
   }
   const operation = async (action, confirmed = () => true) => {
+    if (ticks >= limit) return false
     let settled = false
     let failed = false
     const pending = action().then(() => { settled = true }, () => { settled = failed = true })
-    while ((!settled || (!failed && !confirmed())) && !reason && ticks < limit) await tick()
+    await tick()
+    // Inventory RPC needs frozen I/O time, not additional simulation ticks.
+    const deadline = performance.now() + 5500
+    while ((!settled || (!failed && !confirmed())) && !reason && performance.now() < deadline) await sleep(1)
     if (!settled) {
       if (bot.currentWindow) bot.closeWindow(bot.currentWindow)
       await Promise.race([pending, sleep(5500)])
       // A pending inventory transaction must never escape into the next selection.
       if (!settled) { await pause(); fail('backend_error') }
     }
+    state = await observation()
+    reason = interruptReason(state, { ...initial, tool: null }) || reason
     if (failed && !reason) reason = 'operation_failed'
+    if (!failed && !confirmed() && !reason) reason = 'operation_unconfirmed'
     return !failed && confirmed()
   }
   if (candidate.action_kind === 'wait') {
@@ -405,6 +411,7 @@ async function executeMacro (candidate, recoveryWait = false) {
         r.delta.every(d => d.count >= 0 || definition.ingredients[bot.registry.items[d.id].name] === -d.count))
       if (!recipe || (definition.table && table?.name !== 'crafting_table')) { invalid = true; reason = 'invalid_craft' }
       else {
+        if (table) await bot.lookAt(table.position.offset(0.5, 0.5, 0.5), true)
         for (let n = 0; n < quantity / definition.count && !reason && ticks < limit; n++) {
           const before = inventory()
           const confirmed = () => (inventory()[item] || 0) - (before[item] || 0) === definition.count &&
@@ -444,6 +451,7 @@ async function executeMacro (candidate, recoveryWait = false) {
       }
       if (block?.name !== 'furnace') { invalid = true; reason = 'invalid_furnace' }
       else try {
+        await bot.lookAt(block.position.offset(0.5, 0.5, 0.5), true)
         await operation(async () => { window = await bot.openFurnace(block) })
         if (window) {
           if (loading && !reason) {
@@ -513,10 +521,10 @@ async function executeMacro (candidate, recoveryWait = false) {
           events.push(event('equipped', { item: item.name, quantity: 1 }))
           if (!reason) reason = 'equip_completed'
         } else if (!reason && ticks < limit) {
+          await bot.lookAt(new Vec3(...point).offset(0.5, 0, 0.5), true)
           const before = inventory()[item.name] || 0
-          const success = await operation(() => bot.placeBlock(bot.blockAt(new Vec3(...floor), false), new Vec3(0, 1, 0)))
-          // Block acknowledgement can arrive before the matching inventory update.
-          while (success && !reason && ticks < limit && (inventory()[item.name] || 0) === before) await tick()
+          const success = await operation(() => bot.placeBlock(bot.blockAt(new Vec3(...floor), false), new Vec3(0, 1, 0)),
+            () => before - (inventory()[item.name] || 0) === 1)
           state = await observation()
           if (success && terrain.memory.get(point.join(','))?.block === item.name && before - (inventory()[item.name] || 0) === 1) {
             events.push(event('placed', { item: item.name, quantity: 1, position: point }))
@@ -608,7 +616,7 @@ async function executeMacro (candidate, recoveryWait = false) {
   history = [...history.slice(-15), candidate.action_kind + ':' + reason]
   state = await observation()
   events.push(...drainEvents())
-  if (invalid || ['output_not_ready', 'operation_failed', 'craft_unconfirmed', 'collect_unconfirmed', 'place_unconfirmed'].includes(reason)) events.push(event('failed'))
+  if (invalid || ['output_not_ready', 'operation_failed', 'operation_unconfirmed', 'craft_unconfirmed', 'collect_unconfirmed', 'place_unconfirmed'].includes(reason)) events.push(event('failed'))
   if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed', 'craft_completed', 'place_completed', 'furnace_loaded', 'furnace_collected'].includes(reason)) events.push(event('stopped'))
   return stepResult(candidate, started, ticks, state, events, reason,
     { invalid, path: pathTaken, distanceMoved: distance })
@@ -689,7 +697,8 @@ async function clockTrial (payload) {
   if (payload.scene === 'fire') await server.command(`setblock ${x} ${y} ${z} minecraft:fire`)
   if (payload.scene === 'fall') await server.command(`tp ResearchBot ${x + 0.5} ${y + 4} ${z + 0.5}`)
   const start = performance.now()
-  const executedTicks = await advance(payload.scene === 'fall' ? 1 : payload.scene === 'fire' ? 25 : 5)
+  // Falling must hold exactly one client physics tick; only a fenced advance guarantees it.
+  const executedTicks = await advance(payload.scene === 'fall' ? 1 : payload.scene === 'fire' ? 25 : 5, payload.scene === 'fall')
   await pause()
   const before = await sample()
   if (payload.scene === 'furnace') before.server.furnace = await data(furnace)
@@ -747,7 +756,8 @@ async function informationFixture (payload) {
   if (payload.scope === 'iron' || payload.scope === 'production_no_tool') {
     await server.command('clear ResearchBot')
     if (payload.scope === 'iron') await server.command('replaceitem entity ResearchBot weapon.mainhand minecraft:stone_pickaxe')
-    await server.command(`fill ${x + 1} ${y} ${z} ${x + 1} ${y + 2} ${z} minecraft:iron_ore`)
+    // The one-item audit must leave headroom to approach its naturally scattered drop.
+    await server.command(`fill ${x + 1} ${y} ${z} ${x + 1} ${y + (payload.scope === 'iron' ? 0 : 2)} ${z} minecraft:iron_ore`)
   }
   if (['production_craft', 'production_place'].includes(payload.scope)) {
     await server.command('clear ResearchBot')

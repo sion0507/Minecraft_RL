@@ -94,7 +94,9 @@ def main() -> None:
                     assert any(step["reason"] == "observed_hazard" and
                                any(e["kind"] == "mined" for e in step["events"]) for step in steps)
                 else:
-                    assert summary["goal_completed"] and summary["reward_total"] == 1
+                    # The drop's random offset can leave no pickup candidate, so wood_break may mine both logs.
+                    acquired = sum(e["quantity"] for s in steps for e in s["events"] if e["kind"] == "acquired")
+                    assert summary["goal_completed"] and summary["reward_total"] == (acquired if scope == "wood_break" else 1) >= 1
                     assert code == (0 if summary["pause_verified"] else 1)
                     if scope == "wood_break":
                         assert any(step["reason"] == "tool_broken" and
