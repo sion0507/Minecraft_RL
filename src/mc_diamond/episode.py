@@ -34,7 +34,7 @@ def generate_candidates(observation: Observation, goal: Goal) -> CandidateSet:
 
 
 def descent_completed(step: StepResult) -> bool:
-    """Iron pickaxe held through one uninterrupted 20-tick hold on observed ground at y=5-12."""
+    """Iron pickaxe carried (inventory, not hand) through one uninterrupted 20-tick hold on observed ground at y=5-12."""
     return (SAFE_BAND[0] <= math.floor(step.observation.position[1]) <= SAFE_BAND[1]
             and step.stable_boundary and not step.invalid and not step.cancelled
             and step.observation.inventory.get("iron_pickaxe", 0) >= 1

@@ -308,7 +308,7 @@ for line in admin:
     result['events'].append({'kind':'acquired','item':'oak_log','quantity':1,'source':'minecraft'})
   if p.get('scope')=='empty' and sys.argv[2]=='1': result['events']=[]
   if str(p.get('scope')).startswith('stair'):
-   for index in range(2 if p['scope']=='stair_exposed' else 1):
+   for index in range(2 if p['scope'] in ('stair_exposed','stair_iron') else 1):
     if index:
      r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];o=n
      n={**o,'obs_id':'obs-'+str(index+1)}
@@ -316,6 +316,8 @@ for line in admin:
     n.update(active_ticks=o['active_ticks']+40,remaining_ticks=o['remaining_ticks']-40)
     result.update(observation=n,actual_ticks=40,path=[],reason=reason,source_obs_id=o['obs_id'],stop_evidence=[n['obs_id'],reason],
       distance_moved=0.,events=[{'kind':'descended','quantity':1,'source':'minecraft'}]*c['params']['stairs'])
+    if reason=='ore_exposed':
+     result['events']=result['events']+[{'kind':'exposed','item':c['params']['stop_blocks'][-1],'position':[4.,99.,0.],'source':'minecraft'}]
     reply(r,result)
    continue
   if p.get('scope') in ['production_craft','production_place','production_furnace','iron']:
@@ -346,7 +348,7 @@ for line in admin:
     assert result.returncode == (0 if expected else 1), result.stderr
     assert records(result)[-1]["data"]["information_verified"] is expected
     if expected:
-        assert {"craft_batch", "facility_place", "furnace_load", "furnace_collect", "iron_mining", "stair_down", "stair_exposure"} <= set(
+        assert {"craft_batch", "facility_place", "furnace_load", "furnace_collect", "iron_mining", "stair_down", "stair_exposure", "stair_iron_exposure"} <= set(
             records(result)[-1]["data"]["scope"])
 
 

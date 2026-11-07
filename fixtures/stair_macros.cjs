@@ -215,6 +215,17 @@ async function main () {
     assert.equal(step.reason, 'stairs_completed')
     assert.deepEqual(s.dug, [[1, 66, 0], [1, 65, 0], [1, 65, 0], [1, 64, 0]], 'the refilled cell is cut again first')
   }
+  for (const [label, maxTicks, start] of [['macro cap', 10, null], ['active budget', 400, 'budget - 10']]) {
+    // A refill seen on the cap's last tick ends the macro there; re-judging must not buy one more tick.
+    let ticks = 0
+    const s = scene({ digTicks: 6 })
+    if (start) vm.runInContext(`activeTicks = ${start}`, s.c)
+    s.c.afterTick = () => { if (++ticks === 10) s.changed.set('1,65,0', 'gravel') }
+    const step = await s.stair({ stairs: 1 }, maxTicks)
+    assert.equal(step.actual_ticks, 10, label)
+    assert.equal(step.reason, start ? 'active_tick_limit' : 'macro_tick_limit', label)
+    assert.equal(vm.runInContext('budget - activeTicks', s.c), start ? 0 : vm.runInContext('budget', s.c) - 10, label)
+  }
   {
     // The block is gone from the server view but not yet from memory: retries must spend ticks, not spin.
     const s = scene()

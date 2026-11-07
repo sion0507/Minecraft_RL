@@ -54,16 +54,15 @@ def access_report(path: Path) -> dict[str, Any]:
     for cell in final["observed_map"]:
         if cell["block"].endswith("_ore"):
             ores[cell["block"]] = ores.get(cell["block"], 0) + 1
-    def lowest(item: str) -> float | None:
-        heights = [row["y"] for row in timeline if any(name == item for name, _ in row["exposed"])]
-        return max(heights) if heights else None
+    def first_exposed(item: str) -> float | None:
+        return next((row["y"] for row in timeline if any(name == item for name, _ in row["exposed"])), None)
     return {"start": first["position"], "start_inventory": first["inventory"], "final": final["position"],
             "lowest_y": min([first["position"][1], *(row["y"] for row in timeline)]),
             "active_ticks": final["active_ticks"], "wall_seconds": sum(s["wall_seconds"] for s in steps), "decisions": len(steps),
             "reasons": reasons, "stairs": sum(e["kind"] == "descended" for s in steps for e in s["events"]),
             "mined": sum(e["kind"] == "mined" for s in steps for e in s["events"]),
             "observed_cells": len(final["observed_map"]), "visited": len(final["visited"]), "observed_ores": ores,
-            "first_iron_exposed_at_y": lowest("iron_ore"), "first_diamond_exposed_at_y": lowest("diamond_ore"),
+            "first_iron_exposed_at_y": first_exposed("iron_ore"), "first_diamond_exposed_at_y": first_exposed("diamond_ore"),
             "final_inventory": final["inventory"], "final_tool": final["tool"], "final_durability": final["tool_durability"],
             "unstable_stops": sum(not s["stable_boundary"] for s in steps), "timeline": timeline}
 

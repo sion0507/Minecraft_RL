@@ -91,9 +91,20 @@ async function connect () {
         position: entity.position.toArray(), collected: false, target })
     }
   })
+  // stderr diagnostics only (#8 acquisition evidence): a merged stack shows up as a larger pickup plus a tracked drop that vanished.
+  const diagnose = (kind, drop, details = {}) => process.stderr.write(JSON.stringify({ diagnostic: kind, item: drop.item,
+    tracked: drop.quantity, active_ticks: activeTicks, ...details }) + '\n')
   current.on('playerCollect', (collector, collected) => {
     eventCount++
-    if (collector.id === current.entity.id && drops.has(collected.id)) drops.get(collected.id).collected = true
+    const drop = drops.get(collected.id)
+    if (collector.id !== current.entity.id || !drop) return
+    drop.collected = true
+    const count = collected.getDroppedItem?.()?.count
+    if (count !== undefined && count !== drop.quantity) diagnose('drop_count_mismatch', drop, { collected: count })
+  })
+  current.on('entityGone', entity => {
+    const drop = drops.get(entity.id)
+    if (drop && !drop.collected) diagnose('drop_gone_uncollected', drop)
   })
   await sleep(150)
 }
@@ -370,7 +381,8 @@ async function executeMacro (candidate, recoveryWait = false) {
     const target = bot.blockAt(new Vec3(...point), false)
     if (!target || target.name !== block) { reason = 'block_changed'; return false }
     const required = Math.ceil(bot.digTime(target) / 50)
-    if (!Number.isFinite(required) || required > 400) { reason = 'dig_failed'; return false }
+    // T05 rejects zero-time digs; no macro may exceed 400 ticks, so a longer dig can never finish.
+    if (!Number.isFinite(required) || required < 1 || required > 400) { reason = 'dig_failed'; return false }
     await bot.lookAt(new Vec3(...point).offset(0.5, 0.5, 0.5), true)
     const packet = { location: new Vec3(...point), face: 1 }
     bot._client.write('block_dig', { ...packet, status: 0 })
@@ -666,7 +678,7 @@ async function executeMacro (candidate, recoveryWait = false) {
           reason === 'block_changed') {
           // Falling gravel can refill or hide a cut cell; re-judge from the top on a new observation.
           reason = null
-          await tick()
+          if (ticks < limit) await tick()
         }
       }
       const target = [nextX + 0.5, y - 1, nextZ + 0.5]
@@ -832,7 +844,7 @@ async function informationFixture (payload) {
     (Object.hasOwn(payload, 'scope') && !['wood', 'wood_tool', 'wood_break', 'wood_hazard', 'wood_drop', 'empty',
       'production', 'production_no_tool', 'production_no_fuel', 'production_hazard', 'iron',
       'production_craft', 'production_place', 'production_furnace', 'stair', 'stair_exposed', 'stair_coal', 'stair_floor',
-      'stair_gap', 'stair_break', 'stair_limit', 'stair_budget', 'stair_no_tool', 'stair_gravel', 'stair_hold'].includes(payload.scope)) ||
+      'stair_gap', 'stair_break', 'stair_limit', 'stair_budget', 'stair_no_tool', 'stair_gravel', 'stair_hold', 'stair_iron'].includes(payload.scope)) ||
     (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
   await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
   const x = Math.floor(bot.entity.position.x); const z = Math.floor(bot.entity.position.z); const y = 100
@@ -843,8 +855,8 @@ async function informationFixture (payload) {
   const stair = payload.scope?.startsWith('stair')
   // Rock east of the bot: every corridor cell stays hidden until the cell before it is cut.
   if (stair) await server.command(`fill ${x + 1} ${y - 9} ${z - 8} ${x + 9} ${y + 5} ${z + 8} minecraft:stone`)
-  const target = payload.scope === 'stair_coal' ? 'coal_ore' : payload.variant === 'ore' ? 'diamond_ore' : 'lava'
-  const cell = ['stair_exposed', 'stair_coal'].includes(payload.scope) ? `${x + 3} ${y - 1} ${z}`
+  const target = payload.scope === 'stair_coal' ? 'coal_ore' : payload.variant === 'lava' ? 'lava' : payload.scope === 'stair_iron' ? 'iron_ore' : 'diamond_ore'
+  const cell = ['stair_exposed', 'stair_coal', 'stair_iron'].includes(payload.scope) ? `${x + 3} ${y - 1} ${z}`
     : payload.scope === 'stair_floor' ? `${x + 2} ${y - 3} ${z}` : `${x + 4} ${y} ${z}`
   await server.command(`setblock ${cell} minecraft:${target}`)
   const verified = await server.command(`execute if block ${cell} minecraft:${target} run say fixture_target_ok`)
