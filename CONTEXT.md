@@ -1,20 +1,26 @@
-# T05A(#32) 구현·최종 실제 검증 진행 중
+# T05A #32 영속 worktree 복구·최종 실제 검증
 
-현재 사용자 지시로 implement 스킬을 적용해 #32를 구현한다. 아래 과거의 T05A
-착수 금지는 해제됐다. main4694d54에서 전용 branch issue-32-t05a, 별도 worktree
-/tmp/Minecraft_learning-t05a-32를 생성했다. main/T06은 읽기 전용이며 별도 서버/복사
-snapshot과 포트25566을 사용한다. #7을 수정/완료하지 않는다.
+사용자의 재개 지시로 implement를 계속 적용한다. main/T06은 읽기 전용이며
+#7을 수정/완료하지 않는다. 이전 /tmp worktree와 원시는 현재 없어서 재사용하지 않는다.
+보존된787712f에서 새 branch issue-32-t05a-resume, 영속 worktree
+/home/sion/.codex/worktrees/327b/Minecraft_learning을 생성했다. 이후 명령은 이 경로에서만 실행한다.
 
-- 코드3284ba0 커밋. push/merge/이슈 종료 미실행. 최신 상태는 git log/status 확인.
-- 같은 장면960틱: a1.174859334,b.199932601 → a1.195367608,b.050001196.
-  최종T05/T04로그 기준선은 a1.225208660,b.199272347. 중간 b.100186100은 미달 시도다.
-- 새 step/서버 말미 FIFO receipt·보행physics상한·매틱중단·pause 유지. mod재빌드
-  SHA256 688f082452c70ba97fe644a2525caf2788693d5d4b6ad5d3c24360d265c01810.
-- artifacts/issue-32/final-t05/의 clock information production boundaries 실행 중.
-  현재 63조건 완료 전이다. 실제 서버 프로세스와 출력 확인 후 중복 실행하지 않는다.
-  다음 final-t04 information macros, 별도 g2(기존실패 exit1/assert 유지), 전체pytest/mypy.
-- Standards 독립 지적0, Spec 진행 중. 검토·결과 비교·PDF2종·문서최종커밋 남음.
-- 이후 T06에 최종 #32 코드 통합과 각 최종 fingerprint 재인증 필요.
+- main 기준4694d54, 보존 구현3284ba0→787712f. 마지막 미커밋 시설I/O 수정·회귀는
+  대화 패치에서 복원했다. 현재 HEAD/미커밋 상태는 git log/status로 확인한다.
+  push/merge/PR/이슈 종료는 요청되지 않았고 수행하지 않는다.
+- 서버/snapshot/Node 환경을 별도 복사, 전용 포트25566과 uv 환경 설치 완료.
+  새 mod hash c0ff66d5a455075e98ae3fea92ea94d520eaa9909c577b36878626486bbee3fe.
+- 새 변경 전960틱 실제계측 a1.193834879,b.199745351. 유효 최종T05/T04 로그10개
+  회귀 a1.225208660,b.199272347. artifacts/issue-32/recovery/{before-fixed,final-log-fit}.
+- 복원 개별pytest11통과7.98초/mypy22. 새 전체pytest79통과24.41초,
+  전체mypy결과는 recovery/mypy.txt 확인. 이전 소실 인증/원시를 승계하지 않는다.
+- 최종코드 커밋 고정 뒤 final-speed→final-sync→final-t05(clock information
+  production boundaries)→final-t04(information macros)→별도g2(원래assert/exit1유지).
+  실제 서버는 순차 실행하고 원시/results/reset/새fingerprint를 직접 검토한다.
+- 새 속도·시계·정보/T04/T05/G2·독립Standards/Spec·PDF2종·최종문서커밋 남음.
+  PDF 중간파일은/tmp, 보고서는 reports/에 최신PDF2개만/Git제외.
+- 이후 T06에 최종 #32 코드를 통합하고 해당 최종 fingerprint로63조건·감사·회귀를
+  새로 수행해야 한다. 자연G2철3의 최종 통합 책임은#8이며 기존실패를 성공으로 쓰지 않는다.
 
 ## 아래는 이전 T05 완료 기록
 

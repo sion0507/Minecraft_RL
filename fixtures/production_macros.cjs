@@ -18,7 +18,7 @@ function setup () {
       inventory:{items:()=>Object.entries(counts).map(([name,count])=>({name,count})),emptySlotCount:()=>20},
       blockAt:p=>{assertPublic(p); return table},
       recipesFor:(id,meta,count,table)=>require('prismarine-recipe')('1.16.5').Recipe.find(id,meta),
-      craft:async(recipe,n)=>new Promise(resolve=>{completion=()=>{
+      lookAt:async()=>{},craft:async(recipe,n)=>new Promise(resolve=>{completion=()=>{
         for(const d of recipe.delta){const name=bot.registry.items[d.id].name; counts[name]=(counts[name]||0)+d.count*n}
         completion=null; resolve()
       }}),clearControlStates(){},heldItem:null}
@@ -89,7 +89,7 @@ async function main () {
     assert.equal(rejected.actual_ticks,1)
     assert.equal(rejected.events.some(e=>e.kind==='crafted'),false)
   }
-  for(const scenario of ['place','place_late','load','load_late','load_window','collect','collect_late','collect_window','no_fuel','no_tool','interrupted']) {
+  for(const scenario of ['place','place_late','load','load_late','load_unconfirmed','load_window','collect','collect_late','collect_window','no_fuel','no_tool','interrupted']) {
     const c=setup()
     c.scenario=scenario
     vm.runInContext(`
@@ -101,7 +101,7 @@ async function main () {
       bot.blockAt=p=>{assertPublic(p);return {name:terrain.memory.get(p.toArray().join(',')).block,position:p}}
       bot.equip=async item=>{bot.heldItem=item;state.tool=item.name}
       bot.placeBlock=async(ref,face)=>{const p=ref.position.plus(face);terrain.memory.get(p.toArray().join(',')).block='crafting_table';
-        if(scenario==='place_late'){let delay=2;completion=()=>{if(!--delay){counts.crafting_table--;completion=null}}}else counts.crafting_table--}
+        if(scenario==='place_late')setTimeout(()=>counts.crafting_table--,2);else counts.crafting_table--}
       const playerStock=scenario.endsWith('_window')?{...counts}:counts
       const furnace={slots:[null,null,scenario.startsWith('collect')?{name:'iron_ingot',count:3}:null],
         items:()=>Object.entries(playerStock).map(([name,count])=>({name,count})),
@@ -109,13 +109,14 @@ async function main () {
         putFuel:async(id,meta,n)=>{furnace.slots[1]={name:'coal',count:n};spend('coal',n)},
         putInput:async(id,meta,n)=>{furnace.slots[0]={name:'iron_ore',count:n};spend('iron_ore',n)}}
       function spend(name,n){
-        if(scenario==='load_late'){let delay=2;completion=()=>{if(!--delay){playerStock[name]-=n;completion=null}}}else playerStock[name]-=n
+        if(scenario==='load_unconfirmed'&&name==='coal')return
+        if(scenario==='load_late')setTimeout(()=>{playerStock[name]-=n},2);else playerStock[name]-=n
       }
       bot.openFurnace=async()=>{bot.currentWindow=furnace;return furnace}
       bot.closeWindow=()=>{Object.assign(counts,playerStock);bot.currentWindow=null};bot._syncWindow=async()=>{}
       bot.transfer=async options=>{
         const apply=()=>{playerStock.iron_ingot+=options.count;furnace.slots[2].count-=options.count}
-        if(scenario==='collect_late'){let delay=2;completion=()=>{if(!--delay){apply();completion=null}}}else apply()
+        if(scenario==='collect_late')setTimeout(apply,2);else apply()
       }
       if(scenario==='interrupted')advance=async n=>{activeTicks+=n;if(completion)completion();state.health=0;return n}
       var selected=candidate()
@@ -128,7 +129,12 @@ async function main () {
       }
     `,c)
     const step=await c.dispatch({request_id:scenario,method:'step',payload:{candidate:c.selected}},false)
-    if(scenario==='no_fuel'||scenario==='no_tool') {
+    if(scenario==='load_unconfirmed') {
+      assert.equal(step.reason,'operation_unconfirmed')
+      assert.equal(step.observation.inventory.iron_ore,3,'unconfirmed fuel must stop before input transfer')
+      assert.equal(step.events.some(e=>e.kind==='furnace_loaded'),false)
+      assert.equal(step.events.some(e=>e.kind==='failed'),true,'unconfirmed I/O preserves failure evidence')
+    } else if(scenario==='no_fuel'||scenario==='no_tool') {
       assert.equal(step.invalid,true,scenario)
       assert.equal(step.events.some(e=>['crafted','furnace_loaded','mined'].includes(e.kind)),false)
     } else if(scenario==='interrupted') {
@@ -147,6 +153,17 @@ async function main () {
         assert.equal(collected.events.filter(e=>e.kind==='smelted').reduce((n,e)=>n+e.quantity,0),2)
       }
     }
+  }
+  {
+    const c=setup()
+    vm.runInContext(`
+      bot.craft=async()=>{await new Promise(resolve=>setTimeout(resolve,15));
+        counts.iron_ingot=0;counts.stick=0;counts.iron_pickaxe=1}
+    `,c)
+    const step=await c.dispatch({request_id:'network-latency',method:'step',payload:{candidate:c.candidate()}},false)
+    assert.equal(step.actual_ticks,1,'network-only completion must not add active simulation ticks')
+    assert.equal(step.reason,'craft_completed')
+    assert.equal(step.observation.inventory.iron_pickaxe,1)
   }
   process.stdout.write(JSON.stringify({passed:true})+'\n')
 }

@@ -364,17 +364,24 @@ async function executeMacro (candidate, recoveryWait = false) {
       ? { ...initial, tool: null } : initial)
   }
   const operation = async (action, confirmed = () => true) => {
+    if (ticks >= limit) return false
     let settled = false
     let failed = false
     const pending = action().then(() => { settled = true }, () => { settled = failed = true })
-    while ((!settled || (!failed && !confirmed())) && !reason && ticks < limit) await tick()
+    await tick()
+    // Inventory RPC needs frozen I/O time, not additional simulation ticks.
+    const deadline = performance.now() + 5500
+    while ((!settled || (!failed && !confirmed())) && !reason && performance.now() < deadline) await sleep(1)
     if (!settled) {
       if (bot.currentWindow) bot.closeWindow(bot.currentWindow)
       await Promise.race([pending, sleep(5500)])
       // A pending inventory transaction must never escape into the next selection.
       if (!settled) { await pause(); fail('backend_error') }
     }
+    state = await observation()
+    reason = interruptReason(state, { ...initial, tool: null }) || reason
     if (failed && !reason) reason = 'operation_failed'
+    if (!failed && !confirmed() && !reason) reason = 'operation_unconfirmed'
     return !failed && confirmed()
   }
   if (candidate.action_kind === 'wait') {
@@ -404,6 +411,7 @@ async function executeMacro (candidate, recoveryWait = false) {
         r.delta.every(d => d.count >= 0 || definition.ingredients[bot.registry.items[d.id].name] === -d.count))
       if (!recipe || (definition.table && table?.name !== 'crafting_table')) { invalid = true; reason = 'invalid_craft' }
       else {
+        if (table) await bot.lookAt(table.position.offset(0.5, 0.5, 0.5), true)
         for (let n = 0; n < quantity / definition.count && !reason && ticks < limit; n++) {
           const before = inventory()
           const confirmed = () => (inventory()[item] || 0) - (before[item] || 0) === definition.count &&
@@ -443,6 +451,7 @@ async function executeMacro (candidate, recoveryWait = false) {
       }
       if (block?.name !== 'furnace') { invalid = true; reason = 'invalid_furnace' }
       else try {
+        await bot.lookAt(block.position.offset(0.5, 0.5, 0.5), true)
         await operation(async () => { window = await bot.openFurnace(block) })
         if (window) {
           if (loading && !reason) {
@@ -512,10 +521,10 @@ async function executeMacro (candidate, recoveryWait = false) {
           events.push(event('equipped', { item: item.name, quantity: 1 }))
           if (!reason) reason = 'equip_completed'
         } else if (!reason && ticks < limit) {
+          await bot.lookAt(new Vec3(...point).offset(0.5, 0, 0.5), true)
           const before = inventory()[item.name] || 0
-          const success = await operation(() => bot.placeBlock(bot.blockAt(new Vec3(...floor), false), new Vec3(0, 1, 0)))
-          // Block acknowledgement can arrive before the matching inventory update.
-          while (success && !reason && ticks < limit && (inventory()[item.name] || 0) === before) await tick()
+          const success = await operation(() => bot.placeBlock(bot.blockAt(new Vec3(...floor), false), new Vec3(0, 1, 0)),
+            () => before - (inventory()[item.name] || 0) === 1)
           state = await observation()
           if (success && terrain.memory.get(point.join(','))?.block === item.name && before - (inventory()[item.name] || 0) === 1) {
             events.push(event('placed', { item: item.name, quantity: 1, position: point }))
@@ -607,7 +616,7 @@ async function executeMacro (candidate, recoveryWait = false) {
   history = [...history.slice(-15), candidate.action_kind + ':' + reason]
   state = await observation()
   events.push(...drainEvents())
-  if (invalid || ['output_not_ready', 'operation_failed', 'craft_unconfirmed', 'collect_unconfirmed', 'place_unconfirmed'].includes(reason)) events.push(event('failed'))
+  if (invalid || ['output_not_ready', 'operation_failed', 'operation_unconfirmed', 'craft_unconfirmed', 'collect_unconfirmed', 'place_unconfirmed'].includes(reason)) events.push(event('failed'))
   if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed', 'craft_completed', 'place_completed', 'furnace_loaded', 'furnace_collected'].includes(reason)) events.push(event('stopped'))
   return stepResult(candidate, started, ticks, state, events, reason,
     { invalid, path: pathTaken, distanceMoved: distance })
