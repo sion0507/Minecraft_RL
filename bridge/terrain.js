@@ -92,9 +92,16 @@ class Terrain {
     return true
   }
 
-  danger (state) {
-    if (state.on_fire || state.in_liquid || state.health <= 0 || !this.safe(state.position)) return true
+  // `transit` is the one open cell a committed stair crosses before landing on its observed floor.
+  danger (state, transit = null) {
+    const standing = this.safe(state.position) || key(state.position.map(Math.floor)) === transit
+    if (state.on_fire || state.in_liquid || state.health <= 0 || !standing) return true
     return [...this.memory.values()].some(c => c.hazard && Math.hypot(c.position[0] + 0.5 - state.position[0], c.position[1] - state.position[1], c.position[2] + 0.5 - state.position[2]) < 1.5)
+  }
+
+  // Remembered hazard touching any planned cell. Memory only: never a peek past a surface.
+  hazardNear (cells) {
+    return [...this.memory.values()].find(c => c.hazard && cells.some(p => p.every((v, i) => Math.abs(v - c.position[i]) <= 1)))
   }
 
   stable (state) {

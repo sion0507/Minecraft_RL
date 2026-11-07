@@ -8,11 +8,10 @@ from typing import Any, Literal
 from pydantic import JsonValue
 
 from .macros import generate_resource_candidates
-from .navigation import observed_routes
+from .navigation import PICKS, observed_routes
 from .schema import Candidate, CandidateSet, Goal, Observation
 
 RECIPES: list[dict[str, Any]] = json.loads(files("mc_diamond").joinpath("recipes.json").read_text())
-PICKS = ["netherite_pickaxe", "diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe", "golden_pickaxe"]
 FUELS = {"coal": 1600, "charcoal": 1600, **{r["item"]: 300 for r in RECIPES if r["item"].endswith("_planks")}}
 
 

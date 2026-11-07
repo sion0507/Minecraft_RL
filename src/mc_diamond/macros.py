@@ -1,11 +1,11 @@
 """Wood candidates derived only from the saved public observation."""
 
 import math
-from typing import Literal, cast
+from typing import Literal
 
 from pydantic import JsonValue
 
-from .navigation import generate_movement_candidates, observed_routes
+from .navigation import descent_choices, fresh_movement_candidates, observed_routes
 from .schema import Candidate, CandidateSet, Goal, Observation
 
 
@@ -19,6 +19,10 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
     block = "stone" if goal.target == "cobblestone" else goal.target
     if not observation.remaining_ticks or remaining <= 0 or not (block.endswith("_log") or block in {"stone", "iron_ore"}):
         return CandidateSet(candidates=[], mask=[])
+
+    def search() -> CandidateSet:
+        found = descent_choices(observation, [block]) if block == "iron_ore" else fresh_movement_candidates(observation)
+        return CandidateSet(candidates=found, mask=[True] * len(found))
 
     def add(kind: Literal["place_or_equip", "mine_visible_cluster", "move_observed", "wait"],
             params: dict[str, JsonValue], description: str) -> None:
@@ -45,10 +49,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
     logs = sorted({tuple(cell.position) for cell in observation.observed_map if cell.block == block and cell.visible},
                   key=lambda p: (math.dist(p, observation.position), p))
     if not logs:
-        moves = generate_movement_candidates(observation)
-        fresh = [candidate for candidate in moves.candidates if
-                 [float(math.floor(v)) for v in cast(list[list[float]], candidate.params["path"])[-1]] not in observation.visited]
-        return CandidateSet(candidates=fresh, mask=[True] * len(fresh))
+        return search()
     seen_paths: set[str] = set()
     used: set[tuple[float, ...]] = set()
     eye = [observation.position[0], observation.position[1] + 1.62, observation.position[2]]
@@ -94,4 +95,6 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
                     seen_paths.add(signature)
                     add("move_observed", {"path": [[v for v in p] for p in path], "map_version": observation.map_version},
                         f"Approach exposed {goal.target} at {list(target)}")
+    if not candidates and block == "iron_ore":
+        return search()  # Seen but unreachable on this level: stairs are the only way to close in.
     return CandidateSet(candidates=candidates, mask=[True] * len(candidates))
