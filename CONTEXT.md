@@ -1,4 +1,83 @@
-# T05(#6) 개정 범위 완료 — T05A 착수 가능·구현 미착수
+# T05A #32 완료 — 틱 위상 수정·전체 재검증
+
+최종 코드 f915adc(도구 a2c0b9f). 실제 b0.050004초/틱·a1.195·75ms 초과0, 제작 로그 b0.0500.
+새 63/63/drift0·즉시동기화3장면·T05 전체·T04 정보감사와 매크로7항목·pytest/mypy 통과.
+자연 G2는 기존 기준선과 같은 64결정1778틱 예상 실패이며 철3 통합 인수는 #8에 남는다.
+fingerprint `ad28e8582b70af35dcd4b3edd51fa5f10785ae3990ad2627fb5f93c25fef8b20`, mod `9242817e0d3375d8e971af43acb55e47fc34fac3a5330777460c3fc694282f6b`.
+main 머지 후 mod를 다시 빌드해야 한다. T06은 이 코드 위로 올려 새 63조건과 회귀를 다시 받는다.
+원시 artifacts/issue-32/tick-wait/final-2/, 상세 PROGRESS 2026-11-07 첫 절.
+
+## 이전 완료 기록(82e5fe5, 위 절로 대체)
+
+
+최종 실행 코드82e5fe5. 실제b0.059591389초/틱·새63/63/drift0·즉시동기화3장면·
+T05정보감사26/제작56결정1817틱/경계/취소/reset·pytest80/mypy22를 통과했다.
+사용자가 T05 전체 통과로 이전 티켓을 충분히 검증한 것으로 판단하고 추가 검사
+없이 완료·커밋·푸시하도록 명시 승인했다. 이에 추가 테스트를 중단했다.
+T04 최종감사 CLI SIGINT(exit−2)/검사기exit1/reset통과, 후속매크로/자연G2미실행을
+실제대로 기록한다. 자연G2 성공 주장은 없고 최종 통합 인수는#8에 남는다.
+
+같은 원본 Git 저장소의 issue-32-t05a-resume 브랜치다. main4694d54/T06수정없음,
+추가폴더이동없음. 사용자 승인으로 기록커밋·전용브랜치푸시를 수행한다.
+기록커밋559f38f를 origin에 푸시하고 원격해시 일치를 확인했다.
+#32는2026-11-07T05:25:56Z CLOSED, 완료댓글6702791874.
+T06 통합 후 mod재빌드·새fingerprint63조건/감사/관련회귀는 별도로 필요하다.
+새 원시 artifacts/issue-32/final-headroom/, 상세수치/미실행/승인 PROGRESS참조.
+보고서/PDF 때문에 게임을 재실행하지 않는다. 아래는 이전 진행 이력이다.
+
+## 이전 실행 상태(종료 이력)
+
+- final/ 시도는 T04 정보감사 iron의 획득 부재로 exit1/reset통과로 종료됐다.
+  높이3 기둥이 머리 공간을 막아 공개 수집 경로가 거부된 진단 fixture 문제다.
+  iron만 높이1로 수정, strict 감사/정책/자연 snapshot은 그대로다.
+  실제 iron-headroom/ 두 변형 각58틱·채굴1/획득1·signature일치/reset통과.
+  새 pytest80통과26.97초/mypy22, Standards/Spec 추가지적0.
+  아래 final/의63조건과 속도는 이전코드 근거이며 새코드로 승계하지 않는다.
+  다음 실행은 /tmp/t05a-final-run.py artifacts/issue-32/final-headroom 이다.
+  final-headroom/ 진행 중 중복 실행 금지. 최종 비교/PDF/문서커밋은 남았다.
+
+- 최종 실행 코드 edc92cf(선행4f22bdf/787712f/3284ba0). 클라이언트 물리를 먼저
+  완료하고 같은 TCP연결 nonce를 서버 실행기에서 확인한 뒤 실제 틱을 진행한다.
+  mod27fe07bcbbbc100dbcbc4114d08426a66a50007ed1e243d5b722c81bebaa71a6.
+- 늦은물리/입력nonce 모의RED→GREEN과 실제지연(0/5/20/45/75ms)보행2경로47틱/
+  6.379블록·위치검사/reset통과. delayed-movement/은 인증전exit1/unverified다.
+- 새 전체pytest79통과24.46초, mypy22, Node/Java빌드 통과. 두축재검토 잔여0.
+  recovery/pytest-causal.txt,mypy-causal.txt. 코드 그대로면 반복하지 않는다.
+- 이전 /tmp/t05a-final-run.py의 기록은 final-causal.stdout/stderr와
+  artifacts/issue-32/final/run-status.json으로 실제 진행을 확인하고 중복 실행 금지.
+  종료 session13460. 순서 final/final-speed→final-sync→final-t05(clock information
+  production boundaries)→final-t04(information macros)→g2. 양성실패시중단,
+  자연G2기존exit1/assert는보존하고서버오류/정지실패는허용하지않는다.
+- 이전 artifacts/issue-32/{final-speed,final-sync,final-t05}는4f22bdf실행이며
+  늦은물리수정때clock을SIGINT(-2)중단/reset통과. 최신인증으로사용하지않는다.
+- 새최종원시비교/개발검사와구분한한국어PDF2종/전체페이지검수/기록커밋남음.
+  PDF생성때문에게임재실행금지. 코드변경이없으면새시계/전체검사중복금지.
+
+## 복구 경위와 아래 과거 기록
+
+사용자의 재개 지시로 implement를 계속 적용한다. main/T06은 읽기 전용이며
+#7을 수정/완료하지 않는다. 이전 /tmp worktree와 원시는 현재 없어서 재사용하지 않는다.
+보존된787712f에서 새 branch issue-32-t05a-resume, 영속 worktree
+/home/sion/.codex/worktrees/327b/Minecraft_learning을 생성했다. 이후 명령은 이 경로에서만 실행한다.
+
+- main 기준4694d54, 보존 구현3284ba0→787712f. 마지막 미커밋 시설I/O 수정·회귀는
+  대화 패치에서 복원했다. 현재 HEAD/미커밋 상태는 git log/status로 확인한다.
+  push/merge/PR/이슈 종료는 요청되지 않았고 수행하지 않는다.
+- 서버/snapshot/Node 환경을 별도 복사, 전용 포트25566과 uv 환경 설치 완료.
+  새 mod hash c0ff66d5a455075e98ae3fea92ea94d520eaa9909c577b36878626486bbee3fe.
+- 새 변경 전960틱 실제계측 a1.193834879,b.199745351. 유효 최종T05/T04 로그10개
+  회귀 a1.225208660,b.199272347. artifacts/issue-32/recovery/{before-fixed,final-log-fit}.
+- 복원 개별pytest11통과7.98초/mypy22. 새 전체pytest79통과24.41초,
+  전체mypy결과는 recovery/mypy.txt 확인. 이전 소실 인증/원시를 승계하지 않는다.
+- 최종코드 커밋 고정 뒤 final-speed→final-sync→final-t05(clock information
+  production boundaries)→final-t04(information macros)→별도g2(원래assert/exit1유지).
+  실제 서버는 순차 실행하고 원시/results/reset/새fingerprint를 직접 검토한다.
+- 새 속도·시계·정보/T04/T05/G2·독립Standards/Spec·PDF2종·최종문서커밋 남음.
+  PDF 중간파일은/tmp, 보고서는 reports/에 최신PDF2개만/Git제외.
+- 이후 T06에 최종 #32 코드를 통합하고 해당 최종 fingerprint로63조건·감사·회귀를
+  새로 수행해야 한다. 자연G2철3의 최종 통합 책임은#8이며 기존실패를 성공으로 쓰지 않는다.
+
+## 아래는 이전 T05 완료 기록
 
 - 2026-11-06 최신 사용자 승인: T05 범위를 제작·제련·노출 철 직접 채굴/획득 연결과 검증으로 정리한다. 자연 고정 G2 철3 실패를 성공으로 체크하지 않고 미달·후속 이관으로 보존한다. T06은 기존 G3와 별도 G2 접근 가능성, T07은 같은 snapshot/hash·시작점·돌 곡괭이1·10분/12000틱에서 발견→적절한 도구 파괴→해당 드롭 직접 획득3의 최종 통합 책임이다. 미달/장애면 #8은 미완료다. 현행 기준 PLAN §5.2.1·DECISIONS 최상단. 아래 과거 T05/T04의 금지·미완료·Git 상태는 당시 이력이다.
 - 실행 순서는 #5→#6→#32→#7→#8, #7의 기존 #5 선행도 유지. 개정 T05 기준 충족 후 커밋/푸시·#6 종료·#32 ready 확인까지 이번 승인 범위다. **T05A 구현·계측은 아직 시작하지 말 것.** 사용자에게 착수 가능한 상태를 명시적으로 보고한다. PR/merge는 추가하지 않는다.
