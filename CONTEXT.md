@@ -9,6 +9,8 @@ T04 최종감사 CLI SIGINT(exit−2)/검사기exit1/reset통과, 후속매크�
 
 같은 원본 Git 저장소의 issue-32-t05a-resume 브랜치다. main4694d54/T06수정없음,
 추가폴더이동없음. 사용자 승인으로 기록커밋·전용브랜치푸시를 수행한다.
+기록커밋559f38f를 origin에 푸시하고 원격해시 일치를 확인했다.
+#32는2026-11-07T05:25:56Z CLOSED, 완료댓글6702791874.
 T06 통합 후 mod재빌드·새fingerprint63조건/감사/관련회귀는 별도로 필요하다.
 새 원시 artifacts/issue-32/final-headroom/, 상세수치/미실행/승인 PROGRESS참조.
 보고서/PDF 때문에 게임을 재실행하지 않는다. 아래는 이전 진행 이력이다.
