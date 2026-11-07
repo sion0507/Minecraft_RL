@@ -7,7 +7,7 @@ const bridge = path.resolve(__dirname, '../bridge/minecraft.js')
 Module._extensions['.js'] = function (module, filename) {
   if (filename !== bridge) return original(module, filename)
   let source = fs.readFileSync(filename, 'utf8')
-  const advance = "const executedTicks = await advance(payload.scene === 'fall' ? 1 : payload.scene === 'fire' ? 25 : 5)"
+  const advance = "const executedTicks = await advance(payload.scene === 'fall' ? 1 : payload.scene === 'fire' ? 25 : 5, payload.scene === 'fall')"
   if (!source.includes(advance)) throw new Error('Clock diagnostic capture seam changed')
   source = source.replace(advance, `const executedTicks = payload.scene === 'drop'
     ? (await advance(1, true)) + (await advance(1, true)) : await advance(1, true)

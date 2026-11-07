@@ -697,7 +697,8 @@ async function clockTrial (payload) {
   if (payload.scene === 'fire') await server.command(`setblock ${x} ${y} ${z} minecraft:fire`)
   if (payload.scene === 'fall') await server.command(`tp ResearchBot ${x + 0.5} ${y + 4} ${z + 0.5}`)
   const start = performance.now()
-  const executedTicks = await advance(payload.scene === 'fall' ? 1 : payload.scene === 'fire' ? 25 : 5)
+  // Falling must hold exactly one client physics tick; only a fenced advance guarantees it.
+  const executedTicks = await advance(payload.scene === 'fall' ? 1 : payload.scene === 'fire' ? 25 : 5, payload.scene === 'fall')
   await pause()
   const before = await sample()
   if (payload.scene === 'furnace') before.server.furnace = await data(furnace)
