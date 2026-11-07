@@ -755,7 +755,8 @@ async function informationFixture (payload) {
   if (payload.scope === 'iron' || payload.scope === 'production_no_tool') {
     await server.command('clear ResearchBot')
     if (payload.scope === 'iron') await server.command('replaceitem entity ResearchBot weapon.mainhand minecraft:stone_pickaxe')
-    await server.command(`fill ${x + 1} ${y} ${z} ${x + 1} ${y + 2} ${z} minecraft:iron_ore`)
+    // The one-item audit must leave headroom to approach its naturally scattered drop.
+    await server.command(`fill ${x + 1} ${y} ${z} ${x + 1} ${y + (payload.scope === 'iron' ? 0 : 2)} ${z} minecraft:iron_ore`)
   }
   if (['production_craft', 'production_place'].includes(payload.scope)) {
     await server.command('clear ResearchBot')

@@ -1,5 +1,35 @@
 # T05A #32 영속 worktree 복구·최종 실제 검증
 
+## 최신 실행 상태
+
+- final/ 시도는 T04 정보감사 iron의 획득 부재로 exit1/reset통과로 종료됐다.
+  높이3 기둥이 머리 공간을 막아 공개 수집 경로가 거부된 진단 fixture 문제다.
+  iron만 높이1로 수정, strict 감사/정책/자연 snapshot은 그대로다.
+  실제 iron-headroom/ 두 변형 각58틱·채굴1/획득1·signature일치/reset통과.
+  새 pytest80통과26.97초/mypy22, Standards/Spec 추가지적0.
+  아래 final/의63조건과 속도는 이전코드 근거이며 새코드로 승계하지 않는다.
+  다음 실행은 /tmp/t05a-final-run.py artifacts/issue-32/final-headroom 이다.
+  final-headroom/ 진행 중 중복 실행 금지. 최종 비교/PDF/문서커밋은 남았다.
+
+- 최종 실행 코드 edc92cf(선행4f22bdf/787712f/3284ba0). 클라이언트 물리를 먼저
+  완료하고 같은 TCP연결 nonce를 서버 실행기에서 확인한 뒤 실제 틱을 진행한다.
+  mod27fe07bcbbbc100dbcbc4114d08426a66a50007ed1e243d5b722c81bebaa71a6.
+- 늦은물리/입력nonce 모의RED→GREEN과 실제지연(0/5/20/45/75ms)보행2경로47틱/
+  6.379블록·위치검사/reset통과. delayed-movement/은 인증전exit1/unverified다.
+- 새 전체pytest79통과24.46초, mypy22, Node/Java빌드 통과. 두축재검토 잔여0.
+  recovery/pytest-causal.txt,mypy-causal.txt. 코드 그대로면 반복하지 않는다.
+- 이전 /tmp/t05a-final-run.py의 기록은 final-causal.stdout/stderr와
+  artifacts/issue-32/final/run-status.json으로 실제 진행을 확인하고 중복 실행 금지.
+  종료 session13460. 순서 final/final-speed→final-sync→final-t05(clock information
+  production boundaries)→final-t04(information macros)→g2. 양성실패시중단,
+  자연G2기존exit1/assert는보존하고서버오류/정지실패는허용하지않는다.
+- 이전 artifacts/issue-32/{final-speed,final-sync,final-t05}는4f22bdf실행이며
+  늦은물리수정때clock을SIGINT(-2)중단/reset통과. 최신인증으로사용하지않는다.
+- 새최종원시비교/개발검사와구분한한국어PDF2종/전체페이지검수/기록커밋남음.
+  PDF생성때문에게임재실행금지. 코드변경이없으면새시계/전체검사중복금지.
+
+## 복구 경위와 아래 과거 기록
+
 사용자의 재개 지시로 implement를 계속 적용한다. main/T06은 읽기 전용이며
 #7을 수정/완료하지 않는다. 이전 /tmp worktree와 원시는 현재 없어서 재사용하지 않는다.
 보존된787712f에서 새 branch issue-32-t05a-resume, 영속 worktree
