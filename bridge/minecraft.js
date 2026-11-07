@@ -199,16 +199,16 @@ async function advance (ticks, walking = false) {
   if (walking) bot.on('physicsTick', limitPhysics)
   bot.physicsEnabled = previousPhysics
   try {
+    const deadline = performance.now() + 5000
+    while (walking && bot.health > 0 && clientTicks < ticks) {
+      await sleep(1)
+      if (performance.now() > deadline) throw new Error('Client physics timeout')
+    }
     // The receipt follows this tick's state packets on the same client connection.
     const receipt = await server.step(bot._client, ticks)
     actual = receipt.after - receipt.before
     activeTicks += actual
     if (actual !== ticks) throw new Error('Unexpected server tick duration')
-    const deadline = performance.now() + 5000
-    while (walking && bot.health > 0 && clientTicks < ticks) {
-      await sleep(1)
-      if (performance.now() > deadline) throw new Error('Tick step timeout')
-    }
   } finally {
     if (walking) bot.removeListener('physicsTick', limitPhysics)
     bot.clearControlStates()

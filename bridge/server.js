@@ -132,6 +132,7 @@ class Server {
     const nonce = randomUUID()
     const child = this.process
     return await new Promise((resolve, reject) => {
+      let inputSent = false
       const cleanup = () => {
         clearTimeout(timeout)
         client.removeListener('custom_payload', receive)
@@ -140,7 +141,12 @@ class Server {
       }
       const failed = () => { cleanup(); reject(new Error('Server/client exited during tick')) }
       const receive = packet => {
-        if (packet.channel !== 'mcdiamond:tick') return
+        if (packet.channel === 'mcdiamond:step_ready' && !inputSent && packet.data.toString('utf8') === nonce) {
+          inputSent = true
+          try { client.write('custom_payload', { channel: 'mcdiamond:step_ready', data: Buffer.from(nonce) }) } catch (error) { cleanup(); reject(error) }
+          return
+        }
+        if (packet.channel !== 'mcdiamond:tick' || !inputSent) return
         const fields = packet.data.toString('utf8').split(' ')
         if (fields[0] !== nonce) return
         cleanup()

@@ -15,18 +15,27 @@ async function transport (scenario) {
     writes++
     const match = line.match(/^mcdiamond_step 1 ([0-9a-f-]{36})\n$/)
     assert.ok(match, 'one administrator command without a say marker')
+    client.write = (name, packet) => {
+      assert.equal(name,'custom_payload')
+      assert.equal(packet.channel,'mcdiamond:step_ready')
+      assert.equal(packet.data.toString('utf8'),match[1],'input fence uses the authorized nonce')
+      if(scenario==='write_failure')throw Error('injected input fence failure')
+      queueMicrotask(()=>client.emit('custom_payload', {channel:'mcdiamond:tick',
+        data:Buffer.from(match[1]+(scenario==='malformed'?' NaN 1':' 123 124'))}))
+    }
     queueMicrotask(() => {
       client.emit('custom_payload', { channel: 'other:channel', data: Buffer.from('ignored') })
       client.emit('custom_payload', { channel: 'mcdiamond:tick', data: Buffer.from('old-nonce 0 1') })
       if (scenario === 'disconnect') return client.emit('end')
       if (scenario === 'exit') return child.emit('exit')
-      client.emit('custom_payload', { channel: 'mcdiamond:tick',
-        data: Buffer.from(match[1] + (scenario === 'malformed' ? ' NaN 1' : ' 123 124')) })
+      client.emit('custom_payload', {channel:'mcdiamond:step_ready',data:Buffer.from('unrelated')})
+      client.emit('custom_payload', {channel:'mcdiamond:step_ready',data:Buffer.from(match[1])})
     })
   } }
   server.process = child
   if (scenario === 'normal') assert.deepEqual(await server.step(client, 1), { before: 123, after: 124 })
-  else await assert.rejects(server.step(client, 1), scenario === 'malformed' ? /Invalid server tick receipt/ : /exited during tick/)
+  else await assert.rejects(server.step(client, 1), scenario === 'malformed' ? /Invalid server tick receipt/ :
+    scenario==='write_failure'?/injected input fence failure/:/exited during tick/)
   assert.equal(writes, 1)
   assert.equal(client.listenerCount('custom_payload'), 0)
   assert.equal(client.listenerCount('end'), 0)
@@ -40,8 +49,13 @@ async function check (scenario) {
     bot=new EventEmitter(); bot.physicsEnabled=false;bot.health=20
     bot.inventory={items:()=>[]}
     bot.clearControlStates=()=>{bot.cleared=true}
-    var progressed=0; var calls=0; var physical=0; var received=false
+    var progressed=0; var calls=0; var physical=0; var received=false;var serverPhysical=0
     bot.on('physicsTick',()=>physical++)
+    var enabled=false
+    Object.defineProperty(bot,'physicsEnabled',{get:()=>enabled,set:value=>{
+      enabled=value
+      if(value)setTimeout(()=>{for(let i=0;i<4;i++)if(bot.physicsEnabled)bot.emit('physicsTick')},scenario==='late_physics'?8:0)
+    }})
     const state={position:[0,64,0],velocity:[0,0,0],health:20,oxygen:300,on_fire:false,
       on_ground:true,in_liquid:false,inventory:{},tool:null,tool_durability:null,map_version:1}
     terrain.danger=()=>false;terrain.stable=()=>true
@@ -56,8 +70,7 @@ async function check (scenario) {
       calls++;received=false
       assertOne(n)
       const before=progressed;progressed+=scenario==='extra_tick'?2:1
-      const physics=()=>{for(let i=0;i<4;i++)if(bot.physicsEnabled)bot.emit('physicsTick')}
-      if(scenario==='late_physics')setTimeout(physics,8);else physics()
+      serverPhysical=physical
       await new Promise(resolve=>setTimeout(resolve,2))
       if(scenario==='damage')state.health=19
       received=true
@@ -65,7 +78,7 @@ async function check (scenario) {
     }
     function assertOne(n){if(n!==1)throw Error('batched macro tick')}
     bot._client=new EventEmitter()
-    pause=async()=>{}
+    pause=async()=>{if(scenario==='late_physics'&&serverPhysical!==physical)throw Error('late movement left queued on frozen server')}
   `, c)
   const initial = await c.observation()
   const candidate = { candidate_id: 'wait', action_kind: 'wait', params: {}, max_ticks: 20,
@@ -86,7 +99,7 @@ async function check (scenario) {
 }
 
 async function main () {
-  for (const scenario of ['normal', 'malformed', 'disconnect', 'exit']) await transport(scenario)
+  for (const scenario of ['normal', 'malformed', 'disconnect', 'exit','write_failure']) await transport(scenario)
   for (const scenario of ['normal', 'late_physics', 'damage', 'extra_tick']) await check(scenario)
   process.stdout.write(JSON.stringify({ passed: true }) + '\n')
 }

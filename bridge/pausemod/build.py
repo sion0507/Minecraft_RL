@@ -34,6 +34,6 @@ with zipfile.ZipFile(target) as archive:
     assert "mcdiamond/mixin/MovementPause.class" in archive.namelist()
     assert "mcdiamond/mixin/TickReceipt.class" in archive.namelist()
     assert "mcdiamond/mixin/AdminStep.class" in archive.namelist()
-    for name in ["ChunkStorageAccess", "EntityTrackerAccess", "TickStateAccess"]:
+    for name in ["ChunkStorageAccess", "EntityTrackerAccess", "TickStateAccess", "StepPayloadAccess", "ClientStep"]:
         assert f"mcdiamond/mixin/{name}.class" in archive.namelist()
 print(f"{hashlib.sha256(target.read_bytes()).hexdigest()}  {target}")
