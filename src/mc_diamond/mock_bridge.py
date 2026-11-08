@@ -58,7 +58,7 @@ def main() -> None:
                         request_id = REQUEST_ID.validate_python(raw.get("request_id"), strict=True)
                     request = RpcRequest.model_validate(raw)
                     request_id = request.request_id
-                    permitted = {"reset"} if key.data == "admin" else {"observe", "step"}
+                    permitted = {"reset", "verification_log"} if key.data == "admin" else {"observe", "step"}
                     if request.method not in permitted:
                         response = RpcResponse(request_id=request_id, error=ErrorInfo(
                             code="permission_denied", message="Method forbidden on this channel"))
@@ -68,6 +68,9 @@ def main() -> None:
                         observation = Observation.model_validate({**initial.model_dump(), **request.payload})
                         index = 0
                         response = RpcResponse(request_id=request_id, result=observation.model_dump(mode="json"))
+                    elif request.method == "verification_log":
+                        # Scripted administrator log; mock provenance never counts as natural Minecraft evidence.
+                        response = RpcResponse(request_id=request_id, result=fixture.get("verification", {"natural": False, "records": []}))
                     elif observation is None:
                         response = RpcResponse(request_id=request_id, error=ErrorInfo(
                             code="backend_error", message="Reset required"))

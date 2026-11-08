@@ -269,7 +269,7 @@ for line in admin:
   o.update(drops=[{'entity_id':7,'item':'oak_log','quantity':1,'position':o['position']}])
  if p.get('scope')=='empty':
   o['observed_map']=[]
- if p.get('scope') in ['production_craft','production_place','production_furnace','iron']:
+ if p.get('scope') in ['production_craft','production_place','production_furnace','iron','diamond']:
   scope=p['scope']
   o.update(inventory={'iron_ingot':3,'stick':2},observed_map=[])
   if scope=='production_craft': o['observed_map']=[{'block':'crafting_table','position':[1.,64.,0.],'support':True}]
@@ -278,10 +278,12 @@ for line in admin:
    o['observed_map']=[{'block':'air','position':[1.,64.,0.],'passable':True},{'block':'stone','position':[1.,63.,0.],'support':True}]
   if scope=='iron':
    o.update(inventory={'stone_pickaxe':1},tool='stone_pickaxe',observed_map=[{'block':'iron_ore','position':[1.,64.,0.],'support':True}])
+  if scope=='diamond':
+   o.update(inventory={'iron_pickaxe':1},tool='iron_pickaxe',observed_map=[{'block':'diamond_ore','position':[1.,64.,0.],'support':True}])
   if scope=='production_furnace':
    o.update(inventory={'iron_ore':1,'coal':1},observed_map=[{'block':'furnace','position':[1.,64.,0.],'support':True}])
- if str(p.get('scope')).startswith('stair'):
-  o.update(inventory={'iron_pickaxe':1},tool='iron_pickaxe',on_ground=True)
+ if str(p.get('scope')).startswith(('stair','tunnel')):
+  o.update(inventory={'iron_pickaxe':1},tool='iron_pickaxe',tool_durability=250,on_ground=True)
  r=json.loads(sys.stdin.readline());reply(r,o)
  if not p['exposed']:
   r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];ticks=int(sys.argv[1])
@@ -307,20 +309,21 @@ for line in admin:
     n.update(inventory={'oak_log':1},drops=[])
     result['events'].append({'kind':'acquired','item':'oak_log','quantity':1,'source':'minecraft'})
   if p.get('scope')=='empty' and sys.argv[2]=='1': result['events']=[]
-  if str(p.get('scope')).startswith('stair'):
-   for index in range(2 if p['scope'] in ('stair_exposed','stair_iron') else 1):
+  if str(p.get('scope')).startswith(('stair','tunnel')):
+   tunnel=p['scope'].startswith('tunnel')
+   for index in range(2 if p['scope'] in ('stair_exposed','stair_iron','tunnel','tunnel_iron') else 1):
     if index:
      r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];o=n
      n={**o,'obs_id':'obs-'+str(index+1)}
-    reason=('ore_exposed' if p['variant']=='ore' else 'observed_hazard') if index else 'stairs_completed'
+    reason=('ore_exposed' if p['variant']=='ore' else 'observed_hazard') if index else 'tunnel_completed' if tunnel else 'stairs_completed'
     n.update(active_ticks=o['active_ticks']+40,remaining_ticks=o['remaining_ticks']-40)
     result.update(observation=n,actual_ticks=40,path=[],reason=reason,source_obs_id=o['obs_id'],stop_evidence=[n['obs_id'],reason],
-      distance_moved=0.,events=[{'kind':'descended','quantity':1,'source':'minecraft'}]*c['params']['stairs'])
+      distance_moved=0.,events=[{'kind':'tunneled' if tunnel else 'descended','quantity':1,'source':'minecraft'}]*c['params']['cells' if tunnel else 'stairs'])
     if reason=='ore_exposed':
      result['events']=result['events']+[{'kind':'exposed','item':c['params']['stop_blocks'][-1],'position':[4.,99.,0.],'source':'minecraft'}]
     reply(r,result)
    continue
-  if p.get('scope') in ['production_craft','production_place','production_furnace','iron']:
+  if p.get('scope') in ['production_craft','production_place','production_furnace','iron','diamond']:
    for index in range(3 if p['scope']=='production_furnace' else 1):
     if index:
      r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];o=n
@@ -328,7 +331,7 @@ for line in admin:
     ticks=200 if c['action_kind']=='wait' else 1
     kind={'craft_batch':'crafted','place_or_equip':'placed','furnace_load':'furnace_loaded','wait':'wait','furnace_collect':'smelted','mine_visible_cluster':'acquired'}[c['action_kind']]
     reason={'crafted':'craft_completed','placed':'place_completed','furnace_loaded':'furnace_loaded','wait':'wait_completed','smelted':'furnace_collected','acquired':'cluster_completed'}[kind]
-    item={'crafted':'iron_pickaxe','placed':'crafting_table','furnace_loaded':'iron_ore','wait':None,'smelted':'iron_ingot','acquired':'iron_ore'}[kind]
+    item={'crafted':'iron_pickaxe','placed':'crafting_table','furnace_loaded':'iron_ore','wait':None,'smelted':'iron_ingot','acquired':'diamond' if p['scope']=='diamond' else 'iron_ore'}[kind]
     n.update(active_ticks=o['active_ticks']+ticks,remaining_ticks=o['remaining_ticks']-ticks,position=o['position'])
     if kind in ['crafted','smelted','acquired']: n['inventory']={**o['inventory'],item:1}
     if p['scope']=='production_furnace':
@@ -348,7 +351,8 @@ for line in admin:
     assert result.returncode == (0 if expected else 1), result.stderr
     assert records(result)[-1]["data"]["information_verified"] is expected
     if expected:
-        assert {"craft_batch", "facility_place", "furnace_load", "furnace_collect", "iron_mining", "stair_down", "stair_exposure", "stair_iron_exposure"} <= set(
+        assert {"craft_batch", "facility_place", "furnace_load", "furnace_collect", "iron_mining", "stair_down", "stair_exposure", "stair_iron_exposure",
+                "diamond_mining", "tunnel", "tunnel_exposure", "tunnel_iron_exposure"} <= set(
             records(result)[-1]["data"]["scope"])
 
 

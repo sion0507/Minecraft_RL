@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from .episode import emit
-from .navigation import descent_choices, generate_descent_candidates, generate_movement_candidates
+from .navigation import generate_descent_candidates, generate_movement_candidates, ore_search_choices
 from .macros import generate_wood_candidates
 from .production import generate_production_candidates
 from .rpc import EpisodeError, RpcSession
@@ -54,22 +54,26 @@ def stair_signature(value: dict[str, Any]) -> dict[str, Any]:
 
 def audit_stairs(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
     """Same visible rock, different hidden block: every decision before exposure must match."""
-    def stair(scope: str, variant: str, plan: list[int], ores: list[str] | None = None) -> list[dict[str, Any]]:
+    def stair(scope: str, variant: str, plan: list[int], target: str | None = None,
+              kind: str = "stair_down", height: int = 2) -> list[dict[str, Any]]:
         prepared = session._call("information_fixture", {"variant": variant, "exposed": False, "scope": scope}, admin=True)
         if prepared.get("fixture_ready") is not True:
             raise ValueError("Stair fixture was not verified")
         observation = session.policy().observe()
         rows: list[dict[str, Any]] = []
         for stairs in plan:
-            # G2 searches for iron with the same stairs, adding iron_ore to the stop list.
-            found = generate_descent_candidates(observation).candidates if ores is None else descent_choices(observation, ores)
+            # G2/G4 search for iron/diamond with the shared ore search: stairs, then tunnels, the ore on the stop list.
+            found = (generate_descent_candidates(observation).candidates if target is None
+                     else ore_search_choices(observation, target, 3 if target == "iron_ore" else 1))
             candidates = CandidateSet(candidates=found, mask=[True] * len(found))
             emit("information_stair_observation", observation)
             emit("information_stair_candidates", candidates)
-            east = next((c for c in candidates.candidates if c.action_kind == "stair_down" and c.params["direction"] == [1, 0]), None)
+            east = next((c for c in candidates.candidates if c.action_kind == kind and c.params["direction"] == [1, 0]), None)
             if east is None:
-                raise ValueError("Stair candidate absent")
-            selected = east.model_copy(update={"params": {**east.params, "stairs": stairs}})
+                raise ValueError("Stair/tunnel candidate absent")
+            # Workload and section are overridden alike: the 8-choice cap may leave the 1x3 option out above the ore layers.
+            workload = {"stairs": stairs} if kind == "stair_down" else {"cells": stairs, "height": height}
+            selected = east.model_copy(update={"params": {**east.params, **workload}})
             step = session.policy().step(selected)
             emit("information_stair_step", step)
             if (step.invalid or step.cancelled or step.terminated or step.clock_mode != "paused" or not step.pause_verified
@@ -95,15 +99,23 @@ def audit_stairs(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
     evidence.append({"scope": "stair", "exposed": False, "steps": 1, "actual_ticks": hidden[0][0]["step"]["actual_ticks"],
                      "input_sha256": hashlib.sha256(json.dumps(hidden[0], sort_keys=True).encode()).hexdigest()})
     # Positive control: the same block one cut ahead stops only once a cut really opens it.
-    for scope, ores, item in [("stair_exposed", None, "diamond_ore"), ("stair_iron", ["iron_ore"], "iron_ore")]:
-        ore, lava = (stair(scope, variant, [1, 2], ores) for variant in ["ore", "lava"])
+    for scope, target, item, kind, plan, height in [("stair_exposed", None, "diamond_ore", "stair_down", [1, 2], 2),
+                                                    ("stair_iron", "iron_ore", "iron_ore", "stair_down", [1, 2], 2),
+                                                    ("tunnel", "diamond_ore", "diamond_ore", "tunnel", [2, 8], 2),
+                                                    ("tunnel", "diamond_ore", "diamond_ore", "tunnel", [2, 8], 3),
+                                                    ("tunnel_iron", "iron_ore", "iron_ore", "tunnel", [2, 8], 2)]:
+        # The tunnel pair's first two cuts never reach the hidden wall cell: an unexposed level search must match too.
+        ore, lava = (stair(scope, variant, plan, target, kind, height) for variant in ["ore", "lava"])
         if ore[0] != lava[0] or ore[1]["selected"] != lava[1]["selected"]:
             raise ValueError("Hidden variant changed the decision before exposure")
+        if kind == "tunnel" and (ore[0]["step"]["reason"] != "tunnel_completed"
+                                 or sum(event["kind"] == "tunneled" for event in ore[0]["step"]["events"]) != 2):
+            raise ValueError("Tunnel workload was not executed")
         if (ore[1]["step"]["reason"] != "ore_exposed" or lava[1]["step"]["reason"] != "observed_hazard"
                 or ore[1]["step"]["actual_ticks"] != lava[1]["step"]["actual_ticks"]
                 or [e["item"] for e in ore[1]["step"]["events"] if e["kind"] == "exposed"] != [item]):
             raise ValueError("Exposure stop mismatch")
-        evidence.append({"scope": scope, "exposed": True, "steps": 2, "stop_ticks": ore[1]["step"]["actual_ticks"],
+        evidence.append({"scope": scope, "height": height, "exposed": True, "steps": 2, "stop_ticks": ore[1]["step"]["actual_ticks"],
                          "input_sha256": hashlib.sha256(json.dumps(ore[0], sort_keys=True).encode()).hexdigest()})
 
 
@@ -246,14 +258,14 @@ def audit_information(session: RpcSession) -> bool:
                     "steps": len(steps), "actual_ticks": sum(row["step"]["actual_ticks"] for row in steps)})
             if macro_pair[0] != macro_pair[1]:
                 raise ValueError(f"Hidden variant changed {scope} policy evidence")
-        for scope in ["production_craft", "production_place", "production_furnace", "iron"]:
+        for scope in ["production_craft", "production_place", "production_furnace", "iron", "diamond"]:
             production_pair: list[list[dict[str, Any]]] = []
             goal = Goal(goal_id="information-production", kind="smelt" if scope == "production_furnace" else
-                        "collect" if scope == "iron" else "craft",
-                        target="iron_ingot" if scope == "production_furnace" else "iron_ore" if scope == "iron" else "iron_pickaxe",
+                        "collect" if scope == "iron" else "mine_diamond" if scope == "diamond" else "craft",
+                        target={"production_furnace": "iron_ingot", "iron": "iron_ore", "diamond": "diamond"}.get(scope, "iron_pickaxe"),
                         quantity=1)
             expected_event = {"production_craft": "crafted", "production_place": "placed",
-                              "production_furnace": "smelted", "iron": "acquired"}[scope]
+                              "production_furnace": "smelted", "iron": "acquired", "diamond": "acquired"}[scope]
             for variant in ["ore", "lava"]:
                 prepared = session._call("information_fixture", {"variant": variant, "exposed": False, "scope": scope}, admin=True)
                 if prepared.get("fixture_ready") is not True:
@@ -303,7 +315,8 @@ def audit_information(session: RpcSession) -> bool:
     emit("information_summary", {"information_verified": error is None,
          "scope": ["observation", "move_observed", "mine_visible_cluster", "place_or_equip", "wait20", "wait100", "wait200",
                    "drop_pickup", "independent_drop_wait", "zero_candidates", "craft_batch", "facility_place",
-                   "furnace_load", "furnace_collect", "iron_mining", "stair_down", "stair_exposure", "stair_iron_exposure"], "hidden_hazard_peek": False,
+                   "furnace_load", "furnace_collect", "iron_mining", "diamond_mining", "stair_down", "stair_exposure",
+                   "stair_iron_exposure", "tunnel", "tunnel_exposure", "tunnel_iron_exposure"], "hidden_hazard_peek": False,
          "trials": evidence, "error": error.model_dump(mode="json") if error else None,
          "wall_seconds": time.monotonic() - started})
     return error is None

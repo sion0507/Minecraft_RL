@@ -14,6 +14,10 @@ const { Terrain } = require('./terrain')
 const recipes = require('../src/mc_diamond/recipes.json')
 const fuels = { coal: 1600, charcoal: 1600, ...Object.fromEntries(recipes.filter(r => r.item.endsWith('_planks')).map(r => [r.item, 300])) }
 const furnaces = new Map()
+// Block → its own drop (no Fortune/Silk Touch). Unlisted blocks drop themselves.
+const dropOf = block => ({ stone: 'cobblestone', diamond_ore: 'diamond', coal_ore: 'coal', grass_block: 'dirt' })[block] ?? block
+// Ores whose direct mining is verified for the administrator log, with the pickaxes that yield their drop.
+const verifiedOres = { diamond_ore: /^(iron|diamond|netherite)_pickaxe$/, iron_ore: /^(stone|iron|diamond|netherite)_pickaxe$/ }
 const furnaceInputs = new Map()
 const terrain = new Terrain()
 let history = []
@@ -42,6 +46,9 @@ let observationEpoch = randomUUID()
 let connected = false
 let pauseVerified = false
 let clockFingerprint = null
+// Administrator-only evidence: never part of an observation, read back on the admin channel after the episode.
+let natural = false
+let verification = []
 const clockTrials = new Set()
 const observationId = () => observationEpoch + ':' + observationIndex
 const budget = { C4: 36000, G1: 3600, G2: 12000, G3: 18000, G4: 18000 }[task]
@@ -82,11 +89,12 @@ async function connect () {
   connected = true
   current.on('itemDrop', entity => {
     const item = entity.getDroppedItem?.()
-    const target = item && minedTargets.find(target => (target.block === 'stone' ? 'cobblestone' : target.block) === item.name && target.drop_id === undefined &&
+    const target = item && minedTargets.find(target => dropOf(target.block) === item.name && target.drop_id === undefined &&
       activeTicks - target.tick <= 2 &&
       entity.position.distanceTo(new Vec3(...target.position).offset(0.5, 0.5, 0.5)) <= 2)
     if (target && !drops.has(entity.id) && item.count === 1) {
       target.drop_id = entity.id
+      if (target.record) Object.assign(target.record, { drop_item: item.name, drop_entity_id: entity.id })
       drops.set(entity.id, { item: item.name, quantity: item.count, entity_id: entity.id,
         position: entity.position.toArray(), collected: false, target })
     }
@@ -100,11 +108,18 @@ async function connect () {
     if (collector.id !== current.entity.id || !drop) return
     drop.collected = true
     const count = collected.getDroppedItem?.()?.count
+    drop.collectedCount = count ?? drop.quantity
     if (count !== undefined && count !== drop.quantity) diagnose('drop_count_mismatch', drop, { collected: count })
   })
   current.on('entityGone', entity => {
     const drop = drops.get(entity.id)
-    if (drop && !drop.collected) diagnose('drop_gone_uncollected', drop)
+    if (!drop || drop.collected) return
+    drop.gone = true
+    // A merge leaves the absorbing tracked stack within reach at that instant; lava, despawn or an untracked
+    // survivor leaves none, so such a drop can never be credited later.
+    drop.survivors = [...drops].filter(([id, other]) => id !== entity.id && !other.gone && !other.collected &&
+      other.item === drop.item && current.entities?.[id]?.position.distanceTo(entity.position) <= 1.5).map(([id]) => id)
+    diagnose('drop_gone_uncollected', drop, { survivors: drop.survivors })
   })
   await sleep(150)
 }
@@ -244,6 +259,8 @@ async function reset (payload) {
   history = []
   pendingEvents = []
   minedTargets = []
+  natural = true
+  verification = []
   drops.clear()
   furnaces.clear()
   furnaceInputs.clear()
@@ -320,11 +337,20 @@ function event (kind, details = {}) {
 function drainEvents () {
   const held = inventory()
   for (const [id, drop] of drops) {
-    if (drop.target.confirmed && drop.collected && (held[drop.item] || 0) >= (acquisitionBaseline[drop.item] || 0) + drop.quantity) {
-      pendingEvents.push(event('acquired', { item: drop.item, quantity: drop.quantity,
-        entity_id: drop.entity_id, position: drop.position }))
-      acquisitionBaseline[drop.item] = (acquisitionBaseline[drop.item] || 0) + drop.quantity
-      drops.delete(id)
+    if (!drop.target.confirmed || !drop.collected) continue
+    // The server merges nearby stacks: a larger pickup absorbs only tracked drops that vanished next to this very
+    // stack, so an untracked stack merged into it never inflates the credit.
+    const merged = [...drops].filter(([, other]) => other.gone && !other.collected && other.target.confirmed &&
+      other.survivors.includes(id))
+      .slice(0, Math.max(0, (drop.collectedCount ?? drop.quantity) - drop.quantity))
+    const quantity = drop.quantity + merged.reduce((sum, [, other]) => sum + other.quantity, 0)
+    if ((held[drop.item] || 0) < (acquisitionBaseline[drop.item] || 0) + quantity) continue
+    const acquired = event('acquired', { item: drop.item, quantity, entity_id: drop.entity_id, position: drop.position })
+    pendingEvents.push(acquired)
+    acquisitionBaseline[drop.item] = (acquisitionBaseline[drop.item] || 0) + quantity
+    for (const [key, credited] of [[id, drop], ...merged]) {
+      if (credited.target.record) Object.assign(credited.target.record, { acquired_event_id: acquired.event_id, inventory_after: held[drop.item] })
+      drops.delete(key)
     }
   }
   const result = pendingEvents
@@ -349,6 +375,16 @@ function recordConsumption (ingredients) {
   }
 }
 
+// Server-side truth for the administrator log; costs no game time while the game is frozen.
+async function serverBlockIs (point, block) {
+  return (await server.command(`execute if block ${point.join(' ')} minecraft:${block} run say mc_admin_block_ok`)).includes('mc_admin_block_ok')
+}
+
+async function serverTool () {
+  const held = await data('entity ResearchBot', 'SelectedItem').catch(() => '')
+  return held.match(/id: "minecraft:([a-z_]+)"/)?.[1] ?? null
+}
+
 function interruptReason (state, initial, transit = null) {
   if (state.health <= 0) return 'death'
   if (terrain.danger(state, transit) || state.health < initial.health || state.oxygen < initial.oxygen) return 'observed_hazard'
@@ -362,11 +398,13 @@ async function executeMacro (candidate, recoveryWait = false) {
   const limit = Math.min(candidate.max_ticks, budget - activeTicks)
   let state = initial
   let ticks = 0
-  let reason = interruptReason(state, initial)
+  // Only a stair/tunnel may start buried: it cuts the refilled own cell out before anything else.
+  const buried = ['stair_down', 'tunnel'].includes(candidate.action_kind) ? terrain.buried(initial.position) : []
+  let transit = buried.length ? initial.position.map(Math.floor).join(',') : null
+  let reason = interruptReason(state, initial, transit)
   let invalid = false
   let distance = 0
   let pathTaken = []
-  let transit = null
   let watch = () => null
   const events = []
   const tick = async () => {
@@ -383,6 +421,13 @@ async function executeMacro (candidate, recoveryWait = false) {
     const required = Math.ceil(bot.digTime(target) / 50)
     // T05 rejects zero-time digs; no macro may exceed 400 ticks, so a longer dig can never finish.
     if (!Number.isFinite(required) || required < 1 || required > 400) { reason = 'dig_failed'; return false }
+    let record = null
+    if (verifiedOres[block]) {
+      record = { block, position: point, natural, server_block_before: await serverBlockIs(point, block),
+        server_tool: await serverTool(), client_tool: bot.heldItem?.name ?? null, mined_tick: null, server_air_after: null,
+        drop_item: null, drop_entity_id: null, acquired_event_id: null, inventory_after: null }
+      verification.push(record)
+    }
     await bot.lookAt(new Vec3(...point).offset(0.5, 0.5, 0.5), true)
     const packet = { location: new Vec3(...point), face: 1 }
     bot._client.write('block_dig', { ...packet, status: 0 })
@@ -393,13 +438,14 @@ async function executeMacro (candidate, recoveryWait = false) {
         if (!reason && !valid()) reason = 'block_changed'
       }
       if (reason || ticks >= limit) return false
-      const broken = { block, position: point, tick: activeTicks, confirmed: false }
+      const broken = { block, position: point, tick: activeTicks, confirmed: false, record }
       minedTargets = minedTargets.filter(target => activeTicks - target.tick <= 2)
       minedTargets.push(broken)
       bot._client.write('block_dig', { ...packet, status: 2 })
       await tick()
       if (terrain.memory.get(point.join(','))?.block === 'air') {
         broken.confirmed = true
+        if (record) Object.assign(record, { mined_tick: activeTicks, server_air_after: await serverBlockIs(point, 'air') })
         events.push(event('mined', { item: block, quantity: 1, position: point }))
         return true
       }
@@ -595,9 +641,9 @@ async function executeMacro (candidate, recoveryWait = false) {
       Math.hypot(point[0] + 0.5 - state.position[0], point[1] + 0.5 - state.position[1] - 1.62, point[2] + 0.5 - state.position[2]) <= 4.5
     const pick = bot.heldItem?.name
     const toolAllowed = /_log$/.test(block) || (block === 'stone' && /^(wooden|stone|iron|golden|diamond|netherite)_pickaxe$/.test(pick)) ||
-      (block === 'iron_ore' && /^(stone|iron|diamond|netherite)_pickaxe$/.test(pick))
+      (Object.hasOwn(verifiedOres, block) && verifiedOres[block].test(pick))
     const allowed = exactKeys(candidate.params, ['blocks', 'block', 'map_version']) && typeof block === 'string' &&
-      (/_log$/.test(block) || ['stone', 'iron_ore'].includes(block)) && toolAllowed &&
+      (/_log$/.test(block) || block === 'stone' || Object.hasOwn(verifiedOres, block)) && toolAllowed &&
       mapVersion === initial.map_version && Array.isArray(blocks) && blocks.length >= 1 && blocks.length <= 8 &&
       new Set(blocks.map(p => JSON.stringify(p))).size === blocks.length && blocks.every(reachable) &&
       blocks.every((p, i) => i === 0 || blocks.slice(0, i).some(q => p.reduce((sum, v, axis) => sum + Math.abs(v - q[axis]), 0) === 1))
@@ -627,14 +673,21 @@ async function executeMacro (candidate, recoveryWait = false) {
       for (let n = 0; n < 20 && !reason && ticks < limit; n++) await tick()
     }
     if (!reason) reason = 'cluster_completed'
-  } else if (candidate.action_kind === 'stair_down') {
-    const { direction, stairs, stop_blocks: stopBlocks } = candidate.params
-    const allowed = exactKeys(candidate.params, ['direction', 'stairs', 'stop_blocks', 'map_version']) &&
+  } else if (['stair_down', 'tunnel'].includes(candidate.action_kind)) {
+    // A stair cuts a 3-high column one lower each step; a tunnel cuts a 2/3-high section level. Same loop and stops.
+    const stairway = candidate.action_kind === 'stair_down'
+    const { direction, stop_blocks: stopBlocks } = candidate.params
+    const count = stairway ? candidate.params.stairs : candidate.params.cells
+    const height = stairway ? 3 : candidate.params.height
+    const descent = stairway ? 1 : 0
+    const allowed = exactKeys(candidate.params, stairway ? ['direction', 'stairs', 'stop_blocks', 'map_version']
+      : ['direction', 'cells', 'height', 'stop_blocks', 'map_version']) &&
       Array.isArray(direction) && direction.length === 2 && direction.every(Number.isInteger) &&
-      Math.abs(direction[0]) + Math.abs(direction[1]) === 1 && [1, 2, 3, 4].includes(stairs) &&
+      Math.abs(direction[0]) + Math.abs(direction[1]) === 1 &&
+      (stairway ? [1, 2, 3, 4].includes(count) : Number.isInteger(count) && count >= 1 && count <= 8 && [2, 3].includes(height)) &&
       Array.isArray(stopBlocks) && stopBlocks.includes('diamond_ore') &&
       stopBlocks.every(block => typeof block === 'string' && block.endsWith('_ore')) && /_pickaxe$/.test(initial.tool)
-    if (!reason && !allowed) { invalid = true; reason = 'invalid_stair' }
+    if (!reason && !allowed) { invalid = true; reason = stairway ? 'invalid_stair' : 'invalid_tunnel' }
     let planned = []
     let pending = null
     let completed = 0
@@ -648,22 +701,30 @@ async function executeMacro (candidate, recoveryWait = false) {
       }
       return exposure.hazard ? 'observed_hazard' : 'ore_exposed'
     }
+    for (const point of allowed ? buried : []) {
+      const id = point.join(',')
+      const block = terrain.memory.get(id)?.block
+      if (reason || ticks >= limit) break
+      if (!terrain.visible.has(id)) { reason = 'cell_unobserved'; break }
+      await dig(point, block, () => terrain.visible.has(id) && terrain.memory.get(id)?.block === block)
+    }
+    if (!reason) transit = null
     const settle = async () => { for (let n = 0; n < 12 && !reason && ticks < limit && !terrain.stable(state); n++) await tick() }
     const landed = () => {
       if (!pending || Math.floor(state.position[1]) !== pending[1] || !terrain.stable(state)) return false
-      events.push(event('descended', { quantity: 1, position: pending }))
+      events.push(event(stairway ? 'descended' : 'tunneled', { quantity: 1, position: pending }))
       pathTaken.push(pending)
       completed++
       pending = transit = null
       return true
     }
-    while (allowed && !reason && completed < stairs && ticks < limit) {
+    while (allowed && !reason && completed < count && ticks < limit) {
       await settle()
       if (reason || ticks >= limit) break
       const [x, y, z] = state.position.map(Math.floor)
       const [nextX, nextZ] = [x + direction[0], z + direction[1]]
-      const column = [y + 1, y, y - 1].map(height => [nextX, height, nextZ])
-      const floor = [nextX, y - 2, nextZ]
+      const column = Array.from({ length: height }, (_, n) => [nextX, y + height - 1 - descent - n, nextZ])
+      const floor = [nextX, y - 1 - descent, nextZ]
       planned = [...column, floor]
       reason = watch()
       // Top-down: only a cut cell can expose the one under it, so nothing is judged unseen.
@@ -681,7 +742,7 @@ async function executeMacro (candidate, recoveryWait = false) {
           if (ticks < limit) await tick()
         }
       }
-      const target = [nextX + 0.5, y - 1, nextZ + 0.5]
+      const target = [nextX + 0.5, y - descent, nextZ + 0.5]
       let arrived = false
       let idle = 0
       while (!reason && ticks < limit) {
@@ -725,7 +786,7 @@ async function executeMacro (candidate, recoveryWait = false) {
         reason = reason || outcome
       }
       landed()
-      if (!reason) reason = completed === stairs ? 'stairs_completed' : 'macro_tick_limit'
+      if (!reason) reason = completed === count ? (stairway ? 'stairs_completed' : 'tunnel_completed') : 'macro_tick_limit'
     }
   } else {
     invalid = true
@@ -742,7 +803,7 @@ async function executeMacro (candidate, recoveryWait = false) {
   state = await observation()
   events.push(...drainEvents())
   if (invalid || ['output_not_ready', 'operation_failed', 'operation_unconfirmed', 'craft_unconfirmed', 'collect_unconfirmed', 'place_unconfirmed'].includes(reason)) events.push(event('failed'))
-  if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed', 'craft_completed', 'place_completed', 'furnace_loaded', 'furnace_collected', 'stairs_completed'].includes(reason)) events.push(event('stopped'))
+  if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed', 'craft_completed', 'place_completed', 'furnace_loaded', 'furnace_collected', 'stairs_completed', 'tunnel_completed'].includes(reason)) events.push(event('stopped'))
   return stepResult(candidate, started, ticks, state, events, reason,
     { invalid, path: pathTaken, distanceMoved: distance })
 }
@@ -804,6 +865,7 @@ async function sample () {
 async function clockTrial (payload) {
   if (!exactKeys(payload, ['scene', 'delay_seconds', 'trial']) || !scenes.includes(payload.scene) || ![0, 5, 10].includes(payload.delay_seconds) || ![1, 2, 3].includes(payload.trial)) fail('invalid_request')
   if (!bot) await reset({ episode_id: 'clock', attempt_id: 'clock-1' })
+  natural = false
   const manifest = JSON.parse(await fsp.readFile(path.join(server.snapshots, task, 'snapshot.json'), 'utf8'))
   const x = Math.floor(manifest.position[0]); const z = Math.floor(manifest.position[2]); const y = 100
   // These constructed diagnostic scenes are separate from natural task snapshots.
@@ -844,20 +906,26 @@ async function informationFixture (payload) {
     (Object.hasOwn(payload, 'scope') && !['wood', 'wood_tool', 'wood_break', 'wood_hazard', 'wood_drop', 'empty',
       'production', 'production_no_tool', 'production_no_fuel', 'production_hazard', 'iron',
       'production_craft', 'production_place', 'production_furnace', 'stair', 'stair_exposed', 'stair_coal', 'stair_floor',
-      'stair_gap', 'stair_break', 'stair_limit', 'stair_budget', 'stair_no_tool', 'stair_gravel', 'stair_hold', 'stair_iron'].includes(payload.scope)) ||
+      'stair_gap', 'stair_break', 'stair_limit', 'stair_budget', 'stair_no_tool', 'stair_gravel', 'stair_hold', 'stair_iron',
+      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'tunnel_sand', 'diamond', 'diamond_given'].includes(payload.scope)) ||
     (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
   await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
+  natural = false
   const x = Math.floor(bot.entity.position.x); const z = Math.floor(bot.entity.position.z); const y = 100
   // Constructed diagnostics only; frozen task snapshots are never edited.
   await server.command(`fill ${x - 9} ${y - 1} ${z - 9} ${x + 9} ${y + 6} ${z + 9} minecraft:air`)
   await server.command(`fill ${x - 9} ${y - 1} ${z - 9} ${x + 9} ${y - 1} ${z + 9} minecraft:stone`)
   await server.command(`fill ${x + 3} ${y} ${z - 8} ${x + 3} ${y + 5} ${z + 8} minecraft:stone`)
-  const stair = payload.scope?.startsWith('stair')
+  const stair = /^(stair|tunnel)/.test(payload.scope ?? '')
+  const tunnel = payload.scope?.startsWith('tunnel')
   // Rock east of the bot: every corridor cell stays hidden until the cell before it is cut.
   if (stair) await server.command(`fill ${x + 1} ${y - 9} ${z - 8} ${x + 9} ${y + 5} ${z + 8} minecraft:stone`)
-  const target = payload.scope === 'stair_coal' ? 'coal_ore' : payload.variant === 'lava' ? 'lava' : payload.scope === 'stair_iron' ? 'iron_ore' : 'diamond_ore'
+  const target = payload.scope === 'stair_coal' ? 'coal_ore' : payload.variant === 'lava' ? 'lava'
+    : ['stair_iron', 'tunnel_iron'].includes(payload.scope) ? 'iron_ore' : 'diamond_ore'
+  // Tunnels: a side-wall cell that only the third cut opens; other tunnel scenes keep it out of every cut's view.
   const cell = ['stair_exposed', 'stair_coal', 'stair_iron'].includes(payload.scope) ? `${x + 3} ${y - 1} ${z}`
-    : payload.scope === 'stair_floor' ? `${x + 2} ${y - 3} ${z}` : `${x + 4} ${y} ${z}`
+    : payload.scope === 'stair_floor' ? `${x + 2} ${y - 3} ${z}` : ['tunnel', 'tunnel_iron'].includes(payload.scope) ? `${x + 3} ${y} ${z + 1}`
+      : tunnel ? `${x + 4} ${y - 3} ${z}` : `${x + 4} ${y} ${z}`
   await server.command(`setblock ${cell} minecraft:${target}`)
   const verified = await server.command(`execute if block ${cell} minecraft:${target} run say fixture_target_ok`)
   if (!verified.includes('fixture_target_ok')) fail('backend_error')
@@ -912,10 +980,18 @@ async function informationFixture (payload) {
       await server.command(`setblock ${x} ${y - 1} ${z + 1} minecraft:lava`)
     }
   }
+  if (payload.scope?.startsWith('diamond')) {
+    await server.command('clear ResearchBot')
+    // An exposed constructed ore checks the break→drop→pickup link; a given diamond must never count as mined.
+    if (payload.scope === 'diamond') {
+      await server.command('replaceitem entity ResearchBot weapon.mainhand minecraft:iron_pickaxe 1')
+      await server.command(`setblock ${x + 1} ${y} ${z} minecraft:diamond_ore`)
+    } else await server.command('give ResearchBot minecraft:diamond 1')
+  }
   if (stair) {
     await server.command('clear ResearchBot')
-    const pick = payload.scope === 'stair_break' ? 'iron_pickaxe{Damage:249}' : payload.scope === 'stair_limit' ? 'stone_pickaxe' : 'iron_pickaxe'
-    if (payload.scope !== 'stair_no_tool') await server.command(`replaceitem entity ResearchBot weapon.mainhand minecraft:${pick} 1`)
+    const pick = ['stair_break', 'tunnel_break'].includes(payload.scope) ? 'iron_pickaxe{Damage:249}' : payload.scope === 'stair_limit' ? 'stone_pickaxe' : 'iron_pickaxe'
+    if (!['stair_no_tool', 'tunnel_no_tool'].includes(payload.scope)) await server.command(`replaceitem entity ResearchBot weapon.mainhand minecraft:${pick} 1`)
     if (payload.scope === 'stair_limit') await server.command(`fill ${x + 1} ${y - 5} ${z - 1} ${x + 5} ${y + 1} ${z + 1} minecraft:iron_block`)
     if (payload.scope === 'stair_gap') await server.command(`fill ${x + 1} ${y - 3} ${z} ${x + 1} ${y - 2} ${z} minecraft:air`)
     if (payload.scope === 'stair_gravel') await server.command(`fill ${x + 1} ${y + 1} ${z} ${x + 1} ${y + 3} ${z} minecraft:gravel`)
@@ -928,6 +1004,8 @@ async function informationFixture (payload) {
   let setupTicks = await advance(5, true)
   await pause()
   terrain.reset()
+  // Frozen until the first step: the sand then falls past the head into the feet cell, as in G2 attempt 1.
+  if (payload.scope === 'tunnel_sand') await server.command(`setblock ${x} ${y + 2} ${z} minecraft:sand`)
   if (payload.scope === 'wood_drop') {
     const initial = await observation()
     const mined = await executeMacro({ action_kind: 'mine_visible_cluster', params: { block: 'oak_log',
@@ -945,18 +1023,22 @@ async function informationFixture (payload) {
   }
   history = []
   activeTicks = observationIndex = 0
-  if (payload.scope === 'stair_budget') activeTicks = budget - 30
+  if (['stair_budget', 'tunnel_budget'].includes(payload.scope)) activeTicks = budget - 30
   return { fixture_ready: true, setup_ticks: setupTicks }
 }
 
 async function dispatch (request, admin) {
   if (!exactKeys(request, ['request_id', 'method', 'payload']) || !identifier(request.request_id) || !request.payload || Array.isArray(request.payload) || typeof request.payload !== 'object') fail('invalid_request')
-  const methods = ['reset', 'observe', 'step', 'prepare_world', 'clock_trial', 'certify_clock', 'information_fixture']
+  const methods = ['reset', 'observe', 'step', 'prepare_world', 'clock_trial', 'certify_clock', 'information_fixture', 'verification_log']
   if (!methods.includes(request.method)) fail('invalid_request')
-  if (admin ? !['reset', 'prepare_world', 'clock_trial', 'certify_clock', 'information_fixture'].includes(request.method) : !['observe', 'step'].includes(request.method)) fail('permission_denied')
+  if (admin ? !['reset', 'prepare_world', 'clock_trial', 'certify_clock', 'information_fixture', 'verification_log'].includes(request.method) : !['observe', 'step'].includes(request.method)) fail('permission_denied')
   if (request.method === 'reset') return await reset(request.payload)
   if (request.method === 'clock_trial') return await clockTrial(request.payload)
   if (request.method === 'information_fixture') return await informationFixture(request.payload)
+  if (request.method === 'verification_log') {
+    if (!exactKeys(request.payload, []) || !episode) fail('invalid_request')
+    return { ...episode, task, natural, records: verification }
+  }
   if (request.method === 'certify_clock') {
     if (!exactKeys(request.payload, []) || clockTrials.size !== 63 || await fingerprint() !== clockFingerprint) fail('invalid_request')
     const certificate = { fingerprint: clockFingerprint, trials: 63, pause_verified: true }

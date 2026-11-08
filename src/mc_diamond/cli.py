@@ -19,7 +19,7 @@ def main() -> int:
     parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "smoke-macros", "verify-clock", "prepare-world", "audit-information"])
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--diagnostic-fixture", choices=["wood", "wood_tool", "wood_break", "wood_hazard", "wood_drop", "empty",
-        "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron"])
+        "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron", "diamond", "diamond_given"])
     args = parser.parse_args()
     try:
         with args.config.open(encoding="utf-8") as handle:
@@ -63,7 +63,9 @@ def main() -> int:
                 return session.policy().observe()
             summary = run_episode(config, session.policy(), reset,
                                   episode_id, attempt_id, movement=args.command == "smoke-movement",
-                                  macros=args.command == "smoke-macros")
+                                  macros=args.command == "smoke-macros",
+                                  verification=(lambda: session._call("verification_log", {}, admin=True))
+                                  if args.command == "smoke-macros" else None)
         if summary.error or summary.invalid:
             print(f"Episode stopped: {summary.reason}", file=sys.stderr)
             return 1

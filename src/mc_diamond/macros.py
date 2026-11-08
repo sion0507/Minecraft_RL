@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import JsonValue
 
-from .navigation import descent_choices, fresh_movement_candidates, observed_routes
+from .navigation import ORE_TOP, PICKS, fresh_movement_candidates, observed_routes, ore_search_choices
 from .schema import Candidate, CandidateSet, Goal, Observation
 
 
@@ -16,12 +16,12 @@ def generate_wood_candidates(observation: Observation, goal: Goal) -> CandidateS
 def generate_resource_candidates(observation: Observation, goal: Goal) -> CandidateSet:
     candidates: list[Candidate] = []
     remaining = goal.quantity - observation.inventory.get(goal.target, 0)
-    block = "stone" if goal.target == "cobblestone" else goal.target
-    if not observation.remaining_ticks or remaining <= 0 or not (block.endswith("_log") or block in {"stone", "iron_ore"}):
+    block = {"cobblestone": "stone", "diamond": "diamond_ore"}.get(goal.target, goal.target)
+    if not observation.remaining_ticks or remaining <= 0 or not (block.endswith("_log") or block in {"stone", *ORE_TOP}):
         return CandidateSet(candidates=[], mask=[])
 
     def search() -> CandidateSet:
-        found = descent_choices(observation, [block]) if block == "iron_ore" else fresh_movement_candidates(observation)
+        found = ore_search_choices(observation, block, remaining) if block in ORE_TOP else fresh_movement_candidates(observation)
         return CandidateSet(candidates=found, mask=[True] * len(found))
 
     def add(kind: Literal["place_or_equip", "mine_visible_cluster", "move_observed", "wait"],
@@ -63,8 +63,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
                     and p[1] >= math.floor(observation.position[1]))
         if close(target):
             tools = (["netherite_axe", "diamond_axe", "iron_axe", "stone_axe", "wooden_axe", "golden_axe"] if block.endswith("_log")
-                     else ["netherite_pickaxe", "diamond_pickaxe", "iron_pickaxe", "stone_pickaxe"] +
-                     (["wooden_pickaxe", "golden_pickaxe"] if block == "stone" else []))
+                     else PICKS[:3] if block == "diamond_ore" else PICKS[:4] if block == "iron_ore" else PICKS)
             axes = [name for name in tools
                     if observation.inventory.get(name, 0)]
             if not block.endswith("_log") and not axes:
@@ -95,6 +94,6 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
                     seen_paths.add(signature)
                     add("move_observed", {"path": [[v for v in p] for p in path], "map_version": observation.map_version},
                         f"Approach exposed {goal.target} at {list(target)}")
-    if not candidates and block == "iron_ore":
-        return search()  # Seen but unreachable on this level: stairs are the only way to close in.
+    if not candidates and block in ORE_TOP:
+        return search()  # Seen but unreachable on this level: cutting is the only way to close in.
     return CandidateSet(candidates=candidates, mask=[True] * len(candidates))

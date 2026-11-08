@@ -3,6 +3,7 @@ const { Vec3 } = require('vec3')
 const hazards = new Set(['lava', 'water', 'fire', 'soul_fire', 'magma_block', 'cactus', 'sweet_berry_bush', 'campfire', 'soul_campfire'])
 // shortcut: ice supports are excluded until braking is calibrated on ice.
 const slippery = new Set(['ice', 'packed_ice', 'frosted_ice', 'blue_ice'])
+const falling = new Set(['sand', 'red_sand', 'gravel'])
 const key = p => p.join(',')
 
 class Terrain {
@@ -77,6 +78,15 @@ class Terrain {
     const feet = this.memory.get(key([x, y, z]))
     const head = this.memory.get(key([x, y + 1, z]))
     return !!(floor?.support && !floor.hazard && feet?.passable && !feet.hazard && head?.passable && !head.hazard)
+  }
+
+  // Own head/feet cells a falling block refilled (top-down) over an observed floor; [] when standing normally or in anything else.
+  buried (position) {
+    const [x, y, z] = position.map(Math.floor)
+    const cells = [[x, y + 1, z], [x, y, z]].map(p => this.memory.get(key(p)))
+    const floor = this.memory.get(key([x, y - 1, z]))
+    if (!floor?.support || floor.hazard || !cells.every(c => c && (c.passable || falling.has(c.block)))) return []
+    return cells.filter(c => !c.passable).map(c => c.position)
   }
 
   validPath (position, route) {

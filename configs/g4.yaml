@@ -1,0 +1,10 @@
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G4]
+rpc_timeout_seconds: 180.0
+max_decisions: 18000
+wall_limit_seconds: 2700.0
+goal:
+  goal_id: g4-diamond
+  kind: mine_diamond
+  target: diamond
+  quantity: 1

@@ -1,5 +1,84 @@
 # 실행 기록
 
+## 2026-11-08 — T07 #8 결함 수정 후 자연 G2 2차: 철3 미달 (#8 Open, `issue-8-t07`, push 안 함)
+
+**기준:** `d86ce4b`, 작업 트리 깨끗. 사용자 승인으로 1차 결함 두 개를 고쳤다. 내용과 2차 사전 등록은 DECISIONS 2026-11-08 "G2 1차 미달 결함 수정" 절에 있다. 원시 자료는 `artifacts/issue-8/attempt2/`에 있다.
+
+|검사|결과|
+|---|---|
+|개발(mock/scripted)|pytest 116 passed(반복 정지 종료 테스트 추가), mypy 30파일, `stair_macros.cjs`(모래 자기 칸·다른 블록·바닥 미관측)·`diamond_macros.cjs` 통과. 실제 검증과 별개다.|
+|미인증 사전 확인|`preflight-3` tunnel 장면만. `pause_verified=false`라서 증거가 아니다.|
+|시계|63/63, `pause_verified=true`. 새 fingerprint `d482a51c65e3498799d756b5971b6b7728660cd526198eb738a946bf606dc598`. `ab713f1a…`을 승계하지 않는다.|
+|정보 감사|exit0, `information_verified=true`.|
+|tunnel 장면 6개(관리자)|기존 5개는 틱·블록 수가 1차와 같다. 새 `tunnel_sand`: 첫 tunnel이 11틱에 `observed_hazard`(모래가 발 칸 [-241,100,186]을 채움). 둘째 tunnel이 그 모래부터 파고 2칸 `tunnel_completed`(58틱, `stable_boundary`).|
+|구성 fixture 3개|1차와 같다. diamond/iron은 연결 1건이고 `natural=false`라서 `diamond_success=false`. 지급 다이아는 0.|
+|자연 G4 smoke|1차와 같다. 2결정·49틱, `admin_verified={"diamond":1}`, `diamond_success=true`. 시작 방 벽의 노출 다이아라서 탐색 증거가 아니다(snapshot은 바꾸지 않음).|
+|**자연 G2 2차(사전 등록 1회)**|**미달.** exit1, `repeated_stall`, 93결정·1,073활성틱·174.7초, 철 0, `admin_verified={}`. y65→60, tunnel 17칸·계단 4칸·47블록. 관측 광석은 철 1([-241,57,210])·석탄 2.|
+|reset|G4 복원 통과.|
+|T06 회귀|exit0. 계단 장면 12개의 사유·틱이 T06과 같다. 자연 G3 15결정·2,196틱으로 같다.|
+|T05 회귀 1회째|**실패**(exit1). 제작 128결정 `decision_limit`, 원목3·조약돌13·철 0. 경계 3종은 결과 기록 전에 중단됐다. 원인은 아래에 있다.|
+|T04 회귀 1회째|**실패**(exit1). wood_hazard가 12결정 안에 원목을 줍지 못했다(이전 10결정). 마지막 reset은 서버 `backend_error`였다. 나머지 장면과 취소는 통과.|
+|T05 회귀 2회째|exit0. 제작 50결정·1,683틱, 원목4·조약돌11·철광석3·철괴3. 경계 3종 각 1틱, 취소·reset 통과.|
+|T04 회귀 2회째|exit0. 1·81, 3·103, 3·113, 10·70, 2·40, 0후보 12·240(exit1 예상). 취소·reset 통과.|
+
+원시 재계산: 5개 에피소드 모두 스텝 틱 합 = 요약 `active_ticks`, event ID 중복 없음, 전 스텝 `pause_verified=true`.
+
+**G2 2차 경과:**
+- 결정 0–3은 1차와 같다. 계단 4 → 남쪽 tunnel 8 → `unsafe_floor` → 동쪽 tunnel 중 모래가 발 칸을 채우고 `no_progress`.
+- 결정 4에서 수정이 작동했다. 동쪽 tunnel이 발 칸 모래 [-240,61,205]부터 파고 2칸을 더 나아갔다(111틱).
+- 그때 물 [-237,62,206]이 노출되어 `observed_hazard`로 멈췄다. 물이 흘러들어 봇이 물에 있는 스텝이 27회였고 [-238.6,60,208.6]까지 밀렸다.
+- 결정 13부터 후보 0개인 강제 대기가 71회였고, 대기도 위험 때문에 1틱씩 멈췄다. 철은 관측 35에 처음 보였지만 이미 물 속이라 다가갈 후보가 없었다.
+- 위치·지도·인벤토리가 바뀌지 않는 1틱 스텝 20회로 `repeated_stall` 종료했다. 1차처럼 45분을 소모하지 않았다(174.7초).
+- 침수 복구는 기존 결정상 T08 책임이다. 사전 등록대로 재시도하지 않았다. 서버 오류가 아니다.
+
+**T05/T04 1회째 실패 판단:**
+- T05 제작: 원목 드롭 위치가 달라 봇이 다른 곳에서 조약돌을 캤다. fixture 바닥은 한 겹짜리 공중 바닥이라 캔 자리가 구멍이 됐다. 구멍에 둘러싸인 위치에서 계단 4방향이 `unsafe_floor`였고, 이후 후보가 0개였다. 손에는 나무 곡괭이를 들었고 돌 곡괭이는 인벤토리에만 있었다.
+- 이 경로는 이번 수정(낙하 블록 자기 칸, 1틱 반복 정지)을 쓰지 않는다. 두 기능 모두 발동하지 않았다. 다만 T07의 철 탐색 후보 순서도 같은 막다른 곳에서는 도움이 되지 않는다.
+- 드롭 산포에 따라 결정 수가 50·55·61·128로 달라진다. 구성 fixture가 막다른 곳에 빠질 수 있다는 사실은 남는다.
+- T04 wood_hazard는 드롭을 줍는 경계 사례다. 마지막 reset의 `backend_error`는 서버 쪽이다. 각 1회 재실행한 결과를 위 표에 함께 적었다. 실패한 1회째를 지우지 않는다.
+
+**#8 상태:** 자연 G2 수락은 1·2차 모두 미달이므로 완료가 아니다. commit은 `issue-8-t07` 로컬에만 있다. push·PR·병합·이슈 종료·G4 snapshot 변경은 하지 않았다.
+
+
+## 2026-11-08 — T07 #8 인증 실행: 자연 G2 철3 미달 (#8 Open, 브랜치 `issue-8-t07`, push 안 함)
+
+**기준:** `ee76c2c`, 작업 트리 깨끗(`manifest.json` `worktree_dirty=false`). 원시 자료는 `artifacts/issue-8/final/`(12:35–13:44)에 있다. 결정 근거는 DECISIONS 2026-11-08 절이다.
+
+|검사|결과|
+|---|---|
+|개발(mock/scripted)|pytest 115 passed, mypy 30파일, `stair_macros.cjs`·`diamond_macros.cjs` 통과. 실제 검증과 별개다.|
+|시계|63/63, `pause_verified=true`. 새 fingerprint `ab713f1a44cda98ea4f9636f4745f3f969e88004743e9405d3ec9e0962090495`. 이전 `c6760e81…`을 승계하지 않는다.|
+|정보 감사|exit0, `information_verified=true`, `hidden_hazard_peek=false`. 새 범위 `diamond_mining`·`tunnel`·`tunnel_exposure`·`tunnel_iron_exposure`가 숨은 광석/용암 실제 쌍에 들어갔다.|
+|관리자 tunnel 장면 5개(자연 과제 아님)|8×2 `tunnel_completed` 201틱·16블록·8칸, 2×3 69틱·6블록, 내구도 1 곡괭이 `tool_broken` 9틱, 남은 예산 30틱 `active_tick_limit`(시작 활성 17,970), 무도구 `invalid_tunnel` 1틱. 모두 `stable_boundary`·`pause_verified`.|
+|구성 fixture 3개(`natural=false`)|`diamond`: iron_pickaxe 파괴→드롭 267→`acquired` 연결 1건, 그러나 `diamond_success=false`·`admin_verified={}`. `diamond_given`: 지급 다이아는 `acquired`·기록 0, exit1. `iron`: stone_pickaxe→iron_ore 연결 1건.|
+|자연 G4 smoke|exit0, 2결정·49틱. 시작 방 벽의 자연 `diamond_ore` [-240,12,188]을 iron_pickaxe로 파괴하고 그 드롭(엔티티 267)을 직접 주웠다. 서버 판정 before/after·도구·드롭·`acquired`가 연결되어 `admin_verified={"diamond":1}`, `diamond_success=true`다. 아래 주의 참고.|
+|**자연 G2 수락(사전 등록 1회)**|**미달.** exit1, `wall_time_limit`(2,700.4초), 2,111결정·2,974활성틱, 철 0, `admin_verified={}`. y65→61, tunnel 15칸·계단 4칸·41블록, 관측 광석은 석탄 1개뿐이다.|
+|reset|G4 복원 위치·iron_pickaxe 1·남은 18,000틱 확인(`results.json` reset passed).|
+|T06 회귀(`artifacts/issue-8/t06/`)|계단 관리자 장면 12개 모두 기대 사유. 틱 145·55·55·73·64·27·9·400·30·1·100·10이 T06과 같다. 자연 G3는 exit0, 15결정·2,196틱으로 T06과 같다.|
+|T05 회귀(`artifacts/issue-8/t05/`)|제작 exit0, goal_completed, 61결정·2,149틱(T06 55·1,805). 직접 원목4·조약돌11·철광석3, 제련 철괴3. 무도구·무연료·위험 경계 각 1틱. 취소·reset 통과.|
+|T04 회귀(`artifacts/issue-8/t04/`)|1·81, 3·71, 3·113, 10·70, 2·40, 0후보 12·240(exit1 예상). 취소·reset 통과. wood_tool이 T06(2·52)와 다르다.|
+
+T05·T04 차이: 채굴 직후 관측에서 원목 드롭이 더 멀리 떨어져 남아 있었다(T04 wood_tool: T06은 인벤토리 원목1·드롭0, 이번은 원목0·드롭 [-239.0,100,187.3]). 그래서 줍는 이동이 한 번 늘었다. 드롭 착지는 서버 난수 속도라서 이번 코드 변경 탓으로 보지 않는다. 다만 원인을 실험으로 분리하지는 않았다.
+
+원시 재계산: 5개 에피소드 모두 스텝 틱 합 = 요약 `active_ticks`, event ID 중복 없음, 전 스텝 `pause_verified=true`.
+
+**G2 미달 원인(코드 결함, 서버 오류 아님):**
+- 4번째 결정의 동쪽 tunnel이 모래 2칸 [-240,62/61,205]을 캐고 봇이 그 칸으로 들어갔다.
+- 위 칸 모래가 떨어져 봇 발 칸을 다시 채웠다. 머리 칸은 공기라 피해는 없었다(체력 20).
+- 이후 `terrain.danger`가 "안전하게 서 있지 않음"으로 판정해 모든 매크로가 첫 검사에서 1틱 `observed_hazard`로 끝났다.
+- 관측과 후보가 바뀌지 않아 같은 후보를 2,107회 반복했다. 회당 약 1.23초라 45분 상한까지 갔다. 결정 4개 867틱 뒤로는 진행이 없다.
+- 결함은 두 가지다. ① 진입 후 자기 칸으로 떨어진 모래/자갈을 처리하지 않는다. ② 같은 즉시 중단이 반복되어도 에피소드나 후보가 끝나지 않는다.
+- 사전 등록대로 재시도하지 않았다. 재시도는 서버 오류만 허용된다. 결함 수정 뒤 새 시도를 할지는 사용자 결정이다.
+
+**주의 — G4 smoke의 의미:**
+- 고정 G4 snapshot의 관리자 시작 방 벽에 자연 다이아 광석 2개([-240,12,188], [-241,12,188])가 0틱 관측부터 보인다. smoke는 그중 하나를 2결정 만에 캤다.
+- 그래서 판정 경로(자연 파괴→적절한 도구→자기 드롭→인벤토리)의 실제 확인일 뿐이다. 탐색 능력의 증거가 아니다. G4 smoke에서 tunnel은 0칸이다.
+- 노출되지 않은 상태의 탐색은 자연 G2 실행의 tunnel 15칸과 관리자 장면으로만 확인됐다.
+- 이 snapshot이면 G4 평가가 시작 위치에 크게 의존한다. T06에서 고정한 snapshot을 바꿀지는 사용자 결정이다.
+
+**#8 상태:** 자연 G2 수락 미달이므로 완료가 아니다. commit은 `issue-8-t07` 로컬에만 있다. push·PR·병합·이슈 종료는 하지 않았다.
+
+
 ## 2026-11-07 — T06 독립 리뷰 반영·새 fingerprint 재인증 (#7 Open, main 미병합)
 
 이 절이 아래 "#32 위 통합" 절의 현재 수치와 인증을 대체한다. 그 절은 `c905a12` 인증 이력으로 보존한다.

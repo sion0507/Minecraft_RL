@@ -182,6 +182,16 @@ uv run python tools/verify_t06.py --output artifacts/t06-new clock information s
 
 `stairs`는 관리자 장면이며 자연 과제 결과가 아닙니다. `g2`·`g2-directions`는 고정 G2의 접근 가능성·철 노출·실패 구간 진단이고, 자연 철3 직접 획득은 T07 #8의 인수 조건이므로 미달해도 이 검사의 실패로 합치지 않습니다. 시계 인증 전의 실행은 `pause_verified=false`인 사전 검사입니다.
 
+탐색·다이아 진단은 다음 명령을 사용합니다. `tunnel`은 선택한 방향과 단면(1×2 또는 1×3)으로 최대 8칸·400틱을 같은 높이로 파 나가며, 새로 노출된 다이아·목표 광석과 관측 위험에서 멈춥니다. G2(철)와 G4(다이아)는 목표 광석의 생성 상한 위에서는 계단, 그 안에서는 새 보행·tunnel·계단 후보를 받습니다. `configs/g4.yaml`은 고정 G4 snapshot(y=11 준비 공간, 철 곡괭이)에서 18,000 활성 틱·실제 45분 상한입니다.
+
+```bash
+uv run mc-diamond smoke-macros --config configs/g4.yaml
+uv run mc-diamond smoke-macros --config configs/g4.yaml --diagnostic-fixture diamond
+uv run python tools/verify_t07.py --output artifacts/t07-new clock information tunnels diamond g4 g2
+```
+
+다이아 성공(`diamond_success`)은 자연 에피소드에서 관리자 검증 로그가 광석 직접 파괴·철 이상 서버 도구·그 광석의 드롭·인벤토리 획득 사건을 모두 잇는 경우만입니다. 관리자 로그는 마지막 결정 뒤에만 읽으며 정책 입력에 들어가지 않습니다. `diamond`·`diamond_given` fixture는 관리자 배치·지급 진단(`natural=false`)이라 성공으로 세지 않습니다. G4 smoke에서 다이아 성공은 필수가 아닙니다. 자연 G2 철 3개(`admin_verified.iron_ore ≥ 3`, `configs/g2_natural.yaml`)는 T07 인수 조건이며 사전 등록한 상한·종료 기준은 DECISIONS 2026-11-08 절에 있습니다.
+
 ## 문서
 
 | 문서 | 내용 |
