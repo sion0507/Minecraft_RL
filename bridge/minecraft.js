@@ -113,7 +113,13 @@ async function connect () {
   })
   current.on('entityGone', entity => {
     const drop = drops.get(entity.id)
-    if (drop && !drop.collected) { drop.gone = true; diagnose('drop_gone_uncollected', drop) }
+    if (!drop || drop.collected) return
+    drop.gone = true
+    // A merge leaves the absorbing tracked stack within reach at that instant; lava, despawn or an untracked
+    // survivor leaves none, so such a drop can never be credited later.
+    drop.survivors = [...drops].filter(([id, other]) => id !== entity.id && !other.gone && !other.collected &&
+      other.item === drop.item && current.entities?.[id]?.position.distanceTo(entity.position) <= 1.5).map(([id]) => id)
+    diagnose('drop_gone_uncollected', drop, { survivors: drop.survivors })
   })
   await sleep(150)
 }
@@ -332,9 +338,10 @@ function drainEvents () {
   const held = inventory()
   for (const [id, drop] of drops) {
     if (!drop.target.confirmed || !drop.collected) continue
-    // The server merges nearby stacks: a larger pickup absorbs only tracked drops of this item that vanished
-    // uncollected, so an untracked stack merged into it never inflates the credit.
-    const merged = [...drops].filter(([, other]) => other.gone && !other.collected && other.target.confirmed && other.item === drop.item)
+    // The server merges nearby stacks: a larger pickup absorbs only tracked drops that vanished next to this very
+    // stack, so an untracked stack merged into it never inflates the credit.
+    const merged = [...drops].filter(([, other]) => other.gone && !other.collected && other.target.confirmed &&
+      other.survivors.includes(id))
       .slice(0, Math.max(0, (drop.collectedCount ?? drop.quantity) - drop.quantity))
     const quantity = drop.quantity + merged.reduce((sum, [, other]) => sum + other.quantity, 0)
     if ((held[drop.item] || 0) < (acquisitionBaseline[drop.item] || 0) + quantity) continue
@@ -668,14 +675,14 @@ async function executeMacro (candidate, recoveryWait = false) {
     // A stair cuts a 3-high column one lower each step; a tunnel cuts a 2/3-high section level. Same loop and stops.
     const stairway = candidate.action_kind === 'stair_down'
     const { direction, stop_blocks: stopBlocks } = candidate.params
-    const stairs = stairway ? candidate.params.stairs : candidate.params.cells
+    const count = stairway ? candidate.params.stairs : candidate.params.cells
     const height = stairway ? 3 : candidate.params.height
-    const drop = stairway ? 1 : 0
+    const descent = stairway ? 1 : 0
     const allowed = exactKeys(candidate.params, stairway ? ['direction', 'stairs', 'stop_blocks', 'map_version']
       : ['direction', 'cells', 'height', 'stop_blocks', 'map_version']) &&
       Array.isArray(direction) && direction.length === 2 && direction.every(Number.isInteger) &&
       Math.abs(direction[0]) + Math.abs(direction[1]) === 1 &&
-      (stairway ? [1, 2, 3, 4].includes(stairs) : Number.isInteger(stairs) && stairs >= 1 && stairs <= 8 && [2, 3].includes(height)) &&
+      (stairway ? [1, 2, 3, 4].includes(count) : Number.isInteger(count) && count >= 1 && count <= 8 && [2, 3].includes(height)) &&
       Array.isArray(stopBlocks) && stopBlocks.includes('diamond_ore') &&
       stopBlocks.every(block => typeof block === 'string' && block.endsWith('_ore')) && /_pickaxe$/.test(initial.tool)
     if (!reason && !allowed) { invalid = true; reason = stairway ? 'invalid_stair' : 'invalid_tunnel' }
@@ -701,13 +708,13 @@ async function executeMacro (candidate, recoveryWait = false) {
       pending = transit = null
       return true
     }
-    while (allowed && !reason && completed < stairs && ticks < limit) {
+    while (allowed && !reason && completed < count && ticks < limit) {
       await settle()
       if (reason || ticks >= limit) break
       const [x, y, z] = state.position.map(Math.floor)
       const [nextX, nextZ] = [x + direction[0], z + direction[1]]
-      const column = Array.from({ length: height }, (_, n) => [nextX, y + height - 1 - drop - n, nextZ])
-      const floor = [nextX, y - 1 - drop, nextZ]
+      const column = Array.from({ length: height }, (_, n) => [nextX, y + height - 1 - descent - n, nextZ])
+      const floor = [nextX, y - 1 - descent, nextZ]
       planned = [...column, floor]
       reason = watch()
       // Top-down: only a cut cell can expose the one under it, so nothing is judged unseen.
@@ -725,7 +732,7 @@ async function executeMacro (candidate, recoveryWait = false) {
           if (ticks < limit) await tick()
         }
       }
-      const target = [nextX + 0.5, y - drop, nextZ + 0.5]
+      const target = [nextX + 0.5, y - descent, nextZ + 0.5]
       let arrived = false
       let idle = 0
       while (!reason && ticks < limit) {
@@ -769,7 +776,7 @@ async function executeMacro (candidate, recoveryWait = false) {
         reason = reason || outcome
       }
       landed()
-      if (!reason) reason = completed === stairs ? (stairway ? 'stairs_completed' : 'tunnel_completed') : 'macro_tick_limit'
+      if (!reason) reason = completed === count ? (stairway ? 'stairs_completed' : 'tunnel_completed') : 'macro_tick_limit'
     }
   } else {
     invalid = true

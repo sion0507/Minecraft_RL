@@ -55,7 +55,7 @@ def stair_signature(value: dict[str, Any]) -> dict[str, Any]:
 def audit_stairs(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
     """Same visible rock, different hidden block: every decision before exposure must match."""
     def stair(scope: str, variant: str, plan: list[int], target: str | None = None,
-              kind: str = "stair_down") -> list[dict[str, Any]]:
+              kind: str = "stair_down", height: int = 2) -> list[dict[str, Any]]:
         prepared = session._call("information_fixture", {"variant": variant, "exposed": False, "scope": scope}, admin=True)
         if prepared.get("fixture_ready") is not True:
             raise ValueError("Stair fixture was not verified")
@@ -68,11 +68,12 @@ def audit_stairs(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
             candidates = CandidateSet(candidates=found, mask=[True] * len(found))
             emit("information_stair_observation", observation)
             emit("information_stair_candidates", candidates)
-            east = next((c for c in candidates.candidates if c.action_kind == kind and c.params["direction"] == [1, 0]
-                         and c.params.get("height", 2) == 2), None)
+            east = next((c for c in candidates.candidates if c.action_kind == kind and c.params["direction"] == [1, 0]), None)
             if east is None:
                 raise ValueError("Stair/tunnel candidate absent")
-            selected = east.model_copy(update={"params": {**east.params, "stairs" if kind == "stair_down" else "cells": stairs}})
+            # Workload and section are overridden alike: the 8-choice cap may leave the 1x3 option out above the ore layers.
+            workload = {"stairs": stairs} if kind == "stair_down" else {"cells": stairs, "height": height}
+            selected = east.model_copy(update={"params": {**east.params, **workload}})
             step = session.policy().step(selected)
             emit("information_stair_step", step)
             if (step.invalid or step.cancelled or step.terminated or step.clock_mode != "paused" or not step.pause_verified
@@ -98,12 +99,13 @@ def audit_stairs(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
     evidence.append({"scope": "stair", "exposed": False, "steps": 1, "actual_ticks": hidden[0][0]["step"]["actual_ticks"],
                      "input_sha256": hashlib.sha256(json.dumps(hidden[0], sort_keys=True).encode()).hexdigest()})
     # Positive control: the same block one cut ahead stops only once a cut really opens it.
-    for scope, target, item, kind, plan in [("stair_exposed", None, "diamond_ore", "stair_down", [1, 2]),
-                                            ("stair_iron", "iron_ore", "iron_ore", "stair_down", [1, 2]),
-                                            ("tunnel", "diamond_ore", "diamond_ore", "tunnel", [2, 8]),
-                                            ("tunnel_iron", "iron_ore", "iron_ore", "tunnel", [2, 8])]:
+    for scope, target, item, kind, plan, height in [("stair_exposed", None, "diamond_ore", "stair_down", [1, 2], 2),
+                                                    ("stair_iron", "iron_ore", "iron_ore", "stair_down", [1, 2], 2),
+                                                    ("tunnel", "diamond_ore", "diamond_ore", "tunnel", [2, 8], 2),
+                                                    ("tunnel", "diamond_ore", "diamond_ore", "tunnel", [2, 8], 3),
+                                                    ("tunnel_iron", "iron_ore", "iron_ore", "tunnel", [2, 8], 2)]:
         # The tunnel pair's first two cuts never reach the hidden wall cell: an unexposed level search must match too.
-        ore, lava = (stair(scope, variant, plan, target, kind) for variant in ["ore", "lava"])
+        ore, lava = (stair(scope, variant, plan, target, kind, height) for variant in ["ore", "lava"])
         if ore[0] != lava[0] or ore[1]["selected"] != lava[1]["selected"]:
             raise ValueError("Hidden variant changed the decision before exposure")
         if kind == "tunnel" and (ore[0]["step"]["reason"] != "tunnel_completed"
@@ -113,7 +115,7 @@ def audit_stairs(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
                 or ore[1]["step"]["actual_ticks"] != lava[1]["step"]["actual_ticks"]
                 or [e["item"] for e in ore[1]["step"]["events"] if e["kind"] == "exposed"] != [item]):
             raise ValueError("Exposure stop mismatch")
-        evidence.append({"scope": scope, "exposed": True, "steps": 2, "stop_ticks": ore[1]["step"]["actual_ticks"],
+        evidence.append({"scope": scope, "height": height, "exposed": True, "steps": 2, "stop_ticks": ore[1]["step"]["actual_ticks"],
                          "input_sha256": hashlib.sha256(json.dumps(ore[0], sort_keys=True).encode()).hexdigest()})
 
 

@@ -190,7 +190,7 @@ uv run mc-diamond smoke-macros --config configs/g4.yaml --diagnostic-fixture dia
 uv run python tools/verify_t07.py --output artifacts/t07-new clock information tunnels diamond g4 g2
 ```
 
-다이아 성공(`diamond_success`)은 자연 에피소드에서 관리자 검증 로그가 광석 직접 파괴·철 이상 서버 도구·그 광석의 드롭·인벤토리 획득 사건을 모두 잇는 경우만입니다. 관리자 로그는 마지막 결정 뒤에만 읽으며 정책 입력에 들어가지 않습니다. `diamond`·`diamond_given` fixture는 관리자 배치·지급 진단(`natural=false`)이라 성공으로 세지 않습니다. G4 smoke에서 다이아 성공은 필수가 아닙니다. 자연 G2 철 3개(`admin_verified.iron_ore ≥ 3`)는 T07 인수 조건이며 사전 등록한 상한·종료 기준은 DECISIONS 2026-11-08 절에 있습니다.
+다이아 성공(`diamond_success`)은 자연 에피소드에서 관리자 검증 로그가 광석 직접 파괴·철 이상 서버 도구·그 광석의 드롭·인벤토리 획득 사건을 모두 잇는 경우만입니다. 관리자 로그는 마지막 결정 뒤에만 읽으며 정책 입력에 들어가지 않습니다. `diamond`·`diamond_given` fixture는 관리자 배치·지급 진단(`natural=false`)이라 성공으로 세지 않습니다. G4 smoke에서 다이아 성공은 필수가 아닙니다. 자연 G2 철 3개(`admin_verified.iron_ore ≥ 3`, `configs/g2_natural.yaml`)는 T07 인수 조건이며 사전 등록한 상한·종료 기준은 DECISIONS 2026-11-08 절에 있습니다.
 
 ## 문서
 

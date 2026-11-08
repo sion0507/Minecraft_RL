@@ -52,6 +52,7 @@ async function main () {
     vm.runInContext(`
       var a = target('iron_ore', 1); var b = target('iron_ore', 2)
       var dropA = item(10, 'iron_ore', 1); var dropB = item(11, 'iron_ore', 2)
+      bot.entities = { 10: dropA, 11: dropB }
       bot.emit('itemDrop', dropA); bot.emit('itemDrop', dropB)
       bot.emit('entityGone', dropA)
       held.iron_ore = 2; bot.emit('playerCollect', bot.entity, item(11, 'iron_ore', 2, 2))
@@ -61,6 +62,19 @@ async function main () {
     assert.equal(vm.runInContext('a.record.acquired_event_id', c), events[0].event_id)
     assert.equal(vm.runInContext('b.record.acquired_event_id', c), events[0].event_id)
     assert.equal(vm.runInContext('drops.size', c), 0)
+  }
+  {
+    // A tracked drop that vanished away from any tracked stack (lava, despawn, untracked survivor) is never credited later.
+    const c = await connected()
+    vm.runInContext(`
+      var burned = target('diamond_ore', 1); target('diamond_ore', 6)
+      var lost = item(30, 'diamond', 1); var kept = item(31, 'diamond', 6)
+      bot.entities = { 30: lost, 31: kept }
+      bot.emit('itemDrop', lost); bot.emit('itemDrop', kept); bot.emit('entityGone', lost)
+      held.diamond = 2; bot.emit('playerCollect', bot.entity, item(31, 'diamond', 6, 2))
+    `, c)
+    assert.deepEqual(acquired(c.drainEvents()), [['diamond', 1, 31]])
+    assert.equal(vm.runInContext('burned.record.acquired_event_id', c), null)
   }
   {
     // An untracked stack merged into a tracked drop never inflates the credit.
