@@ -31,6 +31,12 @@ def linked(record: dict[str, Any], events: set[str], tool: str, drop: str) -> bo
                 and record["acquired_event_id"] in events)
 
 
+def tunnel(initial: Any, scope: str, cells: int, height: int, ticks: int) -> Candidate:
+    return Candidate.model_validate({"candidate_id": f"{scope}-{cells}-{height}", "action_kind": "tunnel",
+        "params": {"direction": [1, 0], "cells": cells, "height": height, "stop_blocks": ["diamond_ore"], "map_version": initial.map_version},
+        "max_ticks": ticks, "stop_rule_id": "tunnel_ore_or_hazard", "source_obs_id": initial.obs_id, "description": scope})
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
@@ -82,11 +88,7 @@ def main() -> None:
                     prepared = session._call("information_fixture", {"variant": "ore", "exposed": False, "scope": scope}, admin=True)
                     assert prepared.get("fixture_ready") is True
                     initial = session.policy().observe()
-                    selected = Candidate.model_validate({"candidate_id": f"{scope}-{cells}-{height}", "action_kind": "tunnel",
-                        "params": {"direction": [1, 0], "cells": cells, "height": height, "stop_blocks": ["diamond_ore"],
-                                   "map_version": initial.map_version},
-                        "max_ticks": ticks, "stop_rule_id": "tunnel_ore_or_hazard", "source_obs_id": initial.obs_id, "description": scope})
-                    step = session.policy().step(selected)
+                    step = session.policy().step(tunnel(initial, scope, cells, height, ticks))
                     name = f"{scope}-{cells}x{height}"
                     row: dict[str, Any] = {"natural_task": False, "observed_cells": [len(initial.observed_map),
                         len(step.observation.observed_map)], "prepared": prepared, "reason": step.reason, "ticks": step.actual_ticks,
@@ -114,6 +116,29 @@ def main() -> None:
                         assert initial.remaining_ticks == 30 and initial.active_ticks == 18000 - 30, "G4 18,000-tick budget"
                     if scope == "tunnel_no_tool":
                         assert step.invalid and step.actual_ticks == 1
+                # G2 attempt 1: sand fell into the entered feet cell. The next tunnel must cut the own cell out first.
+                prepared = session._call("information_fixture", {"variant": "ore", "exposed": False, "scope": "tunnel_sand"}, admin=True)
+                assert prepared.get("fixture_ready") is True
+                runs = []
+                for _ in range(2):
+                    before = session.policy().observe()
+                    runs.append((before, session.policy().step(tunnel(before, "tunnel_sand", 2, 2, 400))))
+                (args.output / "tunnel_sand.json").write_text(json.dumps([{"initial": a.model_dump(mode="json"),
+                    "step": b.model_dump(mode="json")} for a, b in runs]))
+                buried, second = runs[1]
+                feet = [int(v // 1) for v in buried.position]
+                seen = {tuple(int(v) for v in c.position): c.block for c in buried.observed_map}
+                mined = [e for e in second.events if e.kind == "mined"]
+                row = {"natural_task": False, "first_reason": runs[0][1].reason, "first_ticks": runs[0][1].actual_ticks,
+                       "buried_cell": seen.get(tuple(feet)), "reason": second.reason, "ticks": second.actual_ticks,
+                       "first_mined": [mined[0].item, mined[0].position] if mined else None,
+                       "tunneled": sum(e.kind == "tunneled" for e in second.events), "stable_boundary": second.stable_boundary,
+                       "pause_verified": all(s.pause_verified for _, s in runs)}
+                results["tunnel_sand"] = row
+                print(json.dumps({"check": "tunnel_sand", **row}), flush=True)
+                assert row["buried_cell"] == "sand", "the scene must bury the feet cell before the second tunnel"
+                assert second.reason == "tunnel_completed" and row["tunneled"] == 2 and second.stable_boundary
+                assert row["first_mined"] == ["sand", [float(v) for v in feet]]
         if "diamond" in checks:
             # Constructed fixtures (natural_task=false): the break→drop→pickup link, and a given diamond that never counts.
             # `iron` checks the same link for the stone pickaxe/iron path before the one natural G2 attempt.
@@ -158,7 +183,7 @@ def main() -> None:
             print(json.dumps({"check": name + "-access", "direct_verified": result["direct_verified"], **{k: report[k] for k in
                 ["lowest_y", "tunnels", "stairs", "mined", "observed_ores", "exposed", "reasons", "final_durability"]}}), flush=True)
             assert summary["provided_inventory"] == provided and summary["active_ticks"] <= limit and summary["error"] is None
-            assert summary["reason"] in {"goal_completed", "active_tick_limit", "wall_time_limit"}, summary["reason"]
+            assert summary["reason"] in {"goal_completed", "active_tick_limit", "wall_time_limit", "repeated_stall"}, summary["reason"]
             assert report["start"] == [-240.5, 11.0 if name == "g4" else 65.0, 186.5], "fixed snapshot start"
             if name == "g2" and not result["direct_verified"]:
                 failures.append("natural G2 did not directly acquire three admin-verified iron ore")

@@ -398,11 +398,13 @@ async function executeMacro (candidate, recoveryWait = false) {
   const limit = Math.min(candidate.max_ticks, budget - activeTicks)
   let state = initial
   let ticks = 0
-  let reason = interruptReason(state, initial)
+  // Only a stair/tunnel may start buried: it cuts the refilled own cell out before anything else.
+  const buried = ['stair_down', 'tunnel'].includes(candidate.action_kind) ? terrain.buried(initial.position) : []
+  let transit = buried.length ? initial.position.map(Math.floor).join(',') : null
+  let reason = interruptReason(state, initial, transit)
   let invalid = false
   let distance = 0
   let pathTaken = []
-  let transit = null
   let watch = () => null
   const events = []
   const tick = async () => {
@@ -699,6 +701,14 @@ async function executeMacro (candidate, recoveryWait = false) {
       }
       return exposure.hazard ? 'observed_hazard' : 'ore_exposed'
     }
+    for (const point of allowed ? buried : []) {
+      const id = point.join(',')
+      const block = terrain.memory.get(id)?.block
+      if (reason || ticks >= limit) break
+      if (!terrain.visible.has(id)) { reason = 'cell_unobserved'; break }
+      await dig(point, block, () => terrain.visible.has(id) && terrain.memory.get(id)?.block === block)
+    }
+    if (!reason) transit = null
     const settle = async () => { for (let n = 0; n < 12 && !reason && ticks < limit && !terrain.stable(state); n++) await tick() }
     const landed = () => {
       if (!pending || Math.floor(state.position[1]) !== pending[1] || !terrain.stable(state)) return false
@@ -897,7 +907,7 @@ async function informationFixture (payload) {
       'production', 'production_no_tool', 'production_no_fuel', 'production_hazard', 'iron',
       'production_craft', 'production_place', 'production_furnace', 'stair', 'stair_exposed', 'stair_coal', 'stair_floor',
       'stair_gap', 'stair_break', 'stair_limit', 'stair_budget', 'stair_no_tool', 'stair_gravel', 'stair_hold', 'stair_iron',
-      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'diamond', 'diamond_given'].includes(payload.scope)) ||
+      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'tunnel_sand', 'diamond', 'diamond_given'].includes(payload.scope)) ||
     (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
   await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
   natural = false
@@ -994,6 +1004,8 @@ async function informationFixture (payload) {
   let setupTicks = await advance(5, true)
   await pause()
   terrain.reset()
+  // Frozen until the first step: the sand then falls past the head into the feet cell, as in G2 attempt 1.
+  if (payload.scope === 'tunnel_sand') await server.command(`setblock ${x} ${y + 2} ${z} minecraft:sand`)
   if (payload.scope === 'wood_drop') {
     const initial = await observation()
     const mined = await executeMacro({ action_kind: 'mine_visible_cluster', params: { block: 'oak_log',

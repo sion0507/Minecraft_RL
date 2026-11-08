@@ -58,6 +58,9 @@ def admin_verified(log: dict[str, Any], acquired: dict[str, Event]) -> dict[str,
     return verified
 
 
+STALL_LIMIT = 20  # consecutive <=1-tick steps with no position/map/inventory/durability change
+
+
 def descent_completed(step: StepResult) -> bool:
     """Iron pickaxe carried (inventory, not hand) through one uninterrupted 20-tick hold on observed ground at y=5-12."""
     return (SAFE_BAND[0] <= math.floor(step.observation.position[1]) <= SAFE_BAND[1]
@@ -89,6 +92,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     direct_acquired: dict[str, int] = {}
     acquired_events: dict[str, Event] = {}
     verified: dict[str, int] = {}
+    stalled = 0
     terminated = truncated = invalid = completed = False
     reason = "decision_limit"
     error: ErrorInfo | None = None
@@ -211,11 +215,18 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 completed = (not step.invalid and acquired_target > 0
                              and step.observation.inventory.get(config.goal.target, 0) >= config.goal.quantity)
             terminated, truncated, invalid, reason = step.terminated, step.truncated, step.invalid, step.reason
+            unchanged = [step.observation.position, step.observation.map_version, step.observation.inventory, step.observation.tool_durability]
+            stalled = stalled + 1 if step.actual_ticks <= 1 and not step.cancelled and unchanged == [
+                observation.position, observation.map_version, observation.inventory, observation.tool_durability] else 0
             observation = step.observation
             if terminated or truncated or invalid:
                 break
             if macros and completed:
                 terminated, reason = True, "goal_completed"
+                break
+            if stalled >= STALL_LIMIT:
+                # Nothing moved, cut or changed: the same choice would repeat until a budget ends (T07 G2 attempt 1).
+                truncated, reason = True, "repeated_stall"
                 break
         else:
             truncated, reason = True, "decision_limit"

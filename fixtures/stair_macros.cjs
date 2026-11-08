@@ -321,6 +321,37 @@ async function main () {
     }
   }
   {
+    // G2 attempt 1: sand fell into the cell the bot had just entered; every later macro stopped in one tick.
+    const s = scene()
+    let fell = false
+    s.c.afterTick = bot => {
+      if (!fell && bot.entity.position.x >= 1.1) { fell = true; s.changed.set('1,65,0', 'sand') }
+    }
+    const buried = await s.tunnel({ cells: 2 })
+    assert.equal(fell, true)
+    assert.notEqual(buried.reason, 'tunnel_completed')
+    const step = await s.tunnel({ cells: 1 })
+    assert.equal(step.reason, 'tunnel_completed', 'the stair/tunnel cuts the refilled own cell first')
+    assert.deepEqual(s.dug.slice(-3), [[1, 65, 0], [2, 66, 0], [2, 65, 0]])
+    assert.equal(kinds(step, 'mined')[0].item, 'sand')
+    assert.equal(step.stable_boundary, true)
+    assert.deepEqual(step.observation.position.map(Math.floor), [2, 65, 0])
+  }
+  for (const [block, label, seen] of [['gravel', 'stair', true], ['stone', 'tunnel', true], ['sand', 'tunnel', false]]) {
+    // Only a falling block over an observed floor is cut out; anything else stays an observed hazard with nothing cut.
+    const s = scene({ blocks: seen ? {} : { '0,65,0': block } })
+    if (seen) { await s.observe(); s.changed.set('0,65,0', block) }
+    const step = label === 'stair' ? await s.stair() : await s.tunnel()
+    if (block === 'gravel') {
+      assert.equal(step.reason, 'stairs_completed')
+      assert.deepEqual(s.dug[0], [0, 65, 0])
+    } else {
+      assert.equal(step.reason, 'observed_hazard', block)
+      assert.ok(step.actual_ticks <= 1, block)
+      assert.deepEqual(s.dug, [], block)
+    }
+  }
+  {
     const s = scene({ blocks: { '1,64,0': 'air', '1,63,0': 'air' } })
     const step = await s.tunnel({ cells: 1 })
     assert.equal(step.reason, 'unsafe_floor')

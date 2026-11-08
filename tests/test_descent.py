@@ -300,3 +300,18 @@ def test_shipping_bridge_diamond_and_merge_contract() -> None:
     result = subprocess.run(["node", "fixtures/diamond_macros.cjs"], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"passed": True}
+
+
+def test_cli_ends_a_run_of_identical_one_tick_stops(tmp_path: Path) -> None:
+    """G2 attempt 1 repeated the same 1-tick `observed_hazard` 2,107 times until the wall limit; 20 in a row end the episode."""
+    stuck = [stop_step(actual_ticks=1, source_obs_id=f"obs-{n}", reason="observed_hazard", stop_evidence=[f"obs-{n + 1}", "observed_hazard"],
+                       events=[{"kind": "stopped", "source": "mock", "event_id": f"stop-{n}"}],
+                       observation={"active_ticks": n + 1, "remaining_ticks": 17999 - n}) for n in range(25)]
+    result, output = run(tmp_path, chamber(), stuck, goal=DIAMOND)
+    summary = output[-1]["data"]
+    assert summary["reason"] == "repeated_stall" and summary["truncated"] and summary["decisions"] == 20, summary
+    moving = [stop_step(actual_ticks=1, source_obs_id=f"obs-{n}", reason="observed_hazard", stop_evidence=[f"obs-{n + 1}", "observed_hazard"],
+                        events=[{"kind": "stopped", "source": "mock", "event_id": f"stop-{n}"}],
+                        observation={"active_ticks": n + 1, "remaining_ticks": 17999 - n, "map_version": n + 2}) for n in range(25)]
+    _, output = run(tmp_path, chamber(), moving, goal=DIAMOND)
+    assert output[-1]["data"]["reason"] != "repeated_stall", "a changing map is progress"
