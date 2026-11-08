@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 from pathlib import Path
 from uuid import uuid4
@@ -6,12 +7,31 @@ from uuid import uuid4
 import yaml
 from pydantic import ValidationError
 
-from .episode import emit, run_episode
+from .episode import emit, first_candidate, run_episode
 from .doctor import doctor
 from .clock import verify_clock
 from .information import audit_information
 from .rpc import EpisodeError, RpcSession
-from .schema import EpisodeConfig, EpisodeSummary, ErrorInfo, Observation
+from .schema import Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Observation
+
+
+def human_select(saved: CandidateSet, observation: Observation) -> Candidate:
+    """#36 feasibility diagnostic: the operator only picks among the generated candidates; code executes and judges."""
+    ores = sorted((sum((a - b) ** 2 for a, b in zip(s.position, observation.position)), s.block, [int(v) for v in s.position])
+                  for s in observation.observed_map if s.block.endswith("_ore"))
+    print(f"\n남은 {observation.remaining_ticks}틱 | 위치 {[round(v, 1) for v in observation.position]} | 체력 {observation.health:g}"
+          f" | 도구 {observation.tool} | 인벤토리 {observation.inventory}", file=sys.stderr)
+    if ores:
+        print("관측한 광석: " + ", ".join(f"{block} {position}" for _, block, position in ores[:10]), file=sys.stderr)
+    for index, candidate in enumerate(saved.candidates, 1):
+        print(f"  {index}. {candidate.action_kind}: {candidate.description} {json.dumps(candidate.params)[:160]}", file=sys.stderr)
+    while True:
+        print(f"번호 (1-{len(saved.candidates)}): ", end="", file=sys.stderr, flush=True)
+        answer = sys.stdin.readline()
+        if not answer:
+            raise EOFError("human selector input closed")
+        if answer.strip().isdigit() and 1 <= int(answer) <= len(saved.candidates):
+            return saved.candidates[int(answer) - 1]
 
 
 def main() -> int:
@@ -20,10 +40,21 @@ def main() -> int:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--diagnostic-fixture", choices=["wood", "wood_tool", "wood_break", "wood_hazard", "wood_drop", "empty",
         "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron", "diamond", "diamond_given"])
+    place = parser.add_mutually_exclusive_group()
+    place.add_argument("--start", type=int, nargs=3, metavar=("X", "Y", "Z"), help="prepare-world: C4-G3 surface start block")
+    place.add_argument("--g4", type=int, nargs=3, metavar=("X", "Y", "Z"), help="prepare-world: user-confirmed G4 start block")
+    parser.add_argument("--select", choices=["fixed", "human"], default="fixed",
+                        help="smoke-macros: human = operator picks candidates (#36 feasibility diagnostic, no wall limit)")
     args = parser.parse_args()
+    if args.command == "prepare-world" and args.start is None and args.g4 is None:
+        parser.error("prepare-world requires --start X Y Z or --g4 X Y Z")
     try:
         with args.config.open(encoding="utf-8") as handle:
             config = EpisodeConfig.model_validate(yaml.safe_load(handle))
+        if args.select == "human":
+            if args.command != "smoke-macros" or config.backend != "rpc" or args.diagnostic_fixture:
+                raise ValueError("The human selector runs only natural actual smoke-macros")
+            config = config.model_copy(update={"wall_limit_seconds": None})  # thinking happens while paused
         if args.diagnostic_fixture and (args.command != "smoke-macros" or config.backend != "rpc"):
             raise ValueError("Diagnostic fixtures require actual smoke-macros")
         if args.command == "doctor":
@@ -46,7 +77,7 @@ def main() -> int:
         episode_id, attempt_id = str(uuid4()), str(uuid4())
         with RpcSession(command, config.rpc_timeout_seconds) as session:
             if args.command == "prepare-world":
-                emit("world_prepared", {**session._call("prepare_world", {}, admin=True)})
+                emit("world_prepared", {**session._call("prepare_world", {"start": list(args.start)} if args.start else {"g4": list(args.g4)}, admin=True)})
                 return 0
             if args.command == "verify-clock":
                 return 0 if verify_clock(session) else 1
@@ -64,6 +95,8 @@ def main() -> int:
             summary = run_episode(config, session.policy(), reset,
                                   episode_id, attempt_id, movement=args.command == "smoke-movement",
                                   macros=args.command == "smoke-macros",
+                                  select=human_select if args.select == "human" else first_candidate,
+                                  selector_mode="human" if args.select == "human" else "mock_fixed",
                                   verification=(lambda: session._call("verification_log", {}, admin=True))
                                   if args.command == "smoke-macros" else None)
         if summary.error or summary.invalid:

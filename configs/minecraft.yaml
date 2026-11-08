@@ -1,6 +1,6 @@
 backend: rpc
 command: [node, bridge/minecraft.js, --task, C4]
-rpc_timeout_seconds: 60.0
+rpc_timeout_seconds: 180.0  # prepare-world restarts the server several times
 max_decisions: 2
 goal:
   goal_id: clock-wait

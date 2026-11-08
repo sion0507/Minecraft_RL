@@ -1,6 +1,7 @@
 """T07 actual Minecraft checks from the repository root; no models or APIs.
 
-Order: clock, information, tunnels (administrator scenes), diamond (constructed fixtures), g4, g2 (natural acceptance).
+Order: clock, information, tunnels (administrator scenes), diamond (constructed fixtures), g4, g2.
+Natural g4/g2 are feasibility diagnostics (#36): success is recorded; only an executor stall fails.
 Every invocation needs a new output directory. Finally the G4 snapshot is restored and checked.
 Without a matching clock certificate these are preflights: pause_verified stays false in the record.
 """
@@ -22,6 +23,10 @@ from mc_diamond.schema import Candidate, EpisodeConfig
 SCENES = [("tunnel_long", 8, 2, 400, "tunnel_completed"), ("tunnel_long", 2, 3, 400, "tunnel_completed"),
           ("tunnel_break", 2, 2, 400, "tool_broken"), ("tunnel_budget", 8, 2, 30, "active_tick_limit"),
           ("tunnel_no_tool", 1, 2, 400, "invalid_tunnel")]
+
+
+def start(task: str) -> Any:
+    return json.loads(Path(f"worlds/snapshots/{task}/snapshot.json").read_text())["position"]
 
 
 def linked(record: dict[str, Any], events: set[str], tool: str, drop: str) -> bool:
@@ -184,9 +189,9 @@ def main() -> None:
                 ["lowest_y", "tunnels", "stairs", "mined", "observed_ores", "exposed", "reasons", "final_durability"]}}), flush=True)
             assert summary["provided_inventory"] == provided and summary["active_ticks"] <= limit and summary["error"] is None
             assert summary["reason"] in {"goal_completed", "active_tick_limit", "wall_time_limit", "repeated_stall"}, summary["reason"]
-            assert report["start"] == [-240.5, 11.0 if name == "g4" else 65.0, 186.5], "fixed snapshot start"
-            if name == "g2" and not result["direct_verified"]:
-                failures.append("natural G2 did not directly acquire three admin-verified iron ore")
+            assert report["start"] == start("G4" if name == "g4" else "G2"), "fixed snapshot start"
+            if summary["reason"] == "repeated_stall":
+                failures.append(f"natural {name} ended in repeated_stall: executor defect")
         assert not failures, failures  # Recorded first: an acceptance miss still keeps every artefact and the reset.
     finally:
         try:
@@ -195,7 +200,7 @@ def main() -> None:
                 assert restored == session.policy().observe()
                 (args.output / "restore.json").write_text(restored.model_dump_json())
                 assert restored.active_ticks == 0 and restored.inventory == {"iron_pickaxe": 1} and restored.health == 20
-                assert restored.position == [-240.5, 11.0, 186.5] and restored.remaining_ticks == 18000
+                assert restored.position == start("G4") and restored.remaining_ticks == 18000
                 results["reset"] = {"passed": True}
         except Exception as failure:
             results["reset"] = {"passed": False, "error_type": type(failure).__name__}

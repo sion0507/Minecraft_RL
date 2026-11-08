@@ -122,7 +122,14 @@ uv run python tools/verify_tick_sync.py --output artifacts/t05a-sync-new
 bridge·mod·설정·snapshot을 바꾼 뒤에는 그 fingerprint로 63조건·정보 감사·관련 회귀를
 다시 확인해야 합니다. T06도 T05A 인증을 승계하지 않고 새로 인증했습니다.
 
-최초 snapshot이 없는 새 설치에서만 `uv run mc-diamond prepare-world --config configs/minecraft.yaml`을 실행합니다. 기존 snapshot 덮어쓰기는 거부합니다. 이 작업공간은 C4/G1–G4를 이미 준비했습니다. 단일 자연 월드의 시드와 지상 spawn을 광석 조사 전에 정했고, G2/G3/G4의 도구 지급과 G4의 고정 지하 준비 공간은 관리자 준비로 기록했습니다. 월드·snapshot·실행 산출물은 Git에서 제외합니다.
+snapshot이 없는 새 설치에서만 `uv run mc-diamond prepare-world --config configs/minecraft.yaml --start X Y Z`로 C4/G1–G3를 만들고, 사용자가 G4 시작 칸을 확인한 뒤 `--g4 X Y Z`로 G4만 만듭니다. 기존 snapshot 덮어쓰기는 거부합니다. 이 작업공간은 2026-11-08 사용자가 고른 고정 월드로 준비했습니다(#36). Java 1.16.5, 시드 `-5755571633112603064`, 시작 블록 `-110 65 105`, G4 시작 블록 `-146 12 96`(다이아가 있는 자연 동굴)입니다. 시드·동굴·광석 위치는 운영자 정보라서 정책에 주지 않습니다. 결과는 선정된 고정 환경에서의 성능이며, 다른 월드 일반화는 검증하지 않습니다. 이전 시드 `20261102` 환경은 Git에서 제외한 `archive/seed-20261102/`에 보존합니다. 월드·snapshot·실행 산출물도 Git에서 제외합니다.
+
+자연 G2/G4 가능성 진단(#36)에서는 사용자가 후보 번호만 고르고, 실행과 판정은 코드가 합니다. 결정 대기 중 게임이 정지되므로 실제 경과 상한은 적용하지 않습니다. 이 기록은 학습·성능 결과에 쓰지 않습니다.
+
+```bash
+uv run mc-diamond smoke-macros --config configs/g2_natural.yaml --select human > artifacts/issue-36/human/g2.jsonl
+uv run mc-diamond smoke-macros --config configs/g4.yaml --select human > artifacts/issue-36/human/g4.jsonl
+```
 
 ```bash
 uv run mc-diamond verify-clock --config configs/minecraft.yaml

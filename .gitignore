@@ -39,6 +39,7 @@ node_modules/
 /reports/
 /checkpoints/
 /worlds/
+/archive/
 .cache/
 *.log
 

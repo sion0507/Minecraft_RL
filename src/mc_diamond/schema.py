@@ -112,7 +112,7 @@ class ErrorInfo(Contract):
 
 class SelectionResult(Contract):
     candidate_id: Identifier
-    selector_mode: Literal["mock_fixed", "forced_wait", "sampling", "argmax", "native_choice", "fallback"]
+    selector_mode: Literal["mock_fixed", "human", "forced_wait", "sampling", "argmax", "native_choice", "fallback"]
     probabilities: dict[Identifier, Annotated[float, Field(ge=0, le=1)]] | None
     latency_seconds: float = Field(ge=0)
     provider: str | None

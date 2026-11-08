@@ -817,41 +817,73 @@ async function cancelSelection (candidate) {
   return result
 }
 
-async function prepareWorld () {
+const blockCell = (cell, low, high) => Array.isArray(cell) && cell.length === 3 && cell.every(Number.isSafeInteger) && cell[1] >= low && cell[1] <= high
+
+// The bot stands centred on a natural cell: solid non-falling floor, dry clear feet and head.
+function standsOn ([x, y, z]) {
+  const block = dy => bot.blockAt(new Vec3(x, y + dy, z))
+  const position = clientState().position
+  if (isDeepStrictEqual(position, [x + 0.5, y, z + 0.5]) && block(-1)?.boundingBox === 'block' &&
+    !['sand', 'red_sand', 'gravel'].includes(block(-1).name) &&
+    [0, 1].every(dy => block(dy)?.boundingBox === 'empty' && !['water', 'lava'].includes(block(dy).name))) return position
+  process.stderr.write(JSON.stringify({ diagnostic: 'start_not_standable', cell: [x, y, z], position, blocks: [-1, 0, 1].map(dy => block(dy)?.name ?? null) }) + '\n')
+  fail('backend_error')
+}
+
+async function prepareWorld (start) {
+  // C4–G3 start on the user-provided surface block (#36). G4 is prepared separately once the user confirms it.
+  if (!blockCell(start, 1, 254)) fail('invalid_request')
   if (await fsp.stat(server.snapshots).catch(() => null)) fail('invalid_request')
+  const [x, y, z] = start
+  const seed = (await fsp.readFile(path.join(server.root, 'server.properties'), 'utf8')).match(/^level-seed=(\S+)$/m)?.[1]
+  if (!seed) fail('invalid_request')
+  await server.start()
+  // Radius 0 spawns a new player on exactly this column; the restart loads the spawn chunks around it.
+  for (const command of ['gamerule spawnRadius 0', `setworldspawn ${x} ${y} ${z}`]) await server.command(command)
+  await server.stop()
   await server.start()
   frozen = server.initiallyFrozen
   await connect()
-  const spawn = clientState().position
-  const x = Math.floor(spawn[0]); const y = Math.floor(spawn[1]); const z = Math.floor(spawn[2])
-  for (const command of ['difficulty peaceful', 'gamemode survival ResearchBot', 'gamerule spawnRadius 0',
-    'setworldspawn ' + x + ' ' + y + ' ' + z, 'clear ResearchBot', 'effect clear ResearchBot',
+  const spawn = standsOn(start)
+  for (const command of ['difficulty peaceful', 'gamemode survival ResearchBot', 'clear ResearchBot', 'effect clear ResearchBot',
     'effect give ResearchBot minecraft:instant_health 1 10 true', 'effect give ResearchBot minecraft:saturation 1 10 true', 'time set 1000']) await server.command(command)
   await pause()
   await disconnect()
   await server.stop()
+  const origin = { seed, start_block: start, position: spawn }
   const result = []
-  for (const name of ['C4', 'G1']) result.push(await server.saveSnapshot(name, { position: spawn, inventory: {}, preparation: 'natural surface spawn; no ore search' }))
-  for (const name of ['G2', 'G3', 'G4']) {
+  for (const name of ['C4', 'G1']) result.push(await server.saveSnapshot(name, { ...origin, inventory: {}, preparation: 'user-provided start block (#36); natural surface; no ore search' }))
+  for (const name of ['G2', 'G3']) {
     await server.restore('C4')
     frozen = server.initiallyFrozen
     await connect()
     const tool = name === 'G2' ? 'stone_pickaxe' : 'iron_pickaxe'
     await server.command('give ResearchBot minecraft:' + tool)
-    let position = spawn
-    if (name === 'G4') {
-      // Fixed coordinates chosen independently of ores; preparation is administrator assistance.
-      await server.command(`fill ${x - 1} 10 ${z - 1} ${x + 1} 10 ${z + 1} minecraft:stone`)
-      await server.command(`fill ${x - 1} 11 ${z - 1} ${x + 1} 13 ${z + 1} minecraft:air`)
-      position = [x + 0.5, 11, z + 0.5]
-      await server.command('tp ResearchBot ' + position.join(' '))
-    }
     await pause()
     await disconnect()
     await server.stop()
-    result.push(await server.saveSnapshot(name, { position, inventory: { [tool]: 1 }, preparation: name === 'G4' ? 'fixed chamber at y=11 directly below spawn, administrator carved/provided; no ore search' : 'surface spawn; provided tool; no ore search' }))
+    result.push(await server.saveSnapshot(name, { ...origin, inventory: { [tool]: 1 }, preparation: 'user-provided start block (#36); provided tool; no ore search' }))
   }
   return { snapshots: result, minecraft_verified: true, pause_verified: false }
+}
+
+async function prepareG4 (cell) {
+  // User-confirmed natural diamond-cave cell (#36): no liquid within 8, no falling block within 4, no diamond within 8.
+  const exists = name => fsp.stat(path.join(server.snapshots, name)).then(() => true, () => false)
+  if (!blockCell(cell, 5, 12) || !(await exists('C4')) || await exists('G4')) fail('invalid_request')
+  const { seed } = JSON.parse(await fsp.readFile(path.join(server.snapshots, 'C4', 'snapshot.json'), 'utf8'))
+  await server.restore('C4')
+  frozen = server.initiallyFrozen
+  await connect()
+  await server.command('give ResearchBot minecraft:iron_pickaxe')
+  await server.command(`tp ResearchBot ${cell[0] + 0.5} ${cell[1]} ${cell[2] + 0.5}`)
+  await pause()
+  const position = standsOn(cell)
+  await disconnect()
+  await server.stop()
+  return { snapshots: [await server.saveSnapshot('G4', { seed, start_block: cell, position, inventory: { iron_pickaxe: 1 },
+    preparation: 'user-confirmed natural diamond-cave cell (#36); provided tool; operator-only survey, never in observations' })],
+  minecraft_verified: true, pause_verified: false }
 }
 
 async function sample () {
@@ -1048,7 +1080,11 @@ async function dispatch (request, admin) {
     pauseVerified = true
     return certificate
   }
-  if (request.method === 'prepare_world') { if (!exactKeys(request.payload, [])) fail('invalid_request'); return await prepareWorld() }
+  if (request.method === 'prepare_world') {
+    if (exactKeys(request.payload, ['start'])) return await prepareWorld(request.payload.start)
+    if (exactKeys(request.payload, ['g4'])) return await prepareG4(request.payload.g4)
+    fail('invalid_request')
+  }
   if (request.method === 'observe') { if (!exactKeys(request.payload, [])) fail('invalid_request'); return await observation() }
   if (!exactKeys(request.payload, ['candidate'])) fail('invalid_request')
   const candidate = request.payload.candidate
