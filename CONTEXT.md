@@ -1,3 +1,10 @@
+# T07 #8 — 결함 수정·재인증 후 자연 G2 2차도 철3 미달, Open
+
+현재 기준은 `issue-8-t07`의 `d86ce4b`다(로컬, push 안 함). 1차 결함 두 개를 고쳤다. 낙하 블록이 채운 자기 칸은 stair/tunnel이 먼저 파낸다. 바뀌지 않는 1틱 스텝이 20회 이어지면 `repeated_stall`로 끝낸다.
+- 새 fingerprint는 `d482a51c…c598`이고 63/63이다. 정보 감사·tunnel 6장면(`tunnel_sand` 포함)·fixture·T06 회귀가 통과했다. T05/T04는 1회째 실패, 재실행 통과다(PROGRESS 참조). 원시 자료는 artifacts/issue-8/attempt2/에 있다.
+- 자연 G2 2차는 `repeated_stall`(93결정·1,073틱), 철 0이다. 모래 수정은 실제로 작동했다. 그 뒤 tunnel이 물을 노출해 침수되었고 후보 0개 대기로 멈췄다. 침수 복구는 T08 책임이다.
+- 다음 수정·시도, G4 snapshot, push·PR은 사용자 결정이다.
+
 # T07 #8 — 구현·인증 실행 완료, 자연 G2 철3 미달로 Open
 
 현재 기준은 `issue-8-t07`의 `ee76c2c`(로컬 commit, push 안 함)다. 추가한 것은 tunnel 매크로, 다이아 채굴, 드롭 병합 귀속, 관리자 판정 로그, G4 상한, 자연 G2 사전 등록이다.
