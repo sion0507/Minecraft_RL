@@ -12,9 +12,24 @@ SAFE_BAND = (5, 12)  # PLAN 5.1 descend: y=5-12.
 BOUNCY = {"slime_block"}  # A landing bounces: a height change from or onto it overruns the 16-block cap (#37).
 
 
+HAZARD_RADIUS = 1.5  # bridge `terrain.danger`: no macro starts or continues this close to an observed hazard.
+
+
+def hazard_distance(cells: Iterable[Surface], position: Iterable[float]) -> float:
+    """Distance to the nearest hazard cell, measured as bridge `terrain.hazardDistance` does; inf when none."""
+    px, py, pz = position
+    return min((math.hypot(c.position[0] + 0.5 - px, c.position[1] - py, c.position[2] + 0.5 - pz)
+                for c in cells if c.hazard), default=math.inf)
+
+
 def observed_routes(observation: Observation) -> dict[tuple[int, int, int], list[list[float]]]:
-    """Level walks and one-block steps (bridge `terrain.canStep` is the same rule) over observed cells only."""
+    """Level walks and one-block steps (bridge `terrain.canStep` is the same rule) over observed cells only.
+
+    A point inside the hazard radius is used only farther from the hazard than the point before it (bridge `validPath`):
+    walks never enter the radius, and a walk that starts inside it only moves away.
+    """
     cells = {tuple(cell.position): cell for cell in observation.observed_map}
+    hazards = [cell for cell in observation.observed_map if cell.hazard]
 
     def clear(point: tuple[int, int, int]) -> bool:
         cell = cells.get(point)
@@ -34,6 +49,7 @@ def observed_routes(observation: Observation) -> dict[tuple[int, int, int], list
         (x, y, z), route = queue.popleft()
         if len(route) >= 16:
             continue
+        last = hazard_distance(hazards, route[-1] if route else observation.position)
         for dx, dz in DIRECTIONS:
             for dy in (0, -1, 1):
                 point = (x + dx, y + dy, z + dz)
@@ -44,7 +60,10 @@ def observed_routes(observation: Observation) -> dict[tuple[int, int, int], list
                 if dy and (below.block in BOUNCY or (here := footing((x, y, z))) is None or here.block in BOUNCY
                            or not clear((point[0], y + 1, point[2]) if dy < 0 else (x, y + 2, z))):
                     continue
-                path = [*route, [point[0] + 0.5, float(point[1]), point[2] + 0.5]]
+                centre = [point[0] + 0.5, float(point[1]), point[2] + 0.5]
+                if (away := hazard_distance(hazards, centre)) < HAZARD_RADIUS and away <= last:
+                    continue
+                path = [*route, centre]
                 routes[point] = path
                 queue.append((point, path))
     return routes
@@ -79,13 +98,18 @@ def fresh_movement_candidates(observation: Observation) -> list[Candidate]:
 def safe_ground(observation: Observation) -> bool:
     """Same observed conditions the bridge re-checks on every hold tick."""
     cells = {tuple(cell.position): cell for cell in observation.observed_map}
-    px, py, pz = observation.position
-    x, y, z = math.floor(px), math.floor(py), math.floor(pz)
+    x, y, z = map(math.floor, observation.position)
     floor, feet, head = (cells.get((x, y + offset, z)) for offset in (-1, 0, 1))
     return bool(observation.on_ground and not observation.in_liquid and not observation.on_fire
                 and floor and floor.support and not floor.hazard and feet and feet.passable and head and head.passable
-                and not any(c.hazard and math.hypot(c.position[0] + 0.5 - px, c.position[1] - py, c.position[2] + 0.5 - pz) < 1.5
-                            for c in cells.values()))
+                and hazard_distance(cells.values(), observation.position) >= HAZARD_RADIUS)
+
+
+def escape_candidates(observation: Observation) -> CandidateSet | None:
+    """Inside the hazard radius every other macro stops at once: then only walks away, visited ground included."""
+    if hazard_distance(observation.observed_map, observation.position) >= HAZARD_RADIUS:
+        return None
+    return generate_movement_candidates(observation)
 
 
 ORE_TOP = {"iron_ore": 63, "diamond_ore": 15}  # Highest generation layer in 1.16.5: range(64) and range(16).

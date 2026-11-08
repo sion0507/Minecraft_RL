@@ -289,8 +289,11 @@ async function moveObserved (candidate) {
   const from = () => index ? route[index - 1] : initial.position
   const heightChange = () => route[index][1] - Math.floor(from()[1]) // +1 climb, -1 drop, 0 level, for route[index].
   const across = point => Math.hypot(point[0] - state.position[0], point[2] - state.position[2])
+  // A walk that begins inside the hazard radius (validPath: only away) may go on while no closer than its start.
+  const start = terrain.hazardDistance(initial.position)
+  const escape = start < 1.5 ? start - 0.05 : 1.5
   while (allowed && ticks < limit) {
-    if (terrain.danger(state, index < route.length ? terrain.transit(from(), route[index]) : null) ||
+    if (terrain.danger(state, index < route.length ? terrain.transit(from(), route[index]) : null, escape) ||
         state.health < initial.health) { reason = 'observed_hazard'; interrupted = true; break }
     // A step's point is reached only after landing at its height; level points keep the plain horizontal check.
     if (index < route.length && across(route[index]) < 0.15 &&
@@ -952,7 +955,7 @@ async function informationFixture (payload) {
       'production', 'production_no_tool', 'production_no_fuel', 'production_hazard', 'iron',
       'production_craft', 'production_place', 'production_furnace', 'stair', 'stair_exposed', 'stair_coal', 'stair_floor',
       'stair_gap', 'stair_break', 'stair_limit', 'stair_budget', 'stair_no_tool', 'stair_gravel', 'stair_hold', 'stair_iron',
-      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'tunnel_sand', 'diamond', 'diamond_given', 'steps'].includes(payload.scope)) ||
+      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'tunnel_sand', 'diamond', 'diamond_given', 'steps', 'escape'].includes(payload.scope)) ||
     (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
   await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
   natural = false
@@ -1001,6 +1004,8 @@ async function informationFixture (payload) {
     await server.command(`setblock ${x + 1} ${y + 2} ${z - 1} minecraft:stone`)
     await server.command(`fill ${x - 1} ${y + 3} ${z - 2} ${x - 1} ${y + 3} ${z - 1} minecraft:stone`)
   }
+  // A non-flowing hazard 1.0 block from the bot's start: only walks away may run (#36 stalls, #37).
+  if (payload.scope === 'escape') await server.command(`setblock ${x - 1} ${y} ${z} minecraft:magma_block`)
   if (payload.scope === 'production') {
     await server.command('clear ResearchBot')
     await server.command(`fill ${x + 1} ${y} ${z - 1} ${x + 1} ${y + 3} ${z - 1} minecraft:oak_log`)

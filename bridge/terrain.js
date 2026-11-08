@@ -6,6 +6,7 @@ const slippery = new Set(['ice', 'packed_ice', 'frosted_ice', 'blue_ice'])
 const falling = new Set(['sand', 'red_sand', 'gravel'])
 // A landing bounces: a height change from or onto it overruns the 16-block movement cap (#37).
 const bouncy = new Set(['slime_block'])
+const hazardRadius = 1.5 // No macro starts or continues this close to a remembered hazard (Python HAZARD_RADIUS).
 const key = p => p.join(',')
 
 class Terrain {
@@ -113,23 +114,39 @@ class Terrain {
     return ny > y ? key([x, y + 1, z]) : ny < y ? key([nx, y, nz]) : null
   }
 
+  // A point inside the hazard radius is allowed only farther from the hazard than the point before it (Python
+  // `observed_routes` is the same rule): walks never enter the radius, and one that starts inside it only moves away.
   validPath (position, route) {
     if (!Array.isArray(route) || route.length < 1 || route.length > 16) return false
     let previous = position.map(Math.floor)
+    let near = this.hazardDistance(position)
     for (const point of route) {
       if (!Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite)) return false
       const cell = point.map(Math.floor)
       if (point[0] !== cell[0] + 0.5 || point[1] !== cell[1] || point[2] !== cell[2] + 0.5 || !this.canStep(previous, cell)) return false
+      const away = this.hazardDistance(point)
+      if (away < hazardRadius && away <= near) return false
       previous = cell
+      near = away
     }
     return true
   }
 
+  // Distance from a position to the nearest remembered hazard; Infinity when none. Memory only.
+  hazardDistance (position) {
+    let nearest = Infinity
+    for (const c of this.memory.values()) {
+      if (c.hazard) nearest = Math.min(nearest, Math.hypot(c.position[0] + 0.5 - position[0], c.position[1] - position[1], c.position[2] + 0.5 - position[2]))
+    }
+    return nearest
+  }
+
   // `transit` is the one open cell a committed stair or step crosses before landing on its observed floor.
-  danger (state, transit = null) {
+  // `floor` lowers the hazard radius for an escape walk: it may continue while no closer than where it began.
+  danger (state, transit = null, floor = hazardRadius) {
     const standing = this.safe(state.position) || key(state.position.map(Math.floor)) === transit
     if (state.on_fire || state.in_liquid || state.health <= 0 || !standing) return true
-    return [...this.memory.values()].some(c => c.hazard && Math.hypot(c.position[0] + 0.5 - state.position[0], c.position[1] - state.position[1], c.position[2] + 0.5 - state.position[2]) < 1.5)
+    return this.hazardDistance(state.position) < Math.min(hazardRadius, floor)
   }
 
   // Remembered hazard touching any planned cell. Memory only: never a peek past a surface.

@@ -73,7 +73,8 @@ def test_cli_offers_each_direction_facing_first_with_two_workloads_and_saves_the
 
 
 @pytest.mark.parametrize("veto", [
-    cell("lava", 1, 65, 0, hazard=True), cell("water", 1, 62, 0, hazard=True), cell("lava", 2, 64, 1, hazard=True),
+    # Each hazard stays outside the 1.5-block bridge radius of the bot, where escape walks would replace every cut.
+    cell("lava", 2, 65, 0, hazard=True), cell("water", 1, 62, 0, hazard=True), cell("lava", 2, 64, 1, hazard=True),
     cell("air", 1, 62, 0, passable=True), cell("bedrock", 1, 63, 0, support=True), cell("diamond_ore", 1, 64, 0, support=True),
 ], ids=["lava-in-corridor", "water-floor", "lava-beside", "open-floor", "bedrock", "stop-ore"])
 def test_cli_only_an_observed_cell_can_veto_a_direction(tmp_path: Path, veto: dict[str, Any]) -> None:

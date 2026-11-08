@@ -9,7 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 
 from .rpc import EpisodeError, PolicyEnvironment
-from .navigation import PICKS, SAFE_BAND, generate_descent_candidates, generate_movement_candidates
+from .navigation import PICKS, SAFE_BAND, escape_candidates, generate_descent_candidates, generate_movement_candidates
 from .macros import generate_wood_candidates
 from .production import generate_production_candidates
 from .schema import (
@@ -121,7 +121,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             if config.wall_limit_seconds is not None and time.monotonic() - started >= config.wall_limit_seconds:
                 truncated, reason = True, "wall_time_limit"
                 break
-            saved = (generate_movement_candidates(observation) if movement else
+            escape = escape_candidates(observation) if macros else None
+            saved = escape if escape is not None else (generate_movement_candidates(observation) if movement else
                      (generate_descent_candidates(observation) if config.goal.kind == "descend" else
                       generate_wood_candidates(observation, config.goal) if config.goal.target.endswith("_log") else
                       generate_production_candidates(observation, config.goal)) if macros else generate_candidates(observation, config.goal))

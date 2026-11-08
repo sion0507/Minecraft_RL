@@ -15,7 +15,10 @@ const STEPS = {
   step_blocked: { rise: 1, edge: 1, cells: 2, blocks: { '0,66,0': 'stone' } }, // ... or seen solid.
   step_low: { rise: 1, edge: 1, cells: 2, blocks: { '0,67,0': 'stone', '1,67,0': 'stone', '2,67,0': 'stone' } }, // 3-high climb.
   step_magma: { rise: -1, edge: 1, cells: 2, blocks: { '1,62,0': 'magma_block' } },
-  step_hazard: { rise: -1, edge: 1, cells: 2, blocks: { '1,63,1': 'lava' } },
+  step_hazard: { rise: -1, edge: 1, cells: 2, blocks: { '1,63,1': 'lava' } }, // The landing is 1.0 from lava: never entered.
+  // Hazard radius (#37 review of #36 stalls): a walk that starts within 1.5 of lava may only move away from it.
+  step_escape: { rise: 0, edge: Infinity, cells: 2, blocks: { '-1,64,0': 'lava' } },
+  step_closer: { rise: 0, edge: Infinity, cells: 1, blocks: { '-1,64,1': 'lava' }, path: [[0.5, 64, 1.5]] },
   step_late_up: { rise: 1, edge: 14, cells: 16 }, step_late_down: { rise: -1, edge: 14, cells: 16 },
   step_edge_down: { rise: -1, edge: 13, cells: 16, start: 0.8 }, // 12 blocks are reached with the body over the edge.
   step_slime: { rise: -1, edge: 13, cells: 16, floor: 'slime_block' },
@@ -66,7 +69,8 @@ async function run (floorName, invalid = false) {
     return 1
   }
   const result = await context.moveObserved({ params: {
-    path: invalid ? [] : Array.from({ length: step.cells }, (_, index) => [index + 1.5, height(index + 1), 0.5]), map_version: terrain.version
+    path: invalid ? [] : step.path ?? Array.from({ length: step.cells }, (_, index) => [index + 1.5, height(index + 1), 0.5]),
+    map_version: terrain.version
   }, max_ticks: 400, source_obs_id: '0' })
   return { floorName, invalid, actual_ticks: result.actual_ticks, reason: result.reason,
     stable_boundary: result.stable_boundary, distance_moved: result.distance_moved,

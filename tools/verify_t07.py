@@ -17,7 +17,7 @@ import yaml
 from verify_t06 import access_report
 
 from mc_diamond.information import step_choice
-from mc_diamond.navigation import generate_movement_candidates, observed_routes
+from mc_diamond.navigation import escape_candidates, generate_movement_candidates, hazard_distance, observed_routes
 from mc_diamond.rpc import RpcSession
 from mc_diamond.schema import Candidate, EpisodeConfig
 
@@ -150,6 +150,7 @@ def main() -> None:
         if "steps" in checks:
             # Administrator scene (#37): refuse the climb under an observed stone, climb the platform, drop back down,
             # then climb under a ceiling one higher (3-high). Policy-side routes must agree with the bridge on both columns.
+            # Last, a separate scene: escape walks from inside the 1.5-block hazard radius.
             with RpcSession(config.command, config.rpc_timeout_seconds) as session:
                 prepared = session._call("information_fixture", {"variant": "ore", "exposed": False, "scope": "steps"}, admin=True)
                 assert prepared.get("fixture_ready") is True
@@ -190,7 +191,24 @@ def main() -> None:
                         assert step.observation.position[1] == y + (1 if rise > 0 else 0)
                     observation = step.observation
                     surfaces = {tuple(int(v) for v in c.position): c for c in observation.observed_map}
-                results["steps"] = {"prepared": prepared, "scenes": scenes}
+                # Inside the hazard radius (magma 1.0 block away) only walks away are offered, and the first one runs.
+                escape_prepared = session._call("information_fixture", {"variant": "ore", "exposed": False, "scope": "escape"}, admin=True)
+                assert escape_prepared.get("fixture_ready") is True
+                observation = session.policy().observe()
+                escapes = escape_candidates(observation)
+                assert escapes is not None and escapes.candidates, "escape walks must be offered inside the radius"
+                assert {c.action_kind for c in escapes.candidates} == {"move_observed"}
+                step = session.policy().step(escapes.candidates[0])
+                scenes.append({"name": "escape", "natural_task": False, "path": escapes.candidates[0].params["path"],
+                    "reason": step.reason, "ticks": step.actual_ticks, "start": observation.position, "end": step.observation.position,
+                    "stable_boundary": step.stable_boundary, "invalid": step.invalid, "pause_verified": step.pause_verified,
+                    "hazard_distance": [hazard_distance(observation.observed_map, observation.position),
+                                        hazard_distance(step.observation.observed_map, step.observation.position)]})
+                print(json.dumps({"check": "steps-escape", **{k: scenes[-1][k] for k in ["reason", "ticks", "end",
+                    "stable_boundary", "hazard_distance"]}}), flush=True)
+                assert scenes[-1]["hazard_distance"][0] < 1.5 <= scenes[-1]["hazard_distance"][1]
+                assert step.reason in {"path_completed", "distance_limit"} and step.stable_boundary and not step.invalid
+                results["steps"] = {"prepared": [prepared, escape_prepared], "scenes": scenes}
                 (args.output / "steps.json").write_text(json.dumps(results["steps"], indent=2))
         if "diamond" in checks:
             # Constructed fixtures (natural_task=false): the break→drop→pickup link, and a given diamond that never counts.

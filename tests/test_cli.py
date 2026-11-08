@@ -249,10 +249,11 @@ def test_shipping_movement_climbs_and_drops_one_observed_block_within_the_caps()
         assert rows[name]["reason"] == "path_completed" and rows[name]["stable_boundary"], rows[name]
         assert [v // 1 for v in rows[name]["position"]] == end and rows[name]["position"][1] == end[1], rows[name]
     assert rows["step_low"]["reason"] == "path_completed" and rows["step_low"]["position"][1] == 65, rows["step_low"]
-    for name in ["step_two_up", "step_two_down", "step_unknown", "step_blocked", "step_magma", "step_slime"]:
+    assert rows["step_escape"]["reason"] == "path_completed" and rows["step_escape"]["stable_boundary"], rows["step_escape"]
+    for name in ["step_two_up", "step_two_down", "step_unknown", "step_blocked", "step_magma", "step_slime", "step_hazard",
+                 "step_closer"]:
         assert rows[name]["reason"] == "invalid_path" and rows[name]["actual_ticks"] == 1, rows[name]
-    for name in ["step_hazard", "step_pit"]:
-        assert rows[name]["reason"] == "observed_hazard" and not rows[name]["stable_boundary"], rows[name]
+    assert rows["step_pit"]["reason"] == "observed_hazard" and not rows["step_pit"]["stable_boundary"], rows["step_pit"]
     assert rows["step_pit"]["position"][1] > 61, "the fall past the landing stops the walk at once"
     for name in ["step_late_up", "step_late_down"]:  # The step comes after 12 blocks: no new height change near the cap.
         assert rows[name]["reason"] == "distance_limit" and rows[name]["stable_boundary"], rows[name]
