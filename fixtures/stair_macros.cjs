@@ -66,7 +66,14 @@ function scene ({ blocks = {}, tool = 'iron_pickaxe', durability = 250, digTicks
     return plain(await c.dispatch({ request_id: 'wait', method: 'step', payload: { candidate: { candidate_id: 'hold',
       action_kind: 'wait', params: {}, max_ticks: 20, stop_rule_id: 'hold', source_obs_id: state.obs_id, description: 'hold' } } }, false))
   }
-  return { c, bot, dug, reads, changed, observe, stair, wait }
+  const tunnel = async (params = {}, maxTicks = 400) => {
+    const state = await observe()
+    const candidate = { candidate_id: 'tunnel', action_kind: 'tunnel', max_ticks: maxTicks, stop_rule_id: 'tunnel',
+      source_obs_id: state.obs_id, description: 'tunnel',
+      params: { direction: [1, 0], cells: 1, height: 2, stop_blocks: ['diamond_ore'], map_version: state.map_version, ...params } }
+    return plain(await c.dispatch({ request_id: 'step', method: 'step', payload: { candidate } }, false))
+  }
+  return { c, bot, dug, reads, changed, observe, stair, wait, tunnel }
 }
 
 const kinds = (step, kind) => step.events.filter(event => event.kind === kind)
@@ -264,6 +271,85 @@ async function main () {
       stop_rule_id: 'stair', source_obs_id: state.obs_id, description: 'stale' }))
     assert.equal(cancelled.cancelled, true)
     assert.equal(kinds(cancelled, 'safe_hold').length, 0, 'a cancellation wait is not a chosen hold')
+  }
+  // T07 tunnel: the same cut/walk/stop loop as the stairs, level.
+  {
+    const s = scene()
+    const step = await s.tunnel({ cells: 8 })
+    assert.equal(step.reason, 'tunnel_completed')
+    assert.equal(step.stable_boundary, true)
+    assert.deepEqual(step.observation.position.map(Math.floor), [8, 65, 0], 'eight cells east on the same level')
+    assert.equal(kinds(step, 'tunneled').length, 8)
+    assert.equal(kinds(step, 'descended').length, 0)
+    assert.equal(kinds(step, 'mined').length, 16)
+    assert.deepEqual(s.dug.slice(0, 4), [[1, 66, 0], [1, 65, 0], [2, 66, 0], [2, 65, 0]], 'top-down so each cut exposes the next cell')
+    assert.ok(step.actual_ticks <= 400)
+  }
+  {
+    const s = scene()
+    const step = await s.tunnel({ cells: 1, height: 3 })
+    assert.equal(step.reason, 'tunnel_completed')
+    assert.deepEqual(s.dug, [[1, 67, 0], [1, 66, 0], [1, 65, 0]], 'the taller section cuts its head cell first')
+  }
+  {
+    const baseline = await scene().tunnel({ cells: 2 })
+    for (const hidden of ['diamond_ore', 'lava', 'water']) {
+      const s = scene({ blocks: { '3,65,1': hidden } })
+      const step = await s.tunnel({ cells: 2 })
+      assert.equal(step.reason, 'tunnel_completed', hidden)
+      assert.equal(step.actual_ticks, baseline.actual_ticks, hidden)
+      assert.deepEqual(step.observation.position, baseline.observation.position, hidden)
+      assert.equal(s.reads.has('3,65,1'), false, 'hidden wall cell never read')
+    }
+  }
+  for (const [hidden, reason, stops] of [['diamond_ore', 'ore_exposed', ['diamond_ore']], ['iron_ore', 'ore_exposed', ['diamond_ore', 'iron_ore']],
+    ['lava', 'observed_hazard', ['diamond_ore']], ['coal_ore', 'tunnel_completed', ['diamond_ore']]]) {
+    const s = scene({ blocks: { '3,65,1': hidden } })
+    const step = await s.tunnel({ cells: 8, stop_blocks: stops })
+    assert.equal(step.reason, reason, hidden)
+    if (reason !== 'tunnel_completed') {
+      if (hidden !== 'lava') {
+        assert.equal(kinds(step, 'exposed')[0].item, hidden, hidden)
+        assert.deepEqual(kinds(step, 'exposed')[0].position, [3, 65, 1], hidden)
+      }
+      assert.ok(step.observation.position[0] < 3, 'stopped as the third cut opened it, without walking on: ' + hidden)
+    } else assert.ok(step.observation.observed_map.some(cell => cell.block === 'coal_ore'), 'other ore stays on the map only')
+    if (hidden === 'diamond_ore') {
+      const next = await s.tunnel({ cells: 2 })
+      assert.equal(next.reason, 'tunnel_completed', 'the same exposure must not stop again')
+      assert.equal(s.dug.some(point => point.join(',') === '3,65,1'), false, 'no automatic turn or mining chain')
+    }
+  }
+  {
+    const s = scene({ blocks: { '1,64,0': 'air', '1,63,0': 'air' } })
+    const step = await s.tunnel({ cells: 1 })
+    assert.equal(step.reason, 'unsafe_floor')
+    assert.equal(step.observation.position[0], 0.5)
+  }
+  {
+    const s = scene({ durability: 3 })
+    const step = await s.tunnel({ cells: 4 })
+    assert.equal(step.reason, 'tool_broken')
+    assert.equal(kinds(step, 'mined').length, 3)
+  }
+  {
+    const s = scene()
+    vm.runInContext('activeTicks = budget - 10', s.c)
+    const step = await s.tunnel({ cells: 8 }, 10)
+    assert.equal(step.reason, 'active_tick_limit')
+    assert.equal(step.truncated, true)
+    assert.equal(step.actual_ticks, 10)
+  }
+  for (const [label, options, params] of [
+    ['too many cells', {}, { cells: 9 }], ['no section', {}, { height: 4 }], ['diagonal', {}, { direction: [1, 1] }],
+    ['diamond must stop', {}, { stop_blocks: ['iron_ore'] }], ['stair key', {}, { stairs: 1 }], ['needs a pickaxe', { tool: null }, {}]
+  ]) {
+    const s = scene(options)
+    const step = await s.tunnel(params)
+    assert.equal(step.reason, 'invalid_tunnel', label)
+    assert.equal(step.invalid, true, label)
+    assert.equal(step.actual_ticks, 1, label)
+    assert.deepEqual(s.dug, [], label)
   }
   process.stdout.write(JSON.stringify({ passed: true }) + '\n')
 }

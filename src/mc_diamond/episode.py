@@ -4,12 +4,12 @@ import json
 import math
 import time
 from collections.abc import Callable
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
 from .rpc import EpisodeError, PolicyEnvironment
-from .navigation import SAFE_BAND, generate_descent_candidates, generate_movement_candidates
+from .navigation import PICKS, SAFE_BAND, generate_descent_candidates, generate_movement_candidates
 from .macros import generate_wood_candidates
 from .production import generate_production_candidates
 from .schema import (
@@ -33,6 +33,31 @@ def generate_candidates(observation: Observation, goal: Goal) -> CandidateSet:
     return CandidateSet(candidates=candidates, mask=[True] * len(candidates))
 
 
+VERIFIED_ORES = {"diamond_ore": ("diamond", PICKS[:3]), "iron_ore": ("iron_ore", PICKS[:4])}  # block: (drop, tools)
+
+
+def admin_verified(log: dict[str, Any], acquired: dict[str, Event]) -> dict[str, int]:
+    """Count only acquisitions the administrator log ties to a natural ore broken with an allowed tool.
+
+    Every unit of an acquired event needs its own record: server block before, air after, server-held tool,
+    the ore's own drop entity and that same event. Given, chest, traded or foreign items have no such record.
+    """
+    linked: dict[str, int] = {}
+    for record in log.get("records", []) if log.get("natural") is True else []:
+        drop, tools = VERIFIED_ORES.get(record.get("block"), (None, ()))
+        event = acquired.get(record.get("acquired_event_id"))
+        if (drop and event and event.source == "minecraft" and event.item == drop and record.get("drop_item") == drop and record.get("natural") is True
+                and record.get("server_block_before") is True and record.get("server_air_after") is True
+                and record.get("server_tool") in tools and isinstance(record.get("drop_entity_id"), int)):
+            linked[record["acquired_event_id"]] = linked.get(record["acquired_event_id"], 0) + 1
+    verified: dict[str, int] = {}
+    for event_id, units in linked.items():
+        event = acquired[event_id]
+        if event.item and units == event.quantity:
+            verified[event.item] = verified.get(event.item, 0) + units
+    return verified
+
+
 def descent_completed(step: StepResult) -> bool:
     """Iron pickaxe carried (inventory, not hand) through one uninterrupted 20-tick hold on observed ground at y=5-12."""
     return (SAFE_BAND[0] <= math.floor(step.observation.position[1]) <= SAFE_BAND[1]
@@ -44,7 +69,9 @@ def descent_completed(step: StepResult) -> bool:
 def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 reset: Callable[[], Observation], episode_id: str, attempt_id: str,
                 *, movement: bool = False, macros: bool = False,
-                select: Callable[[CandidateSet], Candidate] = lambda saved: saved.candidates[0]) -> EpisodeSummary:
+                select: Callable[[CandidateSet], Candidate] = lambda saved: saved.candidates[0],
+                verification: Callable[[], dict[str, Any]] | None = None) -> EpisodeSummary:
+    """`verification` reads the administrator log only after the last decision, so no policy input can see it."""
     started = time.monotonic()
     active_ticks = decisions = 0
     selection_requests = cancelled_selections = 0
@@ -60,6 +87,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     direct_crafted: dict[str, int] = {}
     direct_smelted: dict[str, int] = {}
     direct_acquired: dict[str, int] = {}
+    acquired_events: dict[str, Event] = {}
+    verified: dict[str, int] = {}
     terminated = truncated = invalid = completed = False
     reason = "decision_limit"
     error: ErrorInfo | None = None
@@ -79,6 +108,9 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             emit("goal", config.goal)
             if observation.remaining_ticks == 0:
                 truncated, reason = True, "active_tick_limit"
+                break
+            if config.wall_limit_seconds is not None and time.monotonic() - started >= config.wall_limit_seconds:
+                truncated, reason = True, "wall_time_limit"
                 break
             saved = (generate_movement_candidates(observation) if movement else
                      (generate_descent_candidates(observation) if config.goal.kind == "descend" else
@@ -158,6 +190,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                     if event.event_id in seen_events:
                         raise EpisodeError(ErrorInfo(code="invalid_step", message="Repeated event identity"))
                     seen_events.add(event.event_id)
+                    if event.kind == "acquired":
+                        acquired_events[event.event_id] = event
                 ledger = {"crafted": direct_crafted, "smelted": direct_smelted, "acquired": direct_acquired}.get(event.kind)
                 if ledger is not None and event.item:
                     ledger[event.item] = ledger.get(event.item, 0) + event.quantity
@@ -170,7 +204,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             if config.goal.kind == "descend":
                 completed = descent_completed(step)
             else:
-                completion_kind = {"collect": "acquired", "craft": "crafted", "smelt": "smelted"}[config.goal.kind]
+                completion_kind = {"collect": "acquired", "mine_diamond": "acquired", "craft": "crafted",
+                                   "smelt": "smelted"}[config.goal.kind]
                 acquired_target += sum(event.quantity for event in step.events
                                        if event.kind == completion_kind and event.item == config.goal.target)
                 completed = (not step.invalid and acquired_target > 0
@@ -184,6 +219,10 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 break
         else:
             truncated, reason = True, "decision_limit"
+        if verification is not None:
+            log = verification()
+            emit("admin_verification", log)
+            verified = admin_verified(log, acquired_events)
     except EpisodeError as failure:
         error, reason = failure.error, failure.error.code
         emit("error", error)
@@ -204,7 +243,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         movement_completed=movement_completed, distance_moved=distance_moved,
         macro_steps=macro_steps, selection_requests=selection_requests, cancelled_selections=cancelled_selections,
         provided_inventory=provided_inventory, direct_crafted=direct_crafted,
-        direct_smelted=direct_smelted, direct_acquired=direct_acquired,
+        direct_smelted=direct_smelted, direct_acquired=direct_acquired, admin_verified=verified,
+        diamond_success=config.goal.kind == "mine_diamond" and completed and verified.get("diamond", 0) >= 1,
     )
     emit("summary", summary)
     return summary

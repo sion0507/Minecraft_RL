@@ -70,7 +70,7 @@ class Observation(Contract):
 
 class Goal(Contract):
     goal_id: Identifier
-    kind: Literal["collect", "craft", "smelt", "descend"]
+    kind: Literal["collect", "craft", "smelt", "descend", "mine_diamond"]
     target: Identifier
     quantity: Positive
     source: Literal["fixed"] = "fixed"
@@ -125,7 +125,7 @@ class SelectionResult(Contract):
 
 class Event(Contract):
     kind: Literal["acquired", "wait", "moved", "stopped", "mined", "equipped", "failed", "crafted", "placed", "furnace_loaded", "furnace_collected", "smelted",
-                  "descended", "exposed", "safe_hold"]
+                  "descended", "tunneled", "exposed", "safe_hold"]
     item: str | None = None
     quantity: Count = 0
     source: Literal["mock", "minecraft"]
@@ -191,7 +191,8 @@ class EpisodeSummary(Contract):
     movement_completed: bool = False
     distance_moved: float = Field(default=0.0, ge=0)
     goal_completed: bool
-    diamond_success: Literal[False] = False
+    diamond_success: bool = False
+    admin_verified: dict[str, Count] = Field(default_factory=dict)
     terminated: bool
     truncated: bool
     invalid: bool
@@ -211,7 +212,8 @@ class EpisodeSummary(Contract):
 
 class RpcRequest(Contract):
     request_id: Identifier
-    method: Literal["reset", "observe", "step", "prepare_world", "clock_trial", "certify_clock", "information_fixture"]
+    method: Literal["reset", "observe", "step", "prepare_world", "clock_trial", "certify_clock", "information_fixture",
+                    "verification_log"]
     payload: dict[str, JsonValue]
 
 
@@ -233,6 +235,7 @@ class EpisodeConfig(Contract):
     command: list[str] | None = None
     rpc_timeout_seconds: float = Field(default=5.0, gt=0, le=180)
     max_decisions: Positive = 8
+    wall_limit_seconds: float | None = Field(default=None, gt=0)
     goal: Goal
 
     @model_validator(mode="after")

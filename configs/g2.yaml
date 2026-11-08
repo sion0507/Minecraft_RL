@@ -1,7 +1,8 @@
 backend: rpc
 command: [node, bridge/minecraft.js, --task, G2]
 rpc_timeout_seconds: 180.0
-max_decisions: 64
+max_decisions: 12000
+wall_limit_seconds: 2700.0
 goal:
   goal_id: g2-direct-iron
   kind: collect
