@@ -139,6 +139,44 @@ def test_movement_does_not_route_through_unknown_or_exposed_hazard(tmp_path: Pat
     assert output[-1]["data"]["movement_completed"] is False
 
 
+def step_cells(rise: int, changes: dict[tuple[int, int], dict[str, Any] | None]) -> list[dict[str, Any]]:
+    """Start column x=0 on floor y=63; column x=1 has its floor at 63+rise. Air up to y=67; `changes` edit (x, y) cells."""
+    def cell(x: int, y: int, block: str) -> dict[str, Any]:
+        return {"position": [float(x), float(y), 0.0], "block": block, "passable": block == "air",
+                "support": block in {"stone", "slime_block"}, "hazard": False}
+    cells = {(x, y): cell(x, y, "stone" if y <= 63 + (rise if x else 0) else "air") for x in range(2) for y in range(60, 68)}
+    for point, value in changes.items():
+        if value is None:
+            del cells[point]
+        else:
+            cells[point] = {**cells[point], **value}
+    return list(cells.values())
+
+
+STONE = {"block": "stone", "passable": False, "support": True}
+
+
+@pytest.mark.parametrize("rise, changes, end", [
+    (1, {}, [1.5, 65.0, 0.5]),
+    (-1, {}, [1.5, 63.0, 0.5]),
+    (1, {(0, 67): STONE, (1, 67): STONE}, [1.5, 65.0, 0.5]),  # A 3-high climb: the ceiling is one over the jump's head.
+    (2, {}, None), (-2, {}, None),
+    (1, {(0, 66): None}, None),  # The jump's head cell over the start column is unobserved ...
+    (1, {(0, 66): STONE}, None),  # ... or solid.
+    (-1, {(1, 65): STONE}, None),  # The drop's front head cell at the start height.
+    (-1, {(1, 62): {"block": "magma_block", "hazard": True}}, None),
+    (1, {(0, 63): {"block": "slime_block"}}, None), (-1, {(1, 62): {"block": "slime_block"}}, None),
+])
+def test_movement_cli_offers_only_observed_one_block_steps(tmp_path: Path, rise: int, changes: dict[tuple[int, int], Any],
+                                                           end: list[float] | None) -> None:
+    fixture = mock_fixture()
+    fixture["initial"].update(position=[0.5, 64.0, 0.5], observed_map=step_cells(rise, changes), map_version=1)
+    result = subprocess.run(["mc-diamond", "smoke-movement", "--config", str(fixture_config(tmp_path, fixture))],
+                            text=True, capture_output=True, timeout=15)
+    candidates = next(row["data"] for row in records(result) if row["type"] == "candidates")["candidates"]
+    assert [c["params"]["path"][-1] for c in candidates] == ([end] if end else [])
+
+
 def test_live_terrain_never_queries_behind_opaque_wall_and_rejects_unknown_route() -> None:
     script = r"""
 const assert = require('node:assert/strict')
@@ -199,6 +237,32 @@ def test_movement_bounds_slippery_surfaces_and_counts_failure_tick_motion() -> N
     assert failed["distance_moved"] == pytest.approx(0.1)
     assert failed["distance_moved"] == pytest.approx(failed["displacement"])
     assert failed["events"][0]["kind"] == "moved"
+
+
+def test_shipping_movement_climbs_and_drops_one_observed_block_within_the_caps() -> None:
+    result = subprocess.run(["node", "fixtures/movement_physics.cjs", "steps"], text=True, capture_output=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    rows = {row["floorName"]: row for row in json.loads(result.stdout)}
+    for row in rows.values():
+        assert 1 <= row["actual_ticks"] <= 400 and row["distance_moved"] <= 16, row
+    for name, end in [("step_up", [2, 65, 0]), ("step_down", [2, 63, 0])]:
+        assert rows[name]["reason"] == "path_completed" and rows[name]["stable_boundary"], rows[name]
+        assert [v // 1 for v in rows[name]["position"]] == end and rows[name]["position"][1] == end[1], rows[name]
+    assert rows["step_low"]["reason"] == "path_completed" and rows["step_low"]["position"][1] == 65, rows["step_low"]
+    for name in ["step_two_up", "step_two_down", "step_unknown", "step_blocked", "step_magma", "step_slime"]:
+        assert rows[name]["reason"] == "invalid_path" and rows[name]["actual_ticks"] == 1, rows[name]
+    for name in ["step_hazard", "step_pit"]:
+        assert rows[name]["reason"] == "observed_hazard" and not rows[name]["stable_boundary"], rows[name]
+    assert rows["step_pit"]["position"][1] > 61, "the fall past the landing stops the walk at once"
+    for name in ["step_late_up", "step_late_down"]:  # The step comes after 12 blocks: no new height change near the cap.
+        assert rows[name]["reason"] == "distance_limit" and rows[name]["stable_boundary"], rows[name]
+        assert rows[name]["position"][1] == 64, rows[name]
+    edge = rows["step_edge_down"]  # Already over the edge at 12 blocks: the committed drop lands instead of hanging.
+    assert edge["stable_boundary"] and edge["actual_ticks"] < 400 and edge["position"][1] == 63, edge
+    sweep = [row for name, row in rows.items() if name.startswith("sweep_")]
+    assert len(sweep) == 96 and sum(row["reason"] != "invalid_path" for row in sweep) >= 80
+    for row in sweep:  # A late climb or drop settles or completes; it never hangs on an edge until the tick cap.
+        assert row["reason"] == "invalid_path" or (row["stable_boundary"] and row["actual_ticks"] < 400), row
 
 
 @pytest.mark.parametrize("scenario", ["logging", "unchanged", "client", "server", "ticks", "freeze_reply", "mismatch"])
@@ -284,6 +348,9 @@ for line in admin:
    o.update(inventory={'iron_ore':1,'coal':1},observed_map=[{'block':'furnace','position':[1.,64.,0.],'support':True}])
  if str(p.get('scope')).startswith(('stair','tunnel')):
   o.update(inventory={'iron_pickaxe':1},tool='iron_pickaxe',tool_durability=250,on_ground=True)
+ if p.get('scope')=='steps':
+  o['observed_map']=[{'block':'stone' if y<=63+(x>0) else 'air','position':[float(x),float(y),0.0],'passable':y>63+(x>0),
+     'support':y<=63+(x>0),'hazard':False} for x in range(3) for y in range(60,68)]
  r=json.loads(sys.stdin.readline());reply(r,o)
  if not p['exposed']:
   r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];ticks=int(sys.argv[1])
@@ -323,6 +390,15 @@ for line in admin:
      result['events']=result['events']+[{'kind':'exposed','item':c['params']['stop_blocks'][-1],'position':[4.,99.,0.],'source':'minecraft'}]
     reply(r,result)
    continue
+  if p.get('scope')=='steps':
+   for index in range(2):
+    if index:
+     r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];o=n
+    n={**o,'obs_id':'obs-'+str(index+1),'active_ticks':o['active_ticks']+ticks,'remaining_ticks':o['remaining_ticks']-ticks,
+       'position':c['params']['path'][-1]}
+    result.update(observation=n,source_obs_id=o['obs_id'],path=c['params']['path'],stop_evidence=[n['obs_id'],'path_completed'])
+    reply(r,result)
+   continue
   if p.get('scope') in ['production_craft','production_place','production_furnace','iron','diamond']:
    for index in range(3 if p['scope']=='production_furnace' else 1):
     if index:
@@ -351,7 +427,7 @@ for line in admin:
     assert result.returncode == (0 if expected else 1), result.stderr
     assert records(result)[-1]["data"]["information_verified"] is expected
     if expected:
-        assert {"craft_batch", "facility_place", "furnace_load", "furnace_collect", "iron_mining", "stair_down", "stair_exposure", "stair_iron_exposure",
+        assert {"move_observed_steps", "craft_batch", "facility_place", "furnace_load", "furnace_collect", "iron_mining", "stair_down", "stair_exposure", "stair_iron_exposure",
                 "diamond_mining", "tunnel", "tunnel_exposure", "tunnel_iron_exposure"} <= set(
             records(result)[-1]["data"]["scope"])
 

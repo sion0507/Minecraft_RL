@@ -4,6 +4,8 @@ const hazards = new Set(['lava', 'water', 'fire', 'soul_fire', 'magma_block', 'c
 // shortcut: ice supports are excluded until braking is calibrated on ice.
 const slippery = new Set(['ice', 'packed_ice', 'frosted_ice', 'blue_ice'])
 const falling = new Set(['sand', 'red_sand', 'gravel'])
+// A landing bounces: a height change from or onto it overruns the 16-block movement cap (#37).
+const bouncy = new Set(['slime_block'])
 const key = p => p.join(',')
 
 class Terrain {
@@ -75,9 +77,7 @@ class Terrain {
   safe (position) {
     const [x, y, z] = position.map(Math.floor)
     const floor = this.memory.get(key([x, y - 1, z]))
-    const feet = this.memory.get(key([x, y, z]))
-    const head = this.memory.get(key([x, y + 1, z]))
-    return !!(floor?.support && !floor.hazard && feet?.passable && !feet.hazard && head?.passable && !head.hazard)
+    return !!(floor?.support && !floor.hazard && this.clear([x, y, z]) && this.clear([x, y + 1, z]))
   }
 
   // Own head/feet cells a falling block refilled (top-down) over an observed floor; [] when standing normally or in anything else.
@@ -89,20 +89,43 @@ class Terrain {
     return cells.filter(c => !c.passable).map(c => c.position)
   }
 
+  clear (point) {
+    const cell = this.memory.get(key(point))
+    return !!cell?.passable && !cell.hazard
+  }
+
+  // Same rule as Python `observed_routes`: one cell sideways, at most one up or down, over observed cells only.
+  canStep (from, to) {
+    const [x, y, z] = from.map(Math.floor)
+    const [nx, ny, nz] = to.map(Math.floor)
+    if (Math.abs(nx - x) + Math.abs(nz - z) !== 1 || Math.abs(ny - y) > 1 || !this.safe(to)) return false
+    if (ny === y) return true
+    if (!this.safe(from) || [[x, y - 1, z], [nx, ny - 1, nz]].some(p => bouncy.has(this.memory.get(key(p)).block))) return false
+    // Down: the head passes the front cell at the start height. Up: the jump lifts the head into the cell over the start;
+    // a ceiling one higher still lets the feet clear the step (3-high climbs, checked in the physics fixture).
+    return this.clear(ny < y ? [nx, y + 1, nz] : [x, y + 2, z])
+  }
+
+  // The one open cell a step crosses: over the start column on the way up, over the target column on the way down.
+  transit (from, to) {
+    const [x, y, z] = from.map(Math.floor)
+    const [nx, ny, nz] = to.map(Math.floor)
+    return ny > y ? key([x, y + 1, z]) : ny < y ? key([nx, y, nz]) : null
+  }
+
   validPath (position, route) {
     if (!Array.isArray(route) || route.length < 1 || route.length > 16) return false
     let previous = position.map(Math.floor)
     for (const point of route) {
-      if (!Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite) || !this.safe(point)) return false
+      if (!Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite)) return false
       const cell = point.map(Math.floor)
-      if (point[0] !== cell[0] + 0.5 || point[1] !== cell[1] || point[2] !== cell[2] + 0.5 ||
-          cell[1] !== previous[1] || Math.abs(cell[0] - previous[0]) + Math.abs(cell[2] - previous[2]) !== 1) return false
+      if (point[0] !== cell[0] + 0.5 || point[1] !== cell[1] || point[2] !== cell[2] + 0.5 || !this.canStep(previous, cell)) return false
       previous = cell
     }
     return true
   }
 
-  // `transit` is the one open cell a committed stair crosses before landing on its observed floor.
+  // `transit` is the one open cell a committed stair or step crosses before landing on its observed floor.
   danger (state, transit = null) {
     const standing = this.safe(state.position) || key(state.position.map(Math.floor)) === transit
     if (state.on_fire || state.in_liquid || state.health <= 0 || !standing) return true

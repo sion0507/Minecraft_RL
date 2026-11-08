@@ -1,6 +1,6 @@
 """T07 actual Minecraft checks from the repository root; no models or APIs.
 
-Order: clock, information, tunnels (administrator scenes), diamond (constructed fixtures), g4, g2.
+Order: clock, information, tunnels and steps (administrator scenes), diamond (constructed fixtures), g4, g2.
 Natural g4/g2 are feasibility diagnostics (#36): success is recorded; only an executor stall fails.
 Every invocation needs a new output directory. Finally the G4 snapshot is restored and checked.
 Without a matching clock certificate these are preflights: pause_verified stays false in the record.
@@ -16,9 +16,12 @@ from typing import Any
 import yaml
 from verify_t06 import access_report
 
+from mc_diamond.information import step_choice
+from mc_diamond.navigation import generate_movement_candidates, observed_routes
 from mc_diamond.rpc import RpcSession
 from mc_diamond.schema import Candidate, EpisodeConfig
 
+CHECKS = ["clock", "information", "tunnels", "steps", "diamond", "g4", "g2"]
 # scope, cells, height, max_ticks, expected reason. Administrator scenes, never a natural task result.
 SCENES = [("tunnel_long", 8, 2, 400, "tunnel_completed"), ("tunnel_long", 2, 3, 400, "tunnel_completed"),
           ("tunnel_break", 2, 2, 400, "tool_broken"), ("tunnel_budget", 8, 2, 30, "active_tick_limit"),
@@ -45,9 +48,9 @@ def tunnel(initial: Any, scope: str, cells: int, height: int, ticks: int) -> Can
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("checks", nargs="*", choices=["clock", "information", "tunnels", "diamond", "g4", "g2"])
+    parser.add_argument("checks", nargs="*", choices=CHECKS)
     args = parser.parse_args()
-    checks = args.checks or ["clock", "information", "tunnels", "diamond", "g4", "g2"]
+    checks = args.checks or CHECKS
     args.output.mkdir(parents=True, exist_ok=False)
     results: dict[str, Any] = {}
     sources = [*Path("src/mc_diamond").glob("*.py"), Path("src/mc_diamond/recipes.json"), *Path("bridge").glob("*.js"),
@@ -144,6 +147,51 @@ def main() -> None:
                 assert row["buried_cell"] == "sand", "the scene must bury the feet cell before the second tunnel"
                 assert second.reason == "tunnel_completed" and row["tunneled"] == 2 and second.stable_boundary
                 assert row["first_mined"] == ["sand", [float(v) for v in feet]]
+        if "steps" in checks:
+            # Administrator scene (#37): refuse the climb under an observed stone, climb the platform, drop back down,
+            # then climb under a ceiling one higher (3-high). Policy-side routes must agree with the bridge on both columns.
+            with RpcSession(config.command, config.rpc_timeout_seconds) as session:
+                prepared = session._call("information_fixture", {"variant": "ore", "exposed": False, "scope": "steps"}, admin=True)
+                assert prepared.get("fixture_ready") is True
+                observation = session.policy().observe()
+                x, y, z = (int(v // 1) for v in observation.position)
+                surfaces = {tuple(int(v) for v in c.position): c for c in observation.observed_map}
+                east, west = [[x + 1.5, y, z - 0.5], [x + 1.5, y + 1, z - 1.5]], [[x - 0.5, y, z - 0.5], [x - 0.5, y + 1, z - 1.5]]
+                # The stone is the only veto: every other cell of the east climb is observed and open.
+                assert surfaces[(x + 1, y + 2, z - 1)].block == "stone" and surfaces[(x + 1, y, z - 2)].support
+                assert all(surfaces[p].passable for p in [(x + 1, y, z - 1), (x + 1, y + 1, z - 1), (x + 1, y + 1, z - 2), (x + 1, y + 2, z - 2)])
+                assert not any(any([a, b] == east for a, b in zip(r, r[1:])) for r in observed_routes(observation).values())
+                scenes: list[dict[str, Any]] = []
+                for name, rise in [("blocked", 0), ("up", 1), ("down", -1), ("up_low", 1)]:
+                    if name in {"blocked", "up_low"}:
+                        path = [[x + 1.5, y, z + 0.5], *east] if name == "blocked" else west
+                        if name == "up_low":
+                            assert observed_routes(observation)[(x - 1, y + 1, z - 2)] == west, "routes must offer the 3-high climb"
+                            assert all(surfaces[(x - 1, y + 3, h)].block == "stone" for h in (z - 1, z - 2)), "the ceiling must be observed"
+                        selected: Candidate | None = Candidate.model_validate({"candidate_id": "steps-" + name,
+                            "action_kind": "move_observed", "params": {"path": path, "map_version": observation.map_version},
+                            "max_ticks": 400, "stop_rule_id": "observed_path_or_hazard", "source_obs_id": observation.obs_id,
+                            "description": name})
+                    else:
+                        selected = step_choice(observation, generate_movement_candidates(observation), rise)
+                    assert selected is not None, f"no {name} step candidate"
+                    step = session.policy().step(selected)
+                    scenes.append({"name": name, "natural_task": False, "path": selected.params["path"], "reason": step.reason,
+                        "ticks": step.actual_ticks, "start": observation.position, "end": step.observation.position,
+                        "stable_boundary": step.stable_boundary, "invalid": step.invalid, "pause_verified": step.pause_verified,
+                        "distance_moved": step.distance_moved, "active_ticks": [observation.active_ticks, step.observation.active_ticks]})
+                    print(json.dumps({"check": "steps-" + name, **{k: scenes[-1][k] for k in ["reason", "ticks", "end",
+                        "stable_boundary", "pause_verified"]}}), flush=True)
+                    assert step.observation.active_ticks == observation.active_ticks + step.actual_ticks
+                    if name == "blocked":
+                        assert step.invalid and step.reason == "invalid_path" and step.actual_ticks == 1
+                    else:
+                        assert step.reason == "path_completed" and step.stable_boundary and not step.invalid
+                        assert step.observation.position[1] == y + (1 if rise > 0 else 0)
+                    observation = step.observation
+                    surfaces = {tuple(int(v) for v in c.position): c for c in observation.observed_map}
+                results["steps"] = {"prepared": prepared, "scenes": scenes}
+                (args.output / "steps.json").write_text(json.dumps(results["steps"], indent=2))
         if "diamond" in checks:
             # Constructed fixtures (natural_task=false): the break→drop→pickup link, and a given diamond that never counts.
             # `iron` checks the same link for the stone pickaxe/iron path before the one natural G2 attempt.

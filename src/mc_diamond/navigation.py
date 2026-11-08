@@ -1,18 +1,31 @@
-"""Conservative walking and stair choices over directly observed cells only."""
+"""Conservative walking (level or one-block steps) and stair choices over directly observed cells only."""
 
 import math
 from collections import deque
 from collections.abc import Iterable
 
-from .schema import Candidate, CandidateSet, Observation
+from .schema import Candidate, CandidateSet, Observation, Surface
 
 PICKS = ["netherite_pickaxe", "diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe", "golden_pickaxe"]
 DIRECTIONS = ((1, 0), (0, 1), (-1, 0), (0, -1))
 SAFE_BAND = (5, 12)  # PLAN 5.1 descend: y=5-12.
+BOUNCY = {"slime_block"}  # A landing bounces: a height change from or onto it overruns the 16-block cap (#37).
 
 
 def observed_routes(observation: Observation) -> dict[tuple[int, int, int], list[list[float]]]:
+    """Level walks and one-block steps (bridge `terrain.canStep` is the same rule) over observed cells only."""
     cells = {tuple(cell.position): cell for cell in observation.observed_map}
+
+    def clear(point: tuple[int, int, int]) -> bool:
+        cell = cells.get(point)
+        return bool(cell and cell.passable and not cell.hazard)
+
+    def footing(point: tuple[int, int, int]) -> Surface | None:
+        """The floor of a standable cell (bridge `terrain.safe`): supporting, safe, with clear feet and head."""
+        cell = cells.get((point[0], point[1] - 1, point[2]))
+        standable = cell and cell.support and not cell.hazard and clear(point) and clear((point[0], point[1] + 1, point[2]))
+        return cell if standable else None
+
     sx, sy, sz = map(math.floor, observation.position)
     start = (sx, sy, sz)
     queue: deque[tuple[tuple[int, int, int], list[list[float]]]] = deque([(start, [])])
@@ -22,18 +35,18 @@ def observed_routes(observation: Observation) -> dict[tuple[int, int, int], list
         if len(route) >= 16:
             continue
         for dx, dz in DIRECTIONS:
-            point = (x + dx, y, z + dz)
-            if point in routes:
-                continue
-            floor = cells.get((point[0], y - 1, point[2]))
-            feet = cells.get(point)
-            head = cells.get((point[0], y + 1, point[2]))
-            if not (floor and floor.support and not floor.hazard and feet and feet.passable
-                    and not feet.hazard and head and head.passable and not head.hazard):
-                continue
-            path = [*route, [point[0] + 0.5, float(y), point[2] + 0.5]]
-            routes[point] = path
-            queue.append((point, path))
+            for dy in (0, -1, 1):
+                point = (x + dx, y + dy, z + dz)
+                below = footing(point)
+                if point in routes or below is None:
+                    continue
+                # A drop passes the front head cell at the start height; a jump lifts the head into the cell over the start.
+                if dy and (below.block in BOUNCY or (here := footing((x, y, z))) is None or here.block in BOUNCY
+                           or not clear((point[0], y + 1, point[2]) if dy < 0 else (x, y + 2, z))):
+                    continue
+                path = [*route, [point[0] + 0.5, float(point[1]), point[2] + 0.5]]
+                routes[point] = path
+                queue.append((point, path))
     return routes
 
 

@@ -286,15 +286,28 @@ async function moveObserved (candidate) {
   let reason = allowed ? 'path_completed' : 'invalid_path'
   let state = initial
   let interrupted = false
+  const from = () => index ? route[index - 1] : initial.position
+  const heightChange = () => route[index][1] - Math.floor(from()[1]) // +1 climb, -1 drop, 0 level, for route[index].
+  const across = point => Math.hypot(point[0] - state.position[0], point[2] - state.position[2])
   while (allowed && ticks < limit) {
-    if (terrain.danger(state) || state.health < initial.health) { reason = 'observed_hazard'; interrupted = true; break }
-    if (index < route.length && Math.hypot(route[index][0] - state.position[0], route[index][2] - state.position[2]) < 0.15) index++
-    const settling = index >= route.length || distance >= 15
+    if (terrain.danger(state, index < route.length ? terrain.transit(from(), route[index]) : null) ||
+        state.health < initial.health) { reason = 'observed_hazard'; interrupted = true; break }
+    // A step's point is reached only after landing at its height; level points keep the plain horizontal check.
+    if (index < route.length && across(route[index]) < 0.15 &&
+        (!heightChange() || (state.on_ground && Math.abs(route[index][1] - state.position[1]) < 0.15))) index++
+    const target = route[index]
+    const rise = target ? heightChange() : 0
+    // No step is begun after 12 blocks, so the jump or drop and its landing stay inside the 16-block cap. A step already
+    // begun (the bot left the start column or its floor) is finished: stopping on an edge would never become stable.
+    const before = rise && state.on_ground && Math.abs(state.position[1] - from()[1]) < 0.15 &&
+      [0, 2].every(axis => Math.floor(state.position[axis]) === Math.floor(from()[axis]))
+    const settling = index >= route.length || distance >= 15 || (before && distance >= 12)
     if (settling && terrain.stable(state)) { reason = index >= route.length ? 'path_completed' : 'distance_limit'; break }
-    if (index < route.length && !terrain.safe(route[index])) { reason = 'path_changed'; interrupted = true; break }
+    if (index < route.length && !terrain.safe(target)) { reason = 'path_changed'; interrupted = true; break }
     if (!settling) {
-      await bot.lookAt(new Vec3(...route[index]).offset(0, bot.entity.eyeHeight, 0), true)
-      bot.setControlState('forward', true)
+      await bot.lookAt(new Vec3(...target).offset(0, bot.entity.eyeHeight, 0), true)
+      if (across(target) >= 0.15) bot.setControlState('forward', true)
+      if (rise > 0 && state.position[1] < target[1] - 0.05) bot.setControlState('jump', true)
     }
     const previous = state.position
     ticks += await advance(1, true)
@@ -939,7 +952,7 @@ async function informationFixture (payload) {
       'production', 'production_no_tool', 'production_no_fuel', 'production_hazard', 'iron',
       'production_craft', 'production_place', 'production_furnace', 'stair', 'stair_exposed', 'stair_coal', 'stair_floor',
       'stair_gap', 'stair_break', 'stair_limit', 'stair_budget', 'stair_no_tool', 'stair_gravel', 'stair_hold', 'stair_iron',
-      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'tunnel_sand', 'diamond', 'diamond_given'].includes(payload.scope)) ||
+      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'tunnel_sand', 'diamond', 'diamond_given', 'steps'].includes(payload.scope)) ||
     (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
   await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
   natural = false
@@ -955,7 +968,9 @@ async function informationFixture (payload) {
   const target = payload.scope === 'stair_coal' ? 'coal_ore' : payload.variant === 'lava' ? 'lava'
     : ['stair_iron', 'tunnel_iron'].includes(payload.scope) ? 'iron_ore' : 'diamond_ore'
   // Tunnels: a side-wall cell that only the third cut opens; other tunnel scenes keep it out of every cut's view.
-  const cell = ['stair_exposed', 'stair_coal', 'stair_iron'].includes(payload.scope) ? `${x + 3} ${y - 1} ${z}`
+  // Steps: right under the climb's landing floor, enclosed by the scene's stone.
+  const cell = payload.scope === 'steps' ? `${x} ${y - 1} ${z - 2}`
+    : ['stair_exposed', 'stair_coal', 'stair_iron'].includes(payload.scope) ? `${x + 3} ${y - 1} ${z}`
     : payload.scope === 'stair_floor' ? `${x + 2} ${y - 3} ${z}` : ['tunnel', 'tunnel_iron'].includes(payload.scope) ? `${x + 3} ${y} ${z + 1}`
       : tunnel ? `${x + 4} ${y - 3} ${z}` : `${x + 4} ${y} ${z}`
   await server.command(`setblock ${cell} minecraft:${target}`)
@@ -977,6 +992,14 @@ async function informationFixture (payload) {
   if (payload.scope === 'empty') {
     await server.command(`fill ${x - 1} ${y} ${z - 1} ${x + 1} ${y + 2} ${z + 1} minecraft:stone`)
     await server.command(`fill ${x} ${y} ${z} ${x} ${y + 1} ${z} minecraft:air`)
+  }
+  if (payload.scope === 'steps') {
+    // A platform one block up north of the bot (#37): a stone over the east column's jump space blocks that climb,
+    // a ceiling one higher over the west column leaves a 3-high climb, and stone under it encloses the hidden cell.
+    await server.command(`fill ${x - 1} ${y} ${z - 8} ${x + 1} ${y} ${z - 2} minecraft:stone`)
+    await server.command(`fill ${x - 1} ${y - 2} ${z - 8} ${x + 1} ${y - 2} ${z - 2} minecraft:stone`)
+    await server.command(`setblock ${x + 1} ${y + 2} ${z - 1} minecraft:stone`)
+    await server.command(`fill ${x - 1} ${y + 3} ${z - 2} ${x - 1} ${y + 3} ${z - 1} minecraft:stone`)
   }
   if (payload.scope === 'production') {
     await server.command('clear ResearchBot')

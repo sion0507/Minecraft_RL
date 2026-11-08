@@ -2,15 +2,16 @@
 
 import hashlib
 import json
+import math
 import time
-from typing import Any
+from typing import Any, cast
 
 from .episode import emit
 from .navigation import generate_descent_candidates, generate_movement_candidates, ore_search_choices
 from .macros import generate_wood_candidates
 from .production import generate_production_candidates
 from .rpc import EpisodeError, RpcSession
-from .schema import Candidate, CandidateSet, ErrorInfo, Goal
+from .schema import Candidate, CandidateSet, ErrorInfo, Goal, Observation
 
 
 def policy_signature(value: dict[str, Any]) -> dict[str, Any]:
@@ -117,6 +118,60 @@ def audit_stairs(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
             raise ValueError("Exposure stop mismatch")
         evidence.append({"scope": scope, "height": height, "exposed": True, "steps": 2, "stop_ticks": ore[1]["step"]["actual_ticks"],
                          "input_sha256": hashlib.sha256(json.dumps(ore[0], sort_keys=True).encode()).hexdigest()})
+
+
+def step_choice(observation: Observation, candidates: CandidateSet, rise: int) -> Candidate | None:
+    """The generated walk whose first `rise` height change comes earliest, cut just after it; ties keep candidate order.
+
+    Like the stair audit's workload override: the check runs the step itself, never a long walk to the distance cap.
+    """
+    best: tuple[int, Candidate] | None = None
+    for candidate in candidates.candidates:
+        path = cast(list[list[float]], candidate.params.get("path", []))
+        heights = [math.floor(observation.position[1]), *(point[1] for point in path)]
+        index = next((i for i in range(len(path)) if heights[i + 1] - heights[i] == rise), None)
+        if candidate.action_kind == "move_observed" and index is not None and (best is None or index < best[0]):
+            best = (index, candidate.model_copy(update={"params": {**candidate.params, "path": path[:index + 1]}}))
+    return best[1] if best else None
+
+
+def audit_steps(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
+    """Same visible platform, different hidden block enclosed under the landing: the climb and the drop back match (#37)."""
+    pair: list[list[dict[str, Any]]] = []
+    for variant in ["ore", "lava"]:
+        prepared = session._call("information_fixture", {"variant": variant, "exposed": False, "scope": "steps"}, admin=True)
+        if prepared.get("fixture_ready") is not True:
+            raise ValueError("Step fixture was not verified")
+        observation = session.policy().observe()
+        rows: list[dict[str, Any]] = []
+        for rise in (1, -1):
+            candidates = generate_movement_candidates(observation)
+            emit("information_step_observation", observation)
+            emit("information_step_candidates", candidates)
+            selected = step_choice(observation, candidates, rise)
+            if selected is None:
+                raise ValueError("Step candidate absent")
+            step = session.policy().step(selected)
+            emit("information_step_step", step)
+            if (step.invalid or step.cancelled or step.terminated or step.reason != "path_completed" or not step.stable_boundary
+                    or step.clock_mode != "paused" or not step.pause_verified or not 1 <= step.actual_ticks <= selected.max_ticks
+                    or not 0 < step.distance_moved <= 16 or step.path != selected.params["path"]
+                    or step.observation.position[1] != step.path[-1][1] or step.source_obs_id != observation.obs_id
+                    or step.stop_evidence != [step.observation.obs_id, step.reason]
+                    or step.map_version != step.observation.map_version
+                    or step.observation.active_ticks != observation.active_ticks + step.actual_ticks
+                    or step.observation.remaining_ticks != observation.remaining_ticks - step.actual_ticks
+                    or any(event.source != "minecraft" for event in step.events)):
+                raise ValueError("Step movement/clock/evidence was not verified")
+            rows.append(policy_signature({"observation": observation.model_dump(mode="json"),
+                "candidates": candidates.model_dump(mode="json"), "selected": selected.model_dump(mode="json"),
+                "step": step.model_dump(mode="json")}))
+            observation = step.observation
+        pair.append(rows)
+    if pair[0] != pair[1]:
+        raise ValueError("Hidden variant changed step candidates/path/stop/boundary")
+    evidence.append({"scope": "steps", "exposed": False, "steps": 2, "actual_ticks": [row["step"]["actual_ticks"] for row in pair[0]],
+                     "input_sha256": hashlib.sha256(json.dumps(pair[0], sort_keys=True).encode()).hexdigest()})
 
 
 def audit_information(session: RpcSession) -> bool:
@@ -307,13 +362,14 @@ def audit_information(session: RpcSession) -> bool:
                     "steps": len(steps), "actual_ticks": sum(row["step"]["actual_ticks"] for row in steps)})
             if production_pair[0] != production_pair[1]:
                 raise ValueError(f"Hidden variant changed {scope} policy evidence")
+        audit_steps(session, evidence)
         audit_stairs(session, evidence)
     except ValueError:
         error = ErrorInfo(code="invalid_step", message="Information audit evidence mismatch")
     except EpisodeError as failure:
         error = failure.error
     emit("information_summary", {"information_verified": error is None,
-         "scope": ["observation", "move_observed", "mine_visible_cluster", "place_or_equip", "wait20", "wait100", "wait200",
+         "scope": ["observation", "move_observed", "move_observed_steps", "mine_visible_cluster", "place_or_equip", "wait20", "wait100", "wait200",
                    "drop_pickup", "independent_drop_wait", "zero_candidates", "craft_batch", "facility_place",
                    "furnace_load", "furnace_collect", "iron_mining", "diamond_mining", "stair_down", "stair_exposure",
                    "stair_iron_exposure", "tunnel", "tunnel_exposure", "tunnel_iron_exposure"], "hidden_hazard_peek": False,
