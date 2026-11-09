@@ -14,7 +14,8 @@ from .clock import verify_clock
 from .information import audit_information
 from .rpc import EpisodeError, RpcSession
 from .schema import CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Goal, Observation, SelectionResult
-from .selectors import first_candidate, result, rule_select
+from .rule_selector import rule_select
+from .selectors import first_candidate, result
 
 
 def human_select(observation: Observation, _goal: Goal, saved: CandidateSet, _failures: Sequence[str]) -> SelectionResult:

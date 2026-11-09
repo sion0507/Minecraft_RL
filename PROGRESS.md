@@ -6,7 +6,7 @@
 
 - **구현:**
   - `goals.py`: GoalRegistry(`validate` 형식·즉시 전제조건·제공 상태 거부, `completed` 7종 완료 규칙, `recovery_goal` escape/explore), `Planning`(최초 요청 → 재생성 1회 → 복구, 분자·분모 집계), `ActiveGoal`(완료·연속 실패 3·3,600틱·매크로 20 재계획 사건, GoalStats 행), 모의 `scripted_planner`.
-  - `selectors.py`: 공통 selector 계약 `(observation, goal, saved, failures) → SelectionResult`, 고정 첫 후보, 규칙 기반 S(`s-rules-v1`, 사전식 키·hash·후보별 키 기록).
+  - `selectors.py`: 공통 selector 계약 `(observation, goal, saved, failures) → SelectionResult`, 고정 첫 후보. `rule_selector.py`: 규칙 기반 S(`s-rules-v1`, 사전식 키·hash·후보별 키 기록).
   - `episode.py`: 결정 전 목표 채택(`goal_decision` 기록), 목표별 후보, 제시·마스크 후보 검사, 목표 ID·출처를 매크로 증거·보상·`progress_by_source`·`goal_outcomes`에 연결, 계획기 집계를 summary에. 과제 완료(`config.goal`)와 목표 완료를 나눴다. escape/explore 후보는 기존 보행·hold·광석 탐색 생성기를 쓴다.
   - CLI `--select rule`(S). `tools/verify_t06.py`의 방향 고정 selector를 새 계약으로 바꿨다.
 - **개발 검사(mock·공개 CLI, 실제 서버 아님):** pytest 188 passed(53.7초, 기존 135 + 새 53), strict mypy 34파일 통과.
@@ -14,6 +14,12 @@
   - GoalRegistry 거부 18경우·채택 6경우, 완료 규칙 사건 fixture 12경우(explore·escape는 실제 매크로 연결 검증 전이라 사건 fixture로만 확인).
   - S: 관련성 순서, 위험 회피, 최근 실패 회피(모두 실패면 무시), 동률 저장 순서, 작업량, descend·escape hold, 21개 → 16개 저장 집합에서 유효 ID·마스크, CLI에서 실패한 원목을 피해 다른 원목 선택, 관리자 로그만 다른 두 실행의 선택 동일, 0/1 후보 공통 계약.
   - 변형 검사: 재생성 제거·S 실패 규칙 제거·제공 보유로 완료·연속 실패 사건 제거·S 위험 규칙 제거를 각각 넣으면 새 검사가 실패함을 확인하고 원래대로 돌렸다.
+- **리뷰 반영(Standards·Spec 두 축, 같은 날):**
+  - 결함: escape에서 hold와 멀어지는 보행이 같은 관련성 0이어서 작업량이 큰 보행이 항상 이겨 S가 hold를 고르지 못했다(escape 완료 불가). 멀어지는 보행을 관련성 1로 고쳤다. 실패 검사를 먼저 넣어 실패를 확인한 뒤 고쳤다.
+  - S를 `rule_selector.py`로 분리해 `RULE_HASH`가 S 규칙만 덮게 했다. 완료 사건 표·실패 판정·사건 집계 중복을 `goals`의 하나로 모았다. 계획기 집계가 summary에 검증 없이 들어가던 것을 검증 경로로 바꿨다. 쓰지 않던 상수를 지웠다.
+  - GoalStats에 실패 사유별 수와 채택 전 재생성 수를 넣었다. `direction`은 기록만 한다는 것, S의 전제조건은 생성기·마스크가 맡는다는 것을 DECISIONS에 적었다.
+  - 숨은 정보 불변 검사는 mock에서 관리자 로그만 바꾼다. mock 관측 schema가 숨은 필드를 거부하는 기존 검사와 함께, 실제 숨은 블록 대조는 사전 등록한 실제 정보 감사가 맡는다.
+  - 다시 검사: pytest 188 passed(53.9초), mypy 35파일 통과.
 - **실행하지 않음:** 실제 7B·Astra 계획기(T09), #13 S 슬롯 연결(#13 미구현), 실제 정보 감사·T04–T07 회귀(DECISIONS에 범위를 사전 등록, 실행 승인 대기). escape·explore 목표와 S의 실제 게임 동작은 미검증이다.
 
 ## 2026-11-09 — #38 병합·종료, 실제 검증은 T08 뒤로 (사용자 지시)

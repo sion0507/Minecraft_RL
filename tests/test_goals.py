@@ -15,7 +15,8 @@ import yaml
 
 from mc_diamond.goals import GoalError, completed, recovery_goal, validate
 from mc_diamond.schema import Candidate, CandidateSet, Goal, Observation, StepResult, allocate
-from mc_diamond.selectors import RULE_HASH, rule_select, signature
+from mc_diamond.rule_selector import RULE_HASH, rule_select
+from mc_diamond.selectors import signature
 
 BASE: dict[str, Any] = {**json.loads(Path("fixtures/mock_episode.json").read_text())["initial"], "remaining_ticks": 20000}
 LOGS = [{"block": "air", "position": [float(x), 64.0, 0.0], "passable": True} for x in range(2, 6)] + [
@@ -109,6 +110,7 @@ def test_invalid_reply_is_regenerated_once_with_its_own_denominator(tmp_path: Pa
     summary = kind(output, "summary")[0]
     assert (summary["planner_initial_errors"], summary["planner_initial_requests"]) == (1, 1)
     assert (summary["planner_regeneration_errors"], summary["planner_regeneration_requests"]) == (0, 1)
+    assert summary["goal_outcomes"][0]["planner_retries"] == 1
     assert summary["progress_by_source"] == {"regenerated": {"acquired:oak_log": 1}}
 
 
@@ -145,6 +147,7 @@ def test_first_replan_trigger_switches_to_a_new_goal_decision(tmp_path: Path, co
         ("episode_start", "obs-0", "wood:1"), (trigger, f"obs-{count}", "wood:2")]
     first = kind(output, "summary")[0]["goal_outcomes"][0]
     assert (first["end_reason"], first["macros"], first["completed"]) == (trigger, count, False)
+    assert first["failure_reasons"] == ({"operation_failed": count} if events == FAILED else {})
     assert first["end_tick"] - first["start_tick"] == count * ticks
 
 
@@ -329,6 +332,9 @@ def test_s_holds_for_descend_and_escape_and_walks_away_from_the_hazard() -> None
     lava = [{"block": "lava", "position": [1.0, 64.0, 0.0], "hazard": True}]
     toward, away = walk(0, 0.5, 64.0, 1.5, length=2), walk(1, -3.5, 64.0, 0.5, length=2)
     assert pick([toward, away], escape, observed_map=lava) == away.candidate_id
+    # once 3+ blocks away the hold completes escape: it must beat a longer walk away (review, #9)
+    far = [{"block": "lava", "position": [3.0, 64.0, 0.0], "hazard": True}]
+    assert pick([away, hold], escape, observed_map=far) == hold.candidate_id
 
 
 def test_s_returns_one_offered_id_from_a_capped_set_with_its_rule_record() -> None:
@@ -340,7 +346,7 @@ def test_s_returns_one_offered_id_from_a_capped_set_with_its_rule_record() -> No
     assert (chosen.selector_mode, chosen.probabilities, chosen.provider, chosen.model, chosen.usage) == (
         "rule_deterministic", None, None, None, None)
     assert chosen.rule_version == "s-rules-v1"
-    assert chosen.rule_hash == RULE_HASH == hashlib.sha256(Path("src/mc_diamond/selectors.py").read_bytes()).hexdigest()
+    assert chosen.rule_hash == RULE_HASH == hashlib.sha256(Path("src/mc_diamond/rule_selector.py").read_bytes()).hexdigest()
     assert chosen.rule_keys is not None and set(chosen.rule_keys) == {c.candidate_id for c in saved.candidates}
     masked = saved.model_copy(update={"mask": [c.candidate_id != chosen.candidate_id for c in saved.candidates]})
     assert rule_select(obs(), Goal.model_validate(TASK), masked, ()).candidate_id != chosen.candidate_id

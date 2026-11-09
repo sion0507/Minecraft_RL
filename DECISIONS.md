@@ -7,7 +7,7 @@
 
 ## 2026-11-09 — T08 목표 처리·재계획·규칙 복구와 S 선택기 (#9)
 
-구현 위치: `src/mc_diamond/goals.py`(GoalRegistry·Planning·ActiveGoal), `selectors.py`(공통 ActionSelector·S), `episode.py`(연결). A/B/J/F/S가 같은 코드를 쓰고 계획기 제공처만 바뀐다. 실제 7B·Astra 연결은 T09(#10)다.
+구현 위치: `src/mc_diamond/goals.py`(GoalRegistry·Planning·ActiveGoal), `selectors.py`(공통 ActionSelector), `rule_selector.py`(S), `episode.py`(연결). A/B/J/F/S가 같은 코드를 쓰고 계획기 제공처만 바뀐다. 실제 7B·Astra 연결은 T09(#10)다.
 
 - **규칙 복구 목표(사용자 선택 "escape/explore"):** 관측 위험이 3블록 안이면 `escape`, 아니면 `explore`(target `space`). 제작 사슬의 단계를 고르지 않는다. 그래서 복구 출처의 진행을 계획 능력으로 볼 근거가 없다.
 - **전제조건(사용자 선택 "즉시 전제조건"):** 지금 관측·인벤토리로 확인되는 것만 본다.
@@ -16,15 +16,16 @@
   - smelt(iron_ingot만): 보유·화로 투입·화로 출력의 철 합이 필요량 이상, 필요한 연료 보유(화로에 이미 투입했으면 면제), 화로 보유 또는 관측.
   - escape: 관측 위험이 3블록 안에 있어야 한다. explore: 없음.
   - 이미 보유량을 채운 collect/craft/smelt(제공 아이템 포함)는 `already_satisfied` 오류다. 제공 상태로 새 성공을 만들지 않는다.
+- **`direction`:** explore에서만 받아 기록한다. 지금 후보 생성은 읽지 않는다(새 후보 규칙을 만들지 않기 위해서다). 쓰려면 모든 군 공통으로 따로 정한다.
 - **형식:** JSON 객체 하나, 키는 `kind`·`target`(필수)과 `quantity`·`direction`(선택)만. 대상 목록은 `goals.TARGETS`. 수량은 collect 1–16, craft/smelt 1–8, 나머지 1. `direction`은 explore만(north/south/east/west). 오류 코드는 `invalid_json`·`invalid_format`·`already_satisfied`·`precondition`이고 메시지를 재생성 요청의 feedback으로 넘긴다.
 - **재계획 사건(PLAN §5.1, 처음 일어난 것 하나):** 목표 완료 → 연속 실패 3회 → 목표 활성 3,600틱(3분) → 목표 매크로 20회. 실패는 그 스텝에 `failed` 사건이 있는 것(bridge의 실패 사건, 후보 0개 강제 대기)이다. 취소된 선택은 매크로·실패로 세지 않고 시간에는 포함한다.
 - **한 번 재생성과 집계:** 최초 요청 오류 → 같은 결정에서 재생성 1회 → 다시 오류면 복구 목표. 분자/분모는 최초 오류/최초 요청, 재생성 오류/재생성 요청, 복구 사용/전체 목표 결정으로 각각 summary에 남는다. 결정마다 `goal_decision` 기록에 계기·근거 관측 ID·출처·계획기 모델/버전·원문 응답·오류를 남긴다.
-- **출처 연결:** 목표 출처는 `fixed`·`planner`·`regenerated`·`rule_recovery`다. 각 매크로 증거·보상 기록에 `goal_id`·`goal_source`를 넣고, 직접 획득·제작·제련은 `progress_by_source`로 출처별로 센다. 목표별 시도·완료·시간·매크로·실패·종료 사유는 `goal_outcomes`(GoalStats)다.
+- **출처 연결:** 목표 출처는 `fixed`·`planner`·`regenerated`·`rule_recovery`다. 각 매크로 증거·보상 기록에 `goal_id`·`goal_source`를 넣고, 직접 획득·제작·제련은 `progress_by_source`로 출처별로 센다. 목표별 시도·완료·시간·매크로·실패 수와 실패 사유별 수(`failure_reasons`)·채택 전 재생성 수(`planner_retries`)·종료 사유는 `goal_outcomes`(GoalStats)다.
 - **완료 규칙:** collect·mine_diamond·craft·smelt는 목표 시작 뒤 그 목표의 직접 사건이 있고 보유량을 채웠을 때다(이전 단일 목표 규칙과 같다). descend는 기존 규칙. escape는 끝난 위치가 관측 위험에서 3블록 이상이고 중단 없는 20틱 `safe_hold`. explore는 목표 시작 때 관측에 없던 통과 가능 칸 16개, 또는 target 자원의 새 관측 칸이다.
 - **후보:** escape는 보행(위험에서 3블록 이상이고 안전 지면이면 hold 20틱을 앞에), explore는 새 땅 보행(target이 철·다이아 광석이면 기존 광석 탐색 후보). 새 후보 종류·매크로는 없다. hold는 descend와 같은 후보(`navigation.hold_candidate`)다.
 - **고정 설정 목표(계획기 없음):** `configs/*.yaml`의 `goal`은 과제 정의다. 계획기 출력이 아니므로 GoalRegistry 검사·재생성·복구를 거치지 않고, 재계획 사건마다 같은 목표를 새 ID(`<goal_id>:<n>`)로 다시 채택한다. 후보는 목표 ID를 쓰지 않으므로 T04–T07 궤적은 그대로일 것으로 예상한다(실제 실행으로는 아래 검증에서 확인). 계획기를 설정하면 `config.goal`은 에피소드 종료를 정하는 과제이고 계획기 목표가 후보를 정한다.
 - **계획기 모의 backend:** `planner: {backend: scripted, outputs: [...]}`가 응답을 순서대로 내고, 다 쓰면 빈 응답(오류)이다. 모델·과금 주장 없음.
-- **S 규칙(사용자 승인 순서, `s-rules-v1`):** 후보별 사전식 키 ① 최근 실패한 같은 행동(종류+경로 끝/대상/방향, 에피소드의 최근 실패 3개) ② 도달·절삭 지점이 관측 위험 3블록 안 ③ 목표 관련성(직접 수행 0: 목표 블록 채굴·제작·화로·hold, 준비·접근 1: 다른 채굴·장착/설치·관측 목표 자원/드롭/설비에 가까워지는 보행·descend의 계단, 탐색 2, 일반 대기 3; escape에서는 위험에서 멀어지는 보행이 0) ④ 작업량 큰 쪽 ⑤ 동률이면 저장 순서. 모든 후보가 최근 실패면 ①은 동률이 되어 무시된다. 결정마다 `rule_version`·`rule_hash`(`selectors.py` sha256)·후보별 키를 SelectionResult에 남기고 mode는 `rule_deterministic`, 확률·provider·model·usage는 null이다. 후보 1개는 공통 계약대로 확률 1이다. S 보상 기록의 actor 제외 사유는 `rule_selector`다.
+- **S 규칙(사용자 승인 순서, `s-rules-v1`):** 후보별 사전식 키 ① 최근 실패한 같은 행동(종류+경로 끝/대상/방향, 에피소드의 최근 실패 3개) ② 도달·절삭 지점이 관측 위험 3블록 안 ③ 목표 관련성(직접 수행 0: 목표 블록 채굴·제작·화로·hold, 준비·접근 1: 다른 채굴·장착/설치·관측 목표 자원/드롭/설비에 가까워지는 보행·descend의 계단·escape에서 위험에서 멀어지는 보행, 탐색 2, 일반 대기 3) ④ 작업량 큰 쪽 ⑤ 동률이면 저장 순서. 모든 후보가 최근 실패면 ①은 동률이 되어 무시된다. 공개 전제조건은 생성기와 마스크가 이미 적용하므로 S가 보는 후보는 모두 전제조건을 만족한다. 결정마다 `rule_version`·`rule_hash`(`rule_selector.py`만의 sha256)·후보별 키를 SelectionResult에 남기고 mode는 `rule_deterministic`, 확률·provider·model·usage는 null이다. 후보 1개는 공통 계약대로 확률 1이다. S 보상 기록의 actor 제외 사유는 `rule_selector`다.
 - **공통 selector 계약:** selector는 `(observation, goal, saved, failures) → SelectionResult`이고, episode가 제시·마스크된 후보인지 검사한다(`invalid_selection`). 고정·사람·S가 같은 경로를 쓴다.
 - **#13 슬롯 연결:** #13이 아직 구현되지 않아 이 티켓에서는 연결하지 않았다. #13 구현 때 `--select rule` 실행을 S 슬롯에 연결하고 #20 lock 전에 확인한다. 규칙 hash는 #20에서 고정한다.
 

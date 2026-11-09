@@ -9,7 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 
 from .rpc import EpisodeError, PolicyEnvironment
-from .goals import ESCAPE_DISTANCE, ActiveGoal, Planning, completed, scripted_planner
+from .goals import COMPLETION_EVENT, ESCAPE_DISTANCE, ActiveGoal, Planning, completed, failed, tally
 from .navigation import (
     ORE_TOP, PICKS, escape_candidates, fresh_movement_candidates, generate_descent_candidates, generate_movement_candidates,
     hazard_distance, hold_candidate, ore_search_choices, safe_ground,
@@ -117,9 +117,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     verified: dict[str, int] = {}
     stalled = 0
     terminated = truncated = invalid = done = False
-    planner = config.planner
-    planning = Planning(config.goal, scripted_planner(planner) if planner else None,
-                        planner.model if planner else None, planner.version if planner else None)
+    planning = Planning(config.goal, config.planner)
     active: ActiveGoal | None = None
     trigger = "episode_start"
     outcomes: list[GoalOutcome] = []
@@ -148,9 +146,10 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 truncated, reason = True, "wall_time_limit"
                 break
             if active is None:
+                retries = planning.counts["planner_regeneration_requests"]
                 adopted, decision = planning.decide(observation, trigger)
                 emit("goal_decision", decision)
-                active = ActiveGoal(adopted, observation)
+                active = ActiveGoal(adopted, observation, planner_retries=planning.counts["planner_regeneration_requests"] - retries)
             goal = active.goal
             emit("goal", goal)
             saved = policy_candidates(observation, goal, movement=movement, macros=macros)
@@ -242,8 +241,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 ledger = {"crafted": direct_crafted, "smelted": direct_smelted, "acquired": direct_acquired}.get(event.kind)
                 if ledger is not None and event.item:
                     ledger[event.item] = ledger.get(event.item, 0) + event.quantity
-                    progress = progress_by_source.setdefault(goal.source, {})
-                    progress[f"{event.kind}:{event.item}"] = progress.get(f"{event.kind}:{event.item}", 0) + event.quantity
+            tally(progress_by_source.setdefault(goal.source, {}), step)
             reward = float(sum(event.quantity for event in step.events if event.kind == "acquired"))
             reward_total += reward
             emit("reward", {"value": reward, "kind": "smoke_acquisition_count", "actor_valid": False,
@@ -251,9 +249,9 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                             "actor_exclusion_reason": "cancelled" if step.cancelled else "no_candidates" if not saved.candidates
                             else "single_candidate" if len(saved.candidates) == 1
                             else "rule_selector" if selection.selector_mode == "rule_deterministic" else "smoke_selector"})
-            if saved.candidates and not step.cancelled and any(event.kind == "failed" for event in step.events):
+            if saved.candidates and not step.cancelled and failed(step):
                 failures.append(signature(candidate))
-            task_event = {"collect": "acquired", "mine_diamond": "acquired", "craft": "crafted", "smelt": "smelted"}.get(config.goal.kind)
+            task_event = COMPLETION_EVENT.get(config.goal.kind)
             acquired_target += sum(event.quantity for event in step.events
                                    if event.kind == task_event and event.item == config.goal.target)
             done = completed(config.goal, start, step, acquired_target)
@@ -306,7 +304,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         direct_smelted=direct_smelted, direct_acquired=direct_acquired, admin_verified=verified,
         diamond_success=config.goal.kind == "mine_diamond" and done and verified.get("diamond", 0) >= 1,
         planner_model=planning.model, planner_version=planning.version,
-        progress_by_source=progress_by_source, goal_outcomes=outcomes,
-    ).model_copy(update=planning.counts)
+        progress_by_source={source: gained for source, gained in progress_by_source.items() if gained}, goal_outcomes=outcomes,
+    )
+    summary = EpisodeSummary.model_validate({**summary.model_dump(), **planning.counts})
     emit("summary", summary)
     return summary

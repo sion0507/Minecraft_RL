@@ -13,9 +13,8 @@ from typing import Literal
 
 from .navigation import PICKS, SAFE_BAND, hazard_distance
 from .production import FUELS, RECIPES
-from .schema import Goal, GoalOutcome, Observation, PlannerConfig, StepResult
+from .schema import Goal, GoalOutcome, GoalSource, Observation, PlannerConfig, StepResult
 
-GOAL_BUDGET_TICKS = 3600  # 3 active minutes at 20 ticks/s
 FAILURE_LIMIT = 3
 MACRO_LIMIT = 20
 ESCAPE_DISTANCE = 3.0
@@ -158,10 +157,16 @@ def scripted_planner(config: PlannerConfig) -> Ask:
 
 
 class Planning:
-    """Goal decisions of one episode: one planner request, one regeneration on error, then the rule recovery goal."""
+    """Goal decisions of one episode: one planner request, one regeneration on error, then the rule recovery goal.
 
-    def __init__(self, task: Goal, ask: Ask | None, model: str | None = None, version: str | None = None) -> None:
-        self.task, self.ask, self.model, self.version = task, ask, model, version
+    Without a planner the task goal is the fixed goal, re-adopted at every decision.
+    """
+
+    def __init__(self, task: Goal, planner: PlannerConfig | None) -> None:
+        self.task = task
+        self.ask = scripted_planner(planner) if planner else None
+        self.model: str | None = planner.model if planner else None
+        self.version: str | None = planner.version if planner else None
         self.counts = {"planner_initial_requests": 0, "planner_initial_errors": 0, "planner_regeneration_requests": 0,
                        "planner_regeneration_errors": 0, "rule_recoveries": 0, "goal_decisions": 0}
 
@@ -192,27 +197,39 @@ class Planning:
                       "requests": requests, "goal": goal.model_dump(mode="json")}
 
 
+def tally(ledger: dict[str, int], step: StepResult) -> None:
+    """Direct acquired/crafted/smelted quantities of one step, keyed `kind:item`."""
+    for event in step.events:
+        if event.kind in {"acquired", "crafted", "smelted"} and event.item:
+            ledger[f"{event.kind}:{event.item}"] = ledger.get(f"{event.kind}:{event.item}", 0) + event.quantity
+
+
+def failed(step: StepResult) -> bool:
+    """A failure for replanning and selector S: the step carries a `failed` event."""
+    return any(event.kind == "failed" for event in step.events)
+
+
 @dataclass
 class ActiveGoal:
     """The adopted goal's counters; `record` returns the first replan trigger a step causes, if any."""
     goal: Goal
     start: Observation
+    planner_retries: int = 0  # regeneration requests of the decision that adopted it
     macros: int = 0
     failures: int = 0
     streak: int = 0
     done: bool = False
     direct: dict[str, int] = field(default_factory=dict)
+    failure_reasons: dict[str, int] = field(default_factory=dict)
 
     def record(self, step: StepResult) -> str | None:
         if not step.cancelled:
             self.macros += 1
-            failed = any(event.kind == "failed" for event in step.events)
-            self.failures += failed
-            self.streak = self.streak + 1 if failed else 0
-        for event in step.events:
-            if event.kind in {"acquired", "crafted", "smelted"} and event.item:
-                key = f"{event.kind}:{event.item}"
-                self.direct[key] = self.direct.get(key, 0) + event.quantity
+            self.streak = self.streak + 1 if failed(step) else 0
+            if failed(step):
+                self.failures += 1
+                self.failure_reasons[step.reason] = self.failure_reasons.get(step.reason, 0) + 1
+        tally(self.direct, step)
         own = self.direct.get(f"{COMPLETION_EVENT.get(self.goal.kind)}:{self.goal.target}", 0)
         self.done = completed(self.goal, self.start, step, own)
         if self.done:
@@ -225,5 +242,6 @@ class ActiveGoal:
 
     def outcome(self, end_tick: int, reason: str) -> GoalOutcome:
         return GoalOutcome(goal_id=self.goal.goal_id, source=self.goal.source, kind=self.goal.kind, target=self.goal.target,
-                           start_tick=self.start.active_ticks, end_tick=end_tick, macros=self.macros, failures=self.failures,
+                           start_tick=self.start.active_ticks, end_tick=end_tick, planner_retries=self.planner_retries,
+                           macros=self.macros, failures=self.failures, failure_reasons=dict(self.failure_reasons),
                            completed=self.done, end_reason=reason, direct=dict(self.direct))

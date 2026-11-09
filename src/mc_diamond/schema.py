@@ -78,7 +78,7 @@ class Goal(Contract):
     quantity: Positive
     direction: Literal["north", "south", "east", "west"] | None = None
     preconditions: list[str] = Field(default_factory=list)  # what GoalRegistry checked when it adopted the goal
-    active_budget_ticks: Positive = 3600  # replan after 3 active minutes (PLAN §5.1)
+    active_budget_ticks: Positive = 3600  # replan after 3 active minutes at 20 ticks/s (PLAN §5.1)
     completion_rule_id: Identifier | None = None
     source: GoalSource = "fixed"
 
@@ -99,8 +99,10 @@ class GoalOutcome(Contract):
     target: str
     start_tick: Count
     end_tick: Count
+    planner_retries: Count  # regeneration requests before this goal was adopted
     macros: Count
     failures: Count
+    failure_reasons: dict[str, Count]  # step reason of each failed step
     completed: bool
     end_reason: str
     direct: dict[str, Count]
