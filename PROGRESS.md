@@ -1,5 +1,15 @@
 # 실행 기록
 
+## 2026-11-09 — #44 등록·Astra 실제 연결 이연·#10 게시/병합/종료 진행
+
+사용자 명시적 요청으로 [관측 확대 #44](https://github.com/sion0507/Minecraft_RL/issues/44)를 gh CLI로 생성했다. 반경32블록·최소256개 수준의 입력, 자원/위험/설비/기억 보존, 표현/스캐너 개선과 실제 검증은 **#44 구현 시** 수행한다. 기존 저장 관측/실제 tokenizer 분석과 합성 CPU 결과만 이슈에 기록했으며 현재 코드는 변경하지 않았다. 로컬 검토 원시는 artifacts/observation-scope-review-2026-11-09다.
+
+Astra 실제 연결·응답·지원 설정·사용량/과금·지연 검증은 **추후 비교 단계**로 이연한다(사용자 결정). 현재 호출0/실제 미검증이며, 이 미실행은 #10 종료의 장애가 아니다. 단순 접근 확인 유료 진단은 지금 실행하지 않는다. 비교 호출 직전의 키/계정·별도 금액/호출 승인과 실제 metadata/청구 확인은 남아 있다. 사용자의 연결 가능성 기대를 검증 성공으로 쓰지 않는다. #1/#10/#17/#20과 PLAN/PRD에 같은 시점 결정을 반영한다.
+
+현재 e887f4a 위 feat/issue-10-planner에서 기록을 커밋·push·PR 병합·#10 종료한다. 앞 절의 미푸시/Open 기록은 당시 이력이며 이번 사용자 승인으로 게시한다. 최종 실제 상태·SHA·개발 검사·PDF 검수는 artifacts/issue-10/publication.json 및 최신 PDF를 따른다. 게임/모델/API/학습·관측 확대 검사는 이번 게시 때문에 재실행하지 않는다.
+
+게시 직전 fresh 검사: **전체 pytest229개/68.46초**, **mypy src/tests31파일 통과**, `git diff --check` 통과. 원시는 `artifacts/issue-10/pre-merge-{pytest,mypy}.txt`다. 원격 main은 작업시작 기준7a7f8c8이며 기존 구현 e887f4a와 문서만 추가해 PR로 게시한다. .github CI workflow는 없어 로컬 검사를 원격 CI 통과로 표시하지 않는다.
+
 ## 2026-11-09 — #10 T09 공통 계획기 구현·실제 Qwen/G1 검증, Astra 승인 대기
 
 **구현:** 선행 #9 Closed/completed와 #10/#1 본문·댓글/PLAN을 확인했다. 기존 Planning/GoalRegistry/run_episode에 공통 입력과 실제 local_7b·Astra HTTPS backend, 공개 smoke-planner를 연결했다. 최초/재생성/규칙 복구 출처·오류 분모·직접 진행을 기존 흐름으로 기록한다. dict/list 목표 필드의 TypeError도 재현 후 수정했다. 고정 선택기의 실제 연결 진단이며 NanoJev/Jev 행동 성능 비교가 아니다.
