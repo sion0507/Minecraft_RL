@@ -28,6 +28,14 @@ def emit(kind: str, data: BaseModel | dict[str, object]) -> None:
     print(json.dumps({"type": kind, "data": value}, allow_nan=False), flush=True)
 
 
+def error_summary(config: EpisodeConfig, episode_id: str, attempt_id: str, error: ErrorInfo, wall_seconds: float) -> EpisodeSummary:
+    """Summary of an episode whose backend failed before `run_episode` could produce one."""
+    return EpisodeSummary(episode_id=episode_id, attempt_id=attempt_id, backend=config.backend,
+                          clock_mode="mock" if config.backend == "mock" else "unverified", goal_completed=False,
+                          terminated=False, truncated=False, invalid=False, reason=error.code, error=error,
+                          active_ticks=0, wall_seconds=wall_seconds, decisions=0, reward_total=0.0)
+
+
 def generate_candidates(observation: Observation, goal: Goal) -> CandidateSet:
     candidates = [Candidate(
         candidate_id=f"{observation.obs_id}:mine:{index}", action_kind="mine_visible_cluster",

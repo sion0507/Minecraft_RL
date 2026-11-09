@@ -82,6 +82,11 @@ def main() -> None:
                         if set(request.payload) != {"candidate"}:
                             raise ValueError("invalid step")
                         candidate = Candidate.model_validate(request.payload["candidate"])
+                        if observation.attempt_id in fixture.get("server_error_attempts", []):
+                            # Scripted server fault for slot retry tests (#13); never a Minecraft result.
+                            print(RpcResponse(request_id=request_id, error=ErrorInfo(
+                                code="backend_error", message="Scripted server error", retryable=True)).model_dump_json(), flush=True)
+                            continue
                         if candidate.source_obs_id != observation.obs_id or index >= len(steps):
                             raise ValueError("stale candidate or exhausted fixture")
                         step = steps[index].model_copy(update={"observation": steps[index].observation.model_copy(update={
