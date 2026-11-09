@@ -5,6 +5,9 @@ description = "Minecraft action-selection experiment diagnostics"
 requires-python = ">=3.12"
 dependencies = ["pydantic>=2.12,<3", "PyYAML>=6,<7"]
 
+[project.optional-dependencies]
+model = ["torch==2.14.0", "transformers==5.17.0", "safetensors==0.8.0", "huggingface-hub>=1,<2"]
+
 [project.scripts]
 mc-diamond = "mc_diamond.cli:main"
 

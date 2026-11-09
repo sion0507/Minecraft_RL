@@ -186,6 +186,9 @@ class SelectionResult(Contract):
     retries: Count = 0
     error: ErrorInfo | None = None
     fallback: bool = False
+    logprob: float | None = None
+    values: dict[Literal["local", "full"], float] | None = None
+    actor_eligible: bool = False  # choice eligibility only; smoke episodes never collect PPO experience
     rule_version: str | None = None  # rule selector S only: fixed rules and their hash
     rule_hash: str | None = None
     rule_keys: dict[Identifier, list[float]] | None = None  # per candidate: the lexicographic key S compared
@@ -310,6 +313,12 @@ class RpcResponse(Contract):
         return self
 
 
+class ModelConfig(Contract):
+    checkpoint: str = "../checkpoints/nanojev"  # relative to the episode YAML
+    mode: Literal["sampling", "argmax"] = "sampling"
+    seed: int = Field(default=11, ge=0, lt=2**63)
+
+
 class EpisodeConfig(Contract):
     backend: Literal["mock", "rpc"] = "mock"
     fixture: str | None = None
@@ -319,6 +328,7 @@ class EpisodeConfig(Contract):
     wall_limit_seconds: float | None = Field(default=None, gt=0)
     goal: Goal  # the task; without a planner it is also the one fixed goal
     planner: PlannerConfig | None = None
+    model: ModelConfig | None = None
 
     @model_validator(mode="after")
     def configured_backend(self) -> Self:

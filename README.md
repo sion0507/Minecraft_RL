@@ -69,7 +69,44 @@ RPC backend는 `--admin-fd <fd>`로 전달받은 파이프에서 reset·snapshot
 알 수 없는 관측 필드와 RPC 결과는 오류로 종료하고 원본 오류 입력을 로그에 출력하지 않습니다.
 
 시계·정보 경계·모델·학습 연결 진단 및 예산 확인 후 실험 설정을 고정합니다.
-아래 실제 Minecraft 검사 외의 후속 실험 명령은 아직 구현되지 않았습니다. 전체 실행 계약은 [PLAN.md §14](PLAN.md#14-구현-후-사용할-명령), 개발 지침은 [AGENTS.md](AGENTS.md)에 있습니다.
+`smoke-model`은 아래 절을 따릅니다. PPO 본 학습 등 후속 실험 명령의 전체 계약은 [PLAN.md §14](PLAN.md#14-구현-후-사용할-명령), 개발 지침은 [AGENTS.md](AGENTS.md)에 있습니다.
+
+## 공개 NanoJev smoke-model (#11 / T10)
+
+실제 공개 모델과 mock Minecraft를 연결하는 최소 진단입니다. CUDA/BF16 GPU와 모델 extra가 필요합니다.
+의존성은 공개 bundle의 PyTorch 2.14.0·Transformers 5.17.0·Safetensors 0.8.0에 맞추며 `uv.lock`으로 고정합니다.
+기존 게임 CLI는 모델 extra 없이도 사용할 수 있습니다. 모델 수치 테스트·mypy 검사는 extra를 설치한 환경에서 실행합니다.
+
+```bash
+uv sync --extra model
+HF_HOME=.cache/huggingface HF_HUB_DISABLE_IMPLICIT_TOKEN=1 uv run --extra model python - <<'PY'
+from huggingface_hub import snapshot_download
+snapshot_download("C-Tianyu/NanoJev", revision="047b927b30882a1138fc504821b82ac145a4b81a",
+    local_dir="checkpoints/nanojev", token=False,
+    allow_patterns=["best.safetensors", "config.json", "backbone_config/*", "tokenizer/*", "README.md",
+                    "source/LICENSE", "source/scripts/train_toy_decisions.py", "source/scripts/predict_toy_decisions.py"])
+PY
+uv run --extra model mc-diamond smoke-model --config configs/model_smoke.yaml
+uv run --extra model pytest
+uv run --extra model mypy src tests
+```
+
+`model_smoke.yaml`의 두 관측 원목은 서로 다른 채굴 대상입니다. 후보는 기존 공통 생성기가 만들고 저장한 ID·내용·순서·mask를 사용합니다.
+`model.checkpoint`는 YAML 기준 상대 경로, `mode`는 `sampling` 또는 `argmax`, `seed`는 해당 선택기의 난수입니다.
+모델 입력은 제한 관측·목표·목적·시간 예산과 후보뿐입니다. 지도의 비공기 표면 중 거리순 64개, 최근 방문 32개·결과 8개를 공통 요약하며 표면·방문의 전체 수도 상태에 기록합니다. 토큰 경로 상한 8192를 넘으면 실패하고 조용히 잘라내지 않습니다.
+전송 키 a0…와 저장 candidate_id를 대응시키고, mask는 Choice attention·정규화·critic 평균·sampling에 적용합니다.
+Jev 연결(T11)에서도 같은 의미를 사용해야 하며 외부 API가 mask를 지원하지 않으면 요청에서 비활성 키를 제외해야 합니다.
+
+`model_loaded`는 고정 revision·파일 SHA-256·새 critic 초기화·정밀도를, `model_input`은 정확한 입력/ID/mask를 기록합니다.
+첫 복수 후보에서 공개 원본 `DecisionModel.forward`와 FP32/BF16 토큰화·EOS pooling·logits를 대조합니다.
+backbone은 frozen/no_grad, dropout 0이며 공개 Choice(norm/scalar/set attention)는 trainable입니다. 후보 표현 masked mean과 목적/시간 4개 수치로 독립 `256/GELU/scalar` local/full critic을 계산합니다.
+합성 수치 목표로 Choice/두 critic을 한 번 갱신하고 단일 후보 full critic-only도 검사한 뒤 초기 actor/critic을 복원합니다. `predict()`의 inference_mode를 학습 경로로 사용하지 않습니다.
+이 단계는 PPO 성능 검증이 아니며 게임 전이를 학습에 사용하지 않습니다. 에피소드 요약의 actor_transitions는 계속 0입니다.
+
+성공은 `model_summary.model_verified=true`와 exit 0으로 확인합니다. 모델/의존성/파일 부재는 exit 2, 로드 후 진단·에피소드/시계 검증 실패는 exit 1입니다.
+기본 `configs/pilot.yaml`은 단일 후보이므로 확률 1·actor 제외는 확인해도 Choice gradient를 검증하지 못해 **exit 1 / model_verified=false**입니다.
+실제 Minecraft 설정(`backend: rpc`)에서도 같은 명령을 쓸 수 있으나 별도 runtime/snapshot·시계 인증이 필요합니다. #11에서는 실제 모델+mock 게임만 검증했습니다.
+선택 확률은 성능·보정된 신뢰도 주장으로 사용하지 않습니다. 7B/Jev/Astra·유료 API·PPO 본 학습·최종 평가는 실행하지 않습니다.
 
 ## 실제 Minecraft 실행
 
