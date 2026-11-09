@@ -114,7 +114,12 @@ def main() -> None:
                     if scope == "tunnel_long":
                         assert step.observation.position[1] == initial.position[1] and step.stable_boundary
                         assert row["tunneled"] == cells and row["mined"] == cells * height
-                        assert row["observed_cells"][1] > row["observed_cells"][0], "cutting extends the observation"
+                        # #44: the policy map carries air only near the bot, so its size can shrink after a move; the
+                        # cut cells themselves must now be remembered open (the count check before #44 assumed full memory).
+                        x0, y0, z0 = (int(v // 1) for v in initial.position)
+                        after = {tuple(int(v) for v in c.position): c for c in step.observation.observed_map}
+                        cut = [(x0 + dx, y0 + dy, z0) for dx in range(1, cells + 1) for dy in range(height)]
+                        assert all(p in after and after[p].passable for p in cut), "cutting extends the observation"
                         assert [int(v // 1) for v in step.observation.position] == [int(initial.position[0] // 1) + cells,
                             int(initial.position[1]), int(initial.position[2] // 1)]
                     if scope == "tunnel_break":
