@@ -1,7 +1,19 @@
 # 기반 도구 출처와 사용 범위
 
 이슈 #2는 배포 패키지를 의존성으로 설치한다. 외부 데모 코드·프롬프트 파일을 복사·번역·변형하지 않았다. schema/RPC/실행기/모의 backend와 PTX 커널은 자체 구현이다.
-모델은 아직 다운로드하지 않았다. 이슈 #3에서 사용자 EULA 승인 후 Minecraft/Fabric/Carpet 공식 바이너리를 설치했다. 외부 게임 실행 코드·프롬프트를 복사하지 않았으며 Node 실행기·snapshot 처리·정지 진단·플레이어 정지 확장은 자체 구현이다.
+모델의 현재 다운로드·검증 상태는 아래 T10 절을 따른다. 이슈 #3에서 사용자 EULA 승인 후 Minecraft/Fabric/Carpet 공식 바이너리를 설치했다. 외부 게임 실행 코드·프롬프트를 복사하지 않았으며 Node 실행기·snapshot 처리·정지 진단·플레이어 정지 확장은 자체 구현이다.
+
+## T10 공개 NanoJev 연결 (2026-11-09, #11)
+
+- 배포: [C-Tianyu/NanoJev unified-games-v1](https://huggingface.co/C-Tianyu/NanoJev/tree/047b927b30882a1138fc504821b82ac145a4b81a), immutable revision `047b927b30882a1138fc504821b82ac145a4b81a`.
+- 초기 모델은 루트의 공개 step-400 `best.safetensors`다. 이 프로젝트의 A/B 초기값이며 upstream의 `training_initialization/` 가중치와 혼동하지 않는다. SHA-256 `f68c47d66998231b86b7e91b4ed5e82ae23acf104c8b7cd6d165c3ac7b7ffe1b`, 2,385,039,280 bytes.
+- 모델카드는 인증 없는 공개 다운로드와 source MIT / Qwen 원본 라이선스 유지를 명시한다. 새 사용 약관 동의·계정 로그인·키·결제 없이 공개 파일만 받았다. 배포 전체를 별도 MIT 라이선스로 재명명하지 않는다.
+- 기반: [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B), 원본 revision `c1899de289a04d12100db370d81485cdf75e47ca`, Apache-2.0. 기반 모델을 다시 다운로드하거나 학습하지 않았다.
+- 허용된 재사용: 같은 immutable bundle의 `source/scripts/train_toy_decisions.py`의 Choice(norm/scalar/set attention)와 EOS pooling, `predict_toy_decisions.py`의 segmented tokenization을 `src/mc_diamond/nanojev.py`에 필요한 Choice 경로만 수정·적용했다. `third_party/nanojev-LICENSE.txt`에 MIT 저작권·허용문 전문을 보존한다.
+- 변경: backbone no_grad/frozen, dropout 0, 외부 mask, 독립 local/full critic, seed sampling/argmax·ID 매핑·head 저장/복원·엄격한 hash 검사. Boolean/Score·게임 데모·프롬프트·학습 파이프라인을 복사하지 않았다. `model_input.py`의 공통 게임 요약/행동 기준과 `model_smoke.py`의 진단은 자체 구현이다.
+- 공개 원본 두 Python 파일은 `checkpoints/`에 그대로 두고, hash 확인 후 진단 oracle로만 실행한다. `trust_remote_code=False`, 모든 모델/토크나이저 로드는 local_files_only다. 실제 공개 forward와 tokenization·pooling·logits를 FP32/BF16 양쪽에서 비교했으며 결과는 PROGRESS의 T10 절을 따른다. 추론용 predict의 inference_mode를 학습에 쓰지 않는다.
+- source forward SHA-256 `4f39babd5575e43d7acf3eca357329a93c60041f334bc2bd7424929bf9c0da86`, predictor `6eedc49aaf9a81763677e3cff4e87fc4e499bfc5decf0bb4678f452f578dd92b`, tokenizer.json `be75606093db2094d7cd20f3c2f385c212750648bd6ea4fb2bf507a6a4c55506`. 사용한 9개 파일의 고정 SHA-256은 `nanojev.FILES`와 실행 `model_loaded`에 모두 보존한다.
+- 모델 extra: PyTorch 2.14.0(BSD-3-Clause), Transformers 5.17.0·Safetensors 0.8.0·Hugging Face Hub 1.33.0(Apache-2.0). 정확한 전이 의존성·wheel hash는 `uv.lock`이다. 공개 bundle과 다른 구형 버전으로 시작한 설치는 실행 진단 전에 위 버전으로 교체했다. 새 시스템 패키지/sudo는 사용하지 않았다.
 
 이슈 #4의 voxel 광선·공개 지도 BFS·보행 제어·정보 fixture/감사도 자체 구현이다. 설치된 Mineflayer와 전이 의존성 `vec3`의 공개 API만 사용하며 외부 데모의 경로/코드/프롬프트는 복사하지 않는다. 새 패키지나 모델은 추가하지 않았고 정확한 배포 무결성은 기존 `bridge/package-lock.json`을 따른다. 시드·숨은 블록·전체 청크를 후보/경로에 제공하지 않는다.
 

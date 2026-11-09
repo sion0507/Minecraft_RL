@@ -1,0 +1,14 @@
+# Actual public NanoJev + explicitly mock Minecraft, with two distinct observed log targets.
+backend: mock
+fixture: ../fixtures/model_episode.json
+max_decisions: 2
+rpc_timeout_seconds: 10.0
+goal:
+  goal_id: model-wood
+  kind: collect
+  target: oak_log
+  quantity: 1
+model:
+  checkpoint: ../checkpoints/nanojev
+  mode: sampling
+  seed: 11

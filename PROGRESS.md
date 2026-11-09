@@ -1,5 +1,46 @@
 # 실행 기록
 
+## 2026-11-09 — #11 T10 게시·병합·종료 진행 (사용자 승인)
+
+병합 직전 fresh 검사: 전체 pytest211통과66.14초(`pre-merge-pytest.txt`), strict mypy src/tests28파일통과(`pre-merge-mypy.txt`), diff 공백 검사통과. `origin/main=e799f6f`는 이 브랜치의 조상이며 기준 문서 커밋 `e839a8e`도 보존해 PR에 포함한다. 보고서/모델/원시는 Git제외다.
+
+사용자가 별도 두 축 리뷰(Standards0/Spec0)를 확인한 뒤 commit/push/PR/원격 main 병합/#11 종료를 요청했다. 아래 "미커밋/Open 유지"는 이 요청 전 검증 시점의 이력이다. 기존 main checkout은 수정하지 않고 전용 브랜치와 GitHub PR로 진행한다. 최종 원격 상태와 커밋은 #11 완료 기록 및 로컬 PDF에 조회 근거와 함께 남긴다. 보고서 상태만 바꾸기 위해 실제 게임/모델 검사를 재실행하지 않는다.
+
+## 2026-11-09 — #11 T10 공개 NanoJev 실제 연결 검증 (전용 worktree, 미커밋)
+
+**범위/상태:** `/home/sion/Documents/projects/RL_projects/Minecraft_learning-issue11`, `feat/issue-11-nanojev`, 시작 HEAD `e839a8e`. #11 Open/댓글0, 선행 #5 Closed(2026-11-05T08:42:43Z)/댓글0, 상위 #1 본문·댓글과 PLAN §§4.2/5.2–5.4/6.1–6.3/12–14, AGENTS·GLOSSARY·CONTEXT·현재 코드/검사를 읽었다. main·다른 세션 파일은 수정하지 않았다. 새 commit/push/merge/PR/이슈 종료·댓글은 하지 않았고 #11은 Open 유지한다.
+
+**구현:** 공통 제한 입력/ID·mask와 목적·예산, 공개 Choice 보존, frozen/no_grad backbone/dropout0, raw 후보 masked mean+목적/시간→독립256/GELU/scalar critic, seeded sampling/argmax·logprob/value·단일 후보 actor 제외, 엄격한 head 저장/복원, `smoke-model` 공개 흐름. 선택 이후 게임 실행/보상은 기존 run_episode/RPC를 사용하며 후보 재생성이나 다른 행동 치환을 하지 않는다. critic 두 개는 새 난수 초기화다. PPO/본 학습 전이는 만들지 않았고 actor_transitions는0이다. 결정·허용된 재사용은 DECISIONS와 third_party의 T10 절.
+
+**설치/실패 이력:** 샌드박스 안 GPU 접근은 실패했지만 승인된 샌드박스 밖 `nvidia-smi`와 PyTorch CUDA 초기화에서 RTX5070Ti16GB·driver595.99.02를 확인했다. 독립 `.tools/uv`/`.venv`/bridge node_modules 설치, 공개 가중치2,385,039,280bytes 다운로드를 수행했다. 최초 pytest185통과/18실패는 Node 의존성 부재였고 npm ci 후 기준203통과(61.84초)다. Node audit의 기존 moderate6건은 기록만 하며 자동 major downgrade를 하지 않았다. 구형 모델 의존성으로 시작한 설치는 bundle의 RoPE 설정을 확인한 뒤 실제 모델 실행 전에 공개 requirements와 같은 PyTorch2.14.0+cu130/Transformers5.17.0/Safetensors0.8.0으로 교체했다. HuggingFaceHub1.33.0 및 전이 의존성은 uv.lock이다. 모델·PyPI 네트워크 실패는 권한을 요청해 재실행했고 sudo·로그인·유료 API는 없었다.
+
+**고정 공개 파일:** NanoJev `unified-games-v1` → revision `047b927b30882a1138fc504821b82ac145a4b81a`; 초기 `best.safetensors` SHA-256 `f68c47d66998231b86b7e91b4ed5e82ae23acf104c8b7cd6d165c3ac7b7ffe1b`. `nanojev.FILES`/`model_loaded`가 사용한9개 파일의 해시를 검사한다. 모델카드의 루트 공개 step-400이며 upstream training_initialization을 쓰지 않는다. 본체596,049,920개, trainable Choice+critics727,940개다. 초기 본체 tensor hash는 `e3d8541282d92608cce23cfd7db551905492d9e54713b76f3df8b479b542a5df`, Choice tensor hash는 `cb104d32dd0db0c0c071f4e88f3af4048aa5d4c57f8c376f31bc24ce8c60aec4`다(파일 SHA-256과 다른 정의).
+
+**실제 모델 + mock 게임 검증:**
+- `uv run --locked --extra model --no-sync mc-diamond smoke-model --config configs/model_smoke.yaml`: exit0, model_verified=true, sampling seed11. 저장된 서로 다른 원목 대상 후보2개를 사용했다. public forward/tokenization/EOS pooling/logits FP32/BF16 최대오차 모두0. FP32 logits `[0.3107514381,-0.1800779104]`, BF16 `[0.3125,-0.1796875]`. 확률 `[0.6206215620,0.3793783784]`, ID `obs-0:wood:0`, logprob−0.4770337343이다.
+- 명시적 수치 목표의 loss0.4995728731, Choice/local/full 실제 유한 gradient·head hash 변화와 본체 no_grad/hash 불변을 확인했다. 단일 후보 mask에서는 확률1·actor loss제외, full critic만 갱신하고 Choice/local 불변을 확인했다. 끝나면 Choice/local/full 초기 hash 모두 복원했다. 추론 predict는 inference_mode라는 실제 구현을 읽고 학습에 사용하지 않았다.
+- `/tmp/issue11-argmax.yaml`(동일 config·모델/fixture 절대경로, mode만 argmax): exit0, 동일 logits/확률·선택 ID·초기 복원, model_verified=true. 약14.84초, GPU peak allocated2,495,388,672bytes(약2.32GiB)다. 단독 짧은 입력의 메모리이며 7B 동시 사용/최대 입력/처리량 결과가 아니다.
+- 기본 `configs/pilot.yaml`: **예상 exit1**, 실제 공개 모델의 단일 후보 확률1/logprob0/actor_eligible=false 및 reward.single_candidate 제외를 확인했다. 게임 mock 목표완료true지만 복수 후보 gradient 진단은 없으므로 model_verified=false/diagnostic_completed=false다. 성공 검사로 합치지 않는다.
+- 게임은 모두 mock이다(각20활성틱·mock 획득1). 실제 Minecraft 물리·자연 원목/다이아 성공이 아니다. sampling 첫 실행의 tensor→float 진단 경고는 detach로 수정했으며 최종 argmax stderr에는 mock backend 안내만 있다.
+
+**개발/리뷰:** 모델8검사 통과(최신 artifacts/issue-11/model-tests.txt), 전체 pytest211통과66.77초, strict mypy src/tests28파일 통과, diff 공백 검사 통과. tests/test_model.py의 실제 수치 검사는 tiny CPU backbone이며 실제 NanoJev 검증은 위 별도 CLI 원시다. 잘못된 head checkpoint가 actor를 부분 교체하는 문제를 RED→GREEN으로 수정했다. 독립 read-only 코드 리뷰는 공개 source·변경 코드·원시를 확인했고 필수 수정 지적0; 리뷰 자체의 추가 GPU/게임 실행은 없었다.
+
+**산출물/미실행:** 원시 `artifacts/issue-11/{smoke-model,argmax,single-candidate}.jsonl`, stderr와 pytest/mypy/model-tests, load.stdout. 보고서는 `reports/issue-011-T10-report.pdf`, 코드 가이드는 `reports/issue-011-T10-code-guide.pdf`에 로컬 전용으로 두며 Git 제외다. PDF 검수 결과는 아래 완료 기록을 따른다. 게임/bridge/runtime/snapshot을 변경하거나 실행하지 않아 기존 시계 인증을 새로 주장하지 않는다. 실제 Minecraft 연결·7B/Jev/Astra·과금·PPO·본 학습·A/B 실제 evaluate·최종 평가·7B 동시VRAM/처리량·일반화는 미실행이며 T10 진단 통과로 이들을 완료 처리하지 않는다. 연구/API/PC예산 증액도 없다.
+
+**PDF 완료 검수:** 보고서2쪽·코드가이드3쪽의 한글 추출과 대체문자 없음, 모든 폰트 embedded/subset/Unicode mapping을 확인했다. 5페이지 모두1500px로 렌더해 직접 읽었고 잘림·깨진 글꼴·페이지 넘침이 없었다. reports에는 이 티켓의 PDF2개만 있으며 git check-ignore 통과/Git추적0이다. 생성기·추출텍스트·렌더PNG는 /tmp에서만 처리했다. 코드 가이드의 파일/함수/시작줄은 AST로 추출했고 미커밋 코드 SHA-256을 artifacts/issue-11/evidence.json과 교차 확인한다. 보고서용 ReportLab5.0.1은 별도 uv 도구 환경이며 런타임/lock에 넣지 않았다.
+
+## 2026-11-09 — Pathfinder 보류·보존, #36 사람 선택 진단 기록 보충
+
+- **Pathfinder:** 사용자 결정으로 보류했다(DECISIONS 같은 날).
+  - Codex 비교 22건과 Claude 추가 실제 진단 13건(복사 서버 25590, 63조건 미인증, `pause_verified=false`)의 결과는 `artifacts/claude-pathfinder-review-2026-11-09/report.md`에 있다.
+  - 보존 위치: 로컬 브랜치 두 개, 태그 `pathfinder-deferred-2026-11-09`, `archive/pathfinder-2026-11-09/`.
+  - main 코드는 바꾸지 않았다.
+- **#36 사람 선택 진단 보충(아래 #36 절, 원시 `artifacts/issue-36/human/g2-2.jsonl`·`g4-2.jsonl`):**
+  - 두 실행은 사용자 대신 Hermes가 했다. 아래 절의 "사용자가 별도 Claude 터미널에서"를 이것으로 바로잡는다.
+  - 로그에서 다시 확인한 값: G2 `goal_completed`·관리자 판정 자연 철광석 3(돌 곡괭이 직접 채굴·드롭 획득)·10결정·활성 1,038틱. G4 `diamond_success`·자연 다이아 `(-133,8,81)` 철 곡괭이 직접 채굴·획득·9결정·활성 526틱.
+  - 복사 서버 `worlds/human-copy`(25566)에는 시계 인증서가 없다. 그래서 두 실행 모두 `clock_mode=unverified`이고 CLI가 exit 1을 반환했다(`cli.py` unverified 분기).
+  - 선택에는 운영자 월드 정보(광석·동굴 위치)를 썼다. 따라서 이 결과는 "후보 집합에 성공 경로가 있다"는 증거일 뿐이고, 정책 성능 근거가 아니다.
+
 ## 2026-11-09 — T12 공통 평가 슬롯과 서버 오류 재시도 구현 (#13, mock 검증)
 
 **기준:** 브랜치 `issue-13-t12`, 시작 main `1c83428`. 결정은 DECISIONS 같은 날 #13 절.

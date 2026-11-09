@@ -5,6 +5,46 @@
 
 현행 결정은 2026-10-10 기록이다. 같은 날의 S 필수 진단 보완이 과거 선택 S=규칙 계획/규칙 행동 정의를 대체하며 핵심 F/조건부 7B 학습 결정은 유지한다. 아래 과거 F 제외·계획기 학습 미허용·최종 23회/축소 17회 문구는 당시 결정의 이력이며 해당 부분은 현행 결정으로 대체한다. 과거 기록은 삭제하지 않는다.
 
+## 2026-11-09 — #11 T10 커밋·푸시·원격 main 병합·이슈 종료 승인 (사용자 결정)
+
+- 사용자가 두 축 code-review(Standards0/Spec0) 결과를 확인하고 "푸쉬하고 머지하고 이슈 클로스"를 명시적으로 요청했다. 앞 T10의 미승인/미수행 Git 상태는 당시 이력이며 이 요청으로 commit/push/PR/원격 main 병합/#11 완료 종료를 진행한다.
+- 작업·커밋은 이 전용 worktree 브랜치에서만 한다. GitHub PR 병합을 사용하고 기존 main checkout의 파일·로컬 main ref·다른 세션은 변경하지 않는다. reports/와 모델·실행 산출물은 계속 Git 제외다.
+- 병합 전 최신 origin/main·전체 pytest·mypy·diff 검사를 확인한다. 코드 충돌/실패가 있으면 먼저 해결하고 새 성공 근거를 확인한다. 게임/모델은 코드 변경 없이 보고서 상태 갱신 때문에 재실행하지 않는다. 실제 최종 commit/push/merge/issue 상태는 원격 조회와 #11 완료 기록/PDF로 구분해 남긴다.
+
+## 2026-11-09 — 공개 NanoJev Choice/critic 연결 (#11 T10)
+
+- 사용자 요청 범위는 이 독립 worktree의 구현·실행 검증이며 공개 모델/추가 Python·Node 의존성 다운로드가 승인됐다. main·다른 세션 파일, sudo·새 라이선스 동의·계정·키·유료 호출·본 학습·push/merge/이슈 종료는 범위에 넣지 않았다. 선행 #5의 실제 Closed와 #11/#1 본문·댓글을 확인했다. 관련 ADR은 없다.
+- 공개 루트 step-400 `unified-games-v1`을 A/B의 초기 actor로 사용한다. immutable revision `047b927b30882a1138fc504821b82ac145a4b81a`, 초기 weights SHA-256 `f68c47d66998231b86b7e91b4ed5e82ae23acf104c8b7cd6d165c3ac7b7ffe1b`. 설치 때 사용한 설정/tokenizer/source/weights 9개를 고정 hash로 검사하고 strict loading하며 임의 초기 actor로 진행하지 않는다. MIT source 허용문은 third_party에 보존, 모델카드·Qwen Apache-2.0는 출처 문서를 따른다.
+- `predict`는 inference_mode이므로 역전파 경로로 쓰지 않는다. 공개 원본의 segmented tokenization과 EOS pooling, norm/scalar/set attention Choice 구조를 필요한 Choice 경로에 적용했다. backbone만 frozen/no_grad, Choice와 새 독립 local/full critic만 trainable이다. `train()` 뒤에도 dropout 0·backbone eval을 유지한다. 저장 raw EOS 특징을 재사용해도 trainable Choice/logits는 매번 계산한다.
+- critic은 mask가 true인 raw 후보 표현의 평균에 목적 one-hot 2개와 `log1p(남은 활성틱)/log1p(36000)`, `log1p(목표 활성 예산)/log1p(36000)`를 붙여 각자 hidden256/GELU/scalar로 계산한다. critic이 Choice의 norm을 공유하지 않아 critic-only는 actor에 gradient를 주지 않는다. 두 critic은 새 난수 초기화임을 로그에 명시하며 공개 actor와 혼동하지 않는다.
+- 공통 입력은 검증된 Observation/Goal/CandidateSet만 받는다. 비공기 관측 표면 거리순64, 최근 방문32/결과8과 전체 표면·방문 수, 자기 상태/목적/예산/목표를 요약한다. 후보 params/내용/순서/max_ticks/stop_rule을 보존하고 a0…를 저장 ID에 매핑한다. masked 후보는 attention key·softmax·평균·sampling에서 제외한다. 예산/요약은 NanoJev/Jev 공통 의미이며 Jev가 외부 mask를 지원하지 않으면 비활성 key를 요청에서 빼야 한다. 후보 생성/경로/bridge는 변경하지 않았다.
+- 입력 과장은 하지 않는다. 토큰 경로8192 초과는 실패하며 조용히 자르지 않는다. backbone 인코딩만 padded token32768 이내 chunk로 나눌 수 있고, 전체 후보 Choice는 함께 재계산한다. 이는 처리량/7B 동시 VRAM 보장이 아니다.
+- 공개 `smoke-model`은 첫 저장 복수 후보로 실제 FP32/BF16 public forward/tokenization/EOS/logits를 비교하고 명시적인 수치 목표로 gradient·한 번의 head 업데이트·backbone 불변·단일 후보 full critic-only를 검사한 뒤 finally에서 초기 actor/critic을 복원한다. 이 optimizer step은 PPO/게임 보상 학습이 아니며 에피소드 actor_transitions는0이다. 새 `SelectionResult.actor_eligible`도 선택 자격일 뿐 실제 학습 전이를 뜻하지 않는다.
+- model extra는 공개 코드와 같은 PyTorch2.14.0/Transformers5.17.0/Safetensors0.8.0, 전이는 uv.lock이다. 기본 모델은 CUDA/BF16이며 CPU/mock 모델로 조용히 대체하지 않는다. 게임 backend가 mock인 경우는 명시한다. 기본 pilot의 단일 후보만으로는 전체 gradient 진단을 완료하지 않고 exit1로 남긴다. 복수 후보용 `configs/model_smoke.yaml`은 서로 다른 관측 원목 대상 두 개의 mock 게임이며 실제 공개 모델을 사용한다.
+- T10 범위의 head 저장/복원은 Safetensors와 revision·초기 weight hash를 쓰고 모든 key/shape/dtype/유한값을 검사한 뒤 교체한다. PPO/optimizer/RNG rollout 경계 복구·본 학습/checkpoint·실제 A/B evaluate 연결은 후속 티켓이다.
+
+## 2026-11-09 — Pathfinder 이동 보류, 기존 이동으로 진행 (사용자 결정)
+
+- **결정:** mineflayer-pathfinder는 지금 채택하지 않는다. 다음 이슈는 기존 T08 이동·매크로(`navigation.py`·`terrain.js`·`moveObserved`·`stair_down`/`tunnel`)로 진행한다. 위 #13 절의 "#10은 pathfinder 비교 확정까지 대기"는 이 결정으로 해소된다.
+- **이유(검토 `artifacts/claude-pathfinder-review-2026-11-09/report.md`, Codex `artifacts/pathfinder-*-2026-11-09/`):**
+  - 투시 센서: 시험 센서가 반경 8의 가려진 블록까지 `observed_map`에 넣었다. 자연 G2에서 보이지 않은 철 80칸이 정책 입력에 들어갔다. 엔티티·`blockUpdate` 통로도 남아 있다.
+  - 위험 반경 미반영: PF 경로 계산은 반경 1.5를 모른다. 용암 옆 장면에서 7틱 만에 `observed_hazard`로 멈췄다(기존 방식은 우회해서 도착).
+  - 목적지 미끄러짐: 블록에 들어서는 순간 완료되고 입력만 해제한다. 연속 단차에서 0.72블록 넘어갔다.
+  - 저장 후보와 실행 불일치: 후보 `path`의 끝점만 쓰고 실행 때 다시 계산한다.
+  - 달리기를 똑같이 끄면 공통 4장면 이득은 약 14%다(달리기 포함 24%, Codex 8장면 36.8%).
+- **보존:**
+  - 로컬 브랜치 `test/pathfinder-spike`(`4f436d7`)·`test/pathfinder-t08-compare`(`6b9e781`), 로컬 태그 `pathfinder-deferred-2026-11-09`(`6b9e781`). push하지 않았다.
+  - Git 제외 `archive/pathfinder-2026-11-09/`: 두 브랜치 bundle, Codex worktree의 산출물, 검토용 수정 런타임. 무엇을 뺐는지는 `archive/pathfinder-2026-11-09/README.md`에 있다.
+  - `artifacts/pathfinder-*-2026-11-09/`, `artifacts/claude-pathfinder-review-2026-11-09/`.
+- **다시 꺼낼 조건:** 실험(자연 G2/G4·평가 슬롯 등)이 기존 이동의 한계 때문에 실패할 때. 예: 2칸 이상 낙하·틈·막힌 길에서 반복 무진행. 그때 교체를 다시 검토한다.
+- **채택 전 필요한 작업:**
+  1. PF 입력을 시야 전용 센서(`terrain.visible`+관측 기억)로 제한한다. 엔티티 비용을 끄고, 블록·청크 이벤트의 재계산은 관측 변화로만 일으킨다. 그 뒤 숨은 블록 변형 정보 감사를 실제로 통과한다.
+  2. 위험 반경 1.5를 PF 경로 비용/금지로 넣는다. 실행 중단에도 서 있음/지지 확인을 쓴다.
+  3. 목적지에서 정확히 멈추게 하고(중심 0.15·감속), `maxDropDown=3`으로 둔다. 달리기 사용 여부를 두 방식에 같게 맞춰 사전 등록한다.
+  4. 실행이 저장된 후보 경로를 그대로 따르게 하고 브리지에서 재검증한다. 굴착은 기존 `dig()`(검증 기록·`ore_exposed`·`hazardNear`)를 쓰고, 설치·장착은 `operation()` 틱 회계를 쓴다. 실패 사유도 바로잡는다.
+  5. 새 63조건 인증, 굴착·설치·파쿠르 중 정지 검사, 장면당 3회 이상 반복, 자연 G2/G4 동일 목적지 대조를 실행한다. 틱 이득은 원인별(달리기/경로/능력)로 나눠 보고한다.
+  - 더 싼 대안부터 검토한다: 기존 이동에 달리기를 켜거나 2~3칸 낙하 단계를 추가한다.
+
 ## 2026-11-09 — #13 병합, #9·#13 종료 (사용자 결정)
 
 - 사용자 지시로 `issue-13-t12`를 push하고 PR로 main에 병합한다. #13(수락 기준 mock 충족)과 #9(남은 S 슬롯 연결을 #13에서 해결)를 근거 댓글과 함께 닫는다.

@@ -1,3 +1,13 @@
+# #11 T10 — 실제 공개 NanoJev 검증 완료, 사용자 승인으로 게시·병합·종료 진행
+
+전용 worktree `Minecraft_learning-issue11`, 브랜치 `feat/issue-11-nanojev`, 시작 HEAD `e839a8e`. 사용자 요청으로 #11/#5/#1 본문·댓글과 관련 PLAN·현재 코드를 확인했다. #5는 Closed이며, main/다른 작업공간은 수정하지 않았다.
+- 구현: 공통 제한 입력, 공개 Choice 보존·frozen/no_grad backbone·dropout 0, 독립 local/full critic, seed sampling/argmax, head 저장/복원, 공개 `smoke-model`. 상세 결정은 DECISIONS 2026-11-09 #11 절.
+- 실제 모델: tag revision `047b927b30882a1138fc504821b82ac145a4b81a`, 초기 weight sha256 `f68c47d6…ffe1b`. FP32/BF16 forward/tokenization/EOS pooling/logits 오차 0, Choice/두 critic gradient·변경, backbone hash 불변, 초기 head 복원을 확인했다. 실제 CUDA RTX5070Ti에서 실행했다.
+- 게임은 mock이다. sampling/argmax smoke exit0; 기본 pilot 단일 후보는 확률1·actor 제외지만 복수 후보 진단 부재로 의도한 exit1이다. 전체 pytest211, 모델 검사8, mypy src/tests28파일 통과. 원시 `artifacts/issue-11/`.
+- 7B/Jev/Astra·유료 API·실제 Minecraft 연결·PPO/본 학습·평가·7B 동시 VRAM/처리량은 미검증. 평가 A/B 연결은 현재 mock stand-in으로 남으며 후속 실험 연결과 구분한다.
+- 사용자 후속 지시로 commit/push/PR/원격 main 병합/#11 종료를 진행한다. 기존 main checkout·다른 세션 파일은 수정하지 않는다. 그 전의 미수행/Open 상태는 아래 검증 이력이다. 최종 원격 상태는 #11 완료 기록/PDF를 따른다.
+- 로컬 한국어 PDF 두 개는 `reports/issue-011-T10-report.pdf`, `reports/issue-011-T10-code-guide.pdf`; Git 제외. 상세 검증/검수 결과는 PROGRESS 최신 절.
+
 # #13 T12 병합·종료, 다음 작업 대기
 
 평가 슬롯(`evaluate`)을 main에 병합하고 #9·#13을 닫았다(사용자 지시). 결정은 DECISIONS 2026-11-09 #13 두 절, 결과는 PROGRESS 같은 날 #13 절.
