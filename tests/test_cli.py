@@ -726,6 +726,23 @@ def test_alternate_rpc_backend_uses_the_same_public_flow(tmp_path: Path) -> None
     assert records(result)[-1]["data"]["clock_mode"] == "mock"
 
 
+def test_rpc_carries_a_long_episode_observation_memory(tmp_path: Path) -> None:
+    # Natural G2 (#37 run 4) remembered 9,611 cells: its 1.2 MB observation broke the old 1 MiB frame cap.
+    fixture = mock_fixture()
+    fixture["initial"]["observed_map"] += [{"block": "stone", "position": [float(x), 40.0, float(z)], "support": True}
+                                           for x in range(200) for z in range(100)]
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+    assert fixture_path.stat().st_size > 1_048_576
+    config = yaml.safe_load(Path("configs/pilot.yaml").read_text(encoding="utf-8"))
+    config.pop("fixture")
+    config.update(backend="rpc", command=[sys.executable, "-m", "mc_diamond.mock_bridge", "--fixture", str(fixture_path)])
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    result = run_cli(config_path)
+    assert result.returncode == 0, records(result)[-1]["data"]["error"]
+
+
 def test_tick_mismatch_cannot_report_completed_goal(tmp_path: Path) -> None:
     fixture = mock_fixture()
     fixture["steps"][0]["observation"]["active_ticks"] = 99
