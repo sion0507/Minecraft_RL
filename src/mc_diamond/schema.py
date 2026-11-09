@@ -84,11 +84,42 @@ class Goal(Contract):
 
 
 class PlannerConfig(Contract):
-    """Scripted mock planner replies; the shared 7B and Astra backends connect in T09 (#10)."""
+    """Explicitly scripted mock planner replies."""
     backend: Literal["scripted"]
     model: Identifier = "mock-scripted"
     version: Identifier = "fixture"
     outputs: list[str]
+
+
+class LocalPlannerConfig(Contract):
+    backend: Literal["local_7b"]
+    model: Literal["Qwen/Qwen2.5-7B-Instruct"] = "Qwen/Qwen2.5-7B-Instruct"
+    version: Literal["a09a35458c702b33eeacc393d103063234e8bc28"] = "a09a35458c702b33eeacc393d103063234e8bc28"
+    checkpoint: str = "../checkpoints/qwen2.5-7b"
+    max_new_tokens: Positive = Field(default=256, le=512)
+
+
+class AstraPlannerConfig(Contract):
+    backend: Literal["astra"]
+    provider: Identifier
+    model: Identifier
+    version: Identifier
+    endpoint: str  # chat/completions; actual provider/model support must be verified before approval
+    supported_settings: dict[str, JsonValue] = Field(default_factory=dict)
+    max_new_tokens: Positive = Field(default=256, le=512)
+    timeout_seconds: float = Field(default=60.0, gt=0, le=180)
+    approved: bool = False
+    approval_reference: str | None = None
+    max_calls: Positive
+    max_usd: float = Field(gt=0)
+    request_usd_ceiling: float = Field(gt=0)  # provider-verified upper bound INCLUDING reasoning and failed calls
+    budget_file: str  # persistent across processes, episodes and regenerations
+    rates_checked_on: str
+    input_usd_per_million: float = Field(ge=0)
+    output_usd_per_million: float = Field(ge=0)
+
+
+PlannerSettings = Annotated[PlannerConfig | LocalPlannerConfig | AstraPlannerConfig, Field(discriminator="backend")]
 
 
 class GoalOutcome(Contract):
@@ -169,6 +200,7 @@ class ErrorInfo(Contract):
     code: Literal[
         "backend_error", "protocol_error", "timeout", "permission_denied",
         "invalid_request", "invalid_config", "invalid_selection", "invalid_step",
+        "planner_error", "planner_unavailable",
     ]
     message: str
     retryable: bool = False
@@ -327,7 +359,7 @@ class EpisodeConfig(Contract):
     max_decisions: Positive = 8
     wall_limit_seconds: float | None = Field(default=None, gt=0)
     goal: Goal  # the task; without a planner it is also the one fixed goal
-    planner: PlannerConfig | None = None
+    planner: PlannerSettings | None = None
     model: ModelConfig | None = None
 
     @model_validator(mode="after")

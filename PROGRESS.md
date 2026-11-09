@@ -1,5 +1,23 @@
 # 실행 기록
 
+## 2026-11-09 — #10 T09 공통 계획기 구현·실제 Qwen/G1 검증, Astra 승인 대기
+
+**구현:** 선행 #9 Closed/completed와 #10/#1 본문·댓글/PLAN을 확인했다. 기존 Planning/GoalRegistry/run_episode에 공통 입력과 실제 local_7b·Astra HTTPS backend, 공개 smoke-planner를 연결했다. 최초/재생성/규칙 복구 출처·오류 분모·직접 진행을 기존 흐름으로 기록한다. dict/list 목표 필드의 TypeError도 재현 후 수정했다. 고정 선택기의 실제 연결 진단이며 NanoJev/Jev 행동 성능 비교가 아니다.
+
+**설치·고정:** 공개 Qwen2.5-7B-Instruct revision `a09a35458c702b33eeacc393d103063234e8bc28`, Apache-2.0. 인증/결제 없이13파일을 내려받고 SHA-256을 `src/mc_diamond/qwen_files.json`에 고정했다. 정확한 원시 manifest는 `artifacts/issue-10/qwen-files.json`이다. 기존 Torch2.14.0+cu130/Transformers5.17.0에 accelerate1.15.0/bitsandbytes0.50.2/psutil7.2.2를 설치했으며 uv.lock에 고정했다. 샌드박스 DNS·CUDA 접근 실패는 승인 뒤 재실행했고 성공과 합치지 않았다(`qwen-mock.jsonl`, `load-diagnostic.stderr`). sudo·새 약관 동의·로그인·결제는 없었다.
+
+**실제 모델+mock 게임:** 최종 `qwen-final-mock.jsonl` exit0, RTX5070Ti16GB /CUDA13.0. NF4/double quant/BF16·실제4비트·고정/eval 확인, greedy 실효온도0·생성256/총8192토큰 상한이다. 로드9.50초, allocated5,559,966,720bytes(5.18GiB), peak5,870,629,888bytes(5.47GiB), 요청1.315초/815입력·26출력토큰, 유효 collect oak_log1이다. 게임은1결정20mock틱·획득1이며 실제 게임 물리 증거가 아니다. 프롬프트 본문 SHA-256 `49ef69590c951f0f3025ee578fae869a23084a85c8ace46cbba9a6ded69f6ac5`를 기록했다. 최종 오류 경로 보완은 이후 mock 테스트로 검증했고 정상 GPU 경로는 변경하지 않았다.
+
+**실제 Qwen+자연 G1:** `qwen-minecraft.jsonl`/stderr exit0. 기존 G1 snapshot을 사용했고 bridge/runtime/fingerprint 입력은 바꾸지 않았다. 요청4,078입력·26출력토큰/2.541초, 최초 목표유효,5결정216활성틱·원목1 직접획득, reason=goal_completed·clock_mode=paused·pause_verified=true다. 초기오류0/1·재생성0/0·규칙복구0/1, 출처별진행 planner acquired:oak_log=1이다. episode 경과30.873초는 load/reset이전 시간을 포함하지 않으며 전체PC시간으로 해석하지 않는다. 검사 후 `restore.json`/stdout의 G1 reset=observe·0틱·빈인벤토리·체력20 및 Java 서버 종료를 확인했다. 실제 게임은1회만 실행했으며 보고서/오류경로 수정 때문에 재실행하지 않았다. C4/다이아/일반화 결과가 아니다.
+
+**Astra:** 공개 후보 OpenRouter endpoint/model과 공개 표준요율은2026-11-09 공식 페이지를 재확인했다(`astra-access.json`). 실제 제공처/계정 접근·버전·지원옵션·응답·사용량/과금·호출지연·별도 승인금액/호출수는 미확인이다. 질문했으나 아직 확정되지 않아 실제 유료호출0·키읽기0을 유지했다. 상태는 승인/계정설정 대기이며 접근불가/구현오류로 단정하지 않는다. F는 핵심 비교군이다. 승인/키/영속상한 guard, 정상·불량목표/재생성·공통복구·비밀제거·접속/응답오류는mock검사다. 요청당 최악금액은 제공처에서 추론/실패과금까지 검증해야 하며 위반 확인 시 보고비용을 보존하고 해당승인ledger를 영속중지한다. 로컬 사전예약을 실제 청구 확인으로 표시하지 않는다.
+
+**검사·리뷰:** 공개 Planner/기존 목표 검사67개 통과 뒤 독립 Standards2건/Spec3건(서로 중복 포함 결함3건)을 확인했다. 비용 초과 후 재호출, HTTP422 오분류, CUDA 오류 summary 누락을 **3failed→17passed**로 수정했다(`review-red/green.txt`). 문서의 `smoke-planner --config configs/pilot.yaml` 기본 local_7b 경로도 실패 재현 후 보완했다(최종 Planner 검사18개 통과). 최종 전체 pytest **229passed /69.51초**, strict mypy **src/tests31파일 통과**, diff 검사 통과. `mypy .`는 Git 제외 artifacts의 중복 analyze 모듈로 실패했으며 저장소 설정의 개발 범위로 검사했다. 수정 뒤 독립 재리뷰는 하지 않았다. 지적/수정 근거는 `docs/reviews/issue-10-T09-2026-11-09.md`다.
+
+**상태·산출물:** `$implement`의 현재브랜치(main)로컬커밋 범위이며 최종코드기준은 `git log -1`/`artifacts/issue-10/evidence.json`으로식별한다. push·merge·#10종료는미실행/Open유지다. 한국어PDF는 `reports/issue-010-T09-report.pdf`, `reports/issue-010-T09-code-guide.pdf` 각1개, Git제외다. 생성기/중간파일은/tmp에만두고 한글추출·모든글꼴포함·전체페이지렌더가독성을검수한다. 보고서때문에게임은재실행하지않는다.
+
+**후속·미실행:** Jev행동선택#12, 공통6상태계획진단#17, 본학습전예산/lock#20에backend/미확인범위를전달한다. 실제평가군별planner/lock연결은거부하며후속작업이다. 지식부족판정·지식조회·7B학습·PPO/본학습·C4/G4평가·Jev·7B+NanoJev동시VRAM/처리량은미실행이다. 연구/API/PC예산은증액하지않았다.
+
 ## 2026-11-09 — #11 T10 게시·병합·종료 진행 (사용자 승인)
 
 병합 직전 fresh 검사: 전체 pytest211통과66.14초(`pre-merge-pytest.txt`), strict mypy src/tests28파일통과(`pre-merge-mypy.txt`), diff 공백 검사통과. `origin/main=e799f6f`는 이 브랜치의 조상이며 기준 문서 커밋 `e839a8e`도 보존해 PR에 포함한다. 보고서/모델/원시는 Git제외다.

@@ -13,7 +13,7 @@ from typing import Literal
 
 from .navigation import PICKS, SAFE_BAND, hazard_distance
 from .production import FUELS, RECIPES
-from .schema import Goal, GoalOutcome, GoalSource, Observation, PlannerConfig, StepResult
+from .schema import Goal, GoalOutcome, GoalSource, Observation, PlannerSettings, StepResult
 
 FAILURE_LIMIT = 3
 MACRO_LIMIT = 20
@@ -100,11 +100,12 @@ def validate(text: str, observation: Observation, goal_id: str,
     """One planner reply to a goal, or `GoalError` with the reason fed back to the single regeneration."""
     raw = _parse(text)
     kind, target, quantity, direction = raw["kind"], raw["target"], raw.get("quantity", 1), raw.get("direction")
-    if not isinstance(kind, str) or kind not in TARGETS or target not in TARGETS[kind]:
+    if not isinstance(kind, str) or kind not in TARGETS or not isinstance(target, str) or target not in TARGETS[kind]:
         raise GoalError("invalid_format", f"Unknown goal kind/target {kind}/{target}")
     if type(quantity) is not int or not 1 <= quantity <= MAX_QUANTITY.get(kind, 1):
         raise GoalError("invalid_format", f"{kind} quantity must be 1-{MAX_QUANTITY.get(kind, 1)}")
-    if direction is not None and (kind != "explore" or direction not in {"north", "south", "east", "west"}):
+    if direction is not None and (kind != "explore" or not isinstance(direction, str)
+                                  or direction not in {"north", "south", "east", "west"}):
         raise GoalError("invalid_format", "Only explore takes a direction: north, south, east or west")
     goal = Goal(goal_id=goal_id, kind=kind, target=str(target), quantity=quantity,  # type: ignore[arg-type]
                 direction=direction, source=source, completion_rule_id=kind)  # type: ignore[arg-type]
@@ -150,21 +151,20 @@ def completed(goal: Goal, start: Observation, step: StepResult, direct: int) -> 
 Ask = Callable[[Observation, Goal, str | None], str]  # (observation, task, error feedback) -> raw planner reply
 
 
-def scripted_planner(config: PlannerConfig) -> Ask:
-    """Mock planner: the configured replies in order, then empty (invalid) replies."""
-    replies = iter(config.outputs)
-    return lambda _observation, _task, _feedback: next(replies, "")
-
-
 class Planning:
     """Goal decisions of one episode: one planner request, one regeneration on error, then the rule recovery goal.
 
     Without a planner the task goal is the fixed goal, re-adopted at every decision.
     """
 
-    def __init__(self, task: Goal, planner: PlannerConfig | None) -> None:
+    def __init__(self, task: Goal, planner: PlannerSettings | None, ask: Ask | None = None) -> None:
         self.task = task
-        self.ask = scripted_planner(planner) if planner else None
+        if planner and ask is None:
+            if planner.backend != "scripted":
+                raise ValueError("Actual planner backend must be loaded before starting the episode")
+            replies = iter(planner.outputs)
+            ask = lambda _observation, _task, _feedback: next(replies, "")
+        self.ask = ask
         self.model: str | None = planner.model if planner else None
         self.version: str | None = planner.version if planner else None
         self.counts = {"planner_initial_requests": 0, "planner_initial_errors": 0, "planner_regeneration_requests": 0,

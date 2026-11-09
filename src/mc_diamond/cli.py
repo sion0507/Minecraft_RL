@@ -14,7 +14,7 @@ from .doctor import doctor
 from .clock import verify_clock
 from .information import audit_information
 from .rpc import EpisodeError, RpcSession
-from .schema import CandidateSet, EpisodeConfig, ErrorInfo, Goal, Observation, SelectionResult
+from .schema import CandidateSet, EpisodeConfig, ErrorInfo, Goal, LocalPlannerConfig, Observation, SelectionResult
 from .rule_selector import rule_select
 from .selectors import first_candidate, result
 
@@ -41,7 +41,7 @@ def human_select(observation: Observation, _goal: Goal, saved: CandidateSet, _fa
 def main() -> int:
     parser = argparse.ArgumentParser(prog="mc-diamond")
     parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "smoke-macros", "verify-clock", "prepare-world",
-                                            "audit-information", "evaluate", "smoke-model"])
+                                            "audit-information", "evaluate", "smoke-model", "smoke-planner"])
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--diagnostic-fixture", choices=["wood", "wood_tool", "wood_break", "wood_hazard", "wood_drop", "empty",
         "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron", "diamond", "diamond_given"])
@@ -60,6 +60,9 @@ def main() -> int:
             return evaluation.main(args.config, args.groups, args.task, emit)
         with args.config.open(encoding="utf-8") as handle:
             config = EpisodeConfig.model_validate(yaml.safe_load(handle))
+        if args.command == "smoke-planner" and config.planner is None:
+            config = config.model_copy(update={"planner": LocalPlannerConfig(backend="local_7b")})
+        episode_id, attempt_id = str(uuid4()), str(uuid4())
         if args.command == "smoke-model":
             if args.select != "fixed" or args.diagnostic_fixture:
                 raise ValueError("smoke-model uses the configured NanoJev selector and natural reset")
@@ -88,7 +91,10 @@ def main() -> int:
             fixture = (args.config.parent / config.fixture).resolve()
             command = [sys.executable, "-m", "mc_diamond.mock_bridge", "--fixture", str(fixture)]
         assert command is not None
-        episode_id, attempt_id = str(uuid4()), str(uuid4())
+        planner = None
+        if args.command in {"smoke-planner", "smoke-episode", "smoke-macros", "smoke-movement"} and config.planner is not None:
+            from .planner import load_planner
+            planner = load_planner(config.planner, args.config, emit)
         with RpcSession(command, config.rpc_timeout_seconds) as session:
             if args.command == "prepare-world":
                 emit("world_prepared", {**session._call("prepare_world", {"start": list(args.start)} if args.start else {"g4": list(args.g4)}, admin=True)})
@@ -108,10 +114,11 @@ def main() -> int:
                 return session.policy().observe()
             summary = run_episode(config, session.policy(), reset,
                                   episode_id, attempt_id, movement=args.command == "smoke-movement",
-                                  macros=args.command == "smoke-macros",
+                                  macros=args.command in {"smoke-macros", "smoke-planner"},
                                   select={"human": human_select, "rule": rule_select}.get(args.select, first_candidate),
+                                  planner=planner,
                                   verification=session.verification_log
-                                  if args.command == "smoke-macros" else None)
+                                  if args.command in {"smoke-macros", "smoke-planner"} else None)
         if summary.error or summary.invalid:
             print(f"Episode stopped: {summary.reason}", file=sys.stderr)
             return 1
@@ -120,7 +127,7 @@ def main() -> int:
             return 1
         if args.command == "smoke-movement" and not summary.movement_completed:
             return 1
-        if args.command == "smoke-macros" and not summary.goal_completed:
+        if args.command in {"smoke-macros", "smoke-planner"} and not summary.goal_completed:
             return 1
         return 0
     except (OSError, ValueError, yaml.YAMLError, ValidationError):

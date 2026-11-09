@@ -5,6 +5,17 @@
 
 현행 결정은 2026-10-10 기록이다. 같은 날의 S 필수 진단 보완이 과거 선택 S=규칙 계획/규칙 행동 정의를 대체하며 핵심 F/조건부 7B 학습 결정은 유지한다. 아래 과거 F 제외·계획기 학습 미허용·최종 23회/축소 17회 문구는 당시 결정의 이력이며 해당 부분은 현행 결정으로 대체한다. 과거 기록은 삭제하지 않는다.
 
+## 2026-11-09 — #10 T09 공통 고정 계획기 연결 (구현 선택)
+
+- 선행 #9의 Closed/completed와 #10/#1 본문·댓글, PLAN §5.1·5.5·5.6·7.4·14를 확인했다. 관련 ADR은 없다. 사용자가 `$implement`로 구현·검증·두 축 리뷰·현재 브랜치 커밋을 요청했다. 현재 main에서 작업하며 push/merge/이슈 종료는 범위에 넣지 않는다.
+- 기존 Planning/GoalRegistry와 run_episode를 재사용한다. local_7b/Astra는 같은 고정 자체 프롬프트·제한 관측 요약·task·검증 오류를 받으며 목표 JSON만 반환한다. 메모리는 거리순 관측 비공기 표면64·최근 방문32·결과8이다. 후보·관리자 정보·시드·숨은 광석/위험을 추가하지 않는다. knowledge=null이며 조건부 지식 조회·계획기 학습은 후속 진단/승인 없이 실행하지 않는다.
+- Qwen 공식 Apache-2.0 배포 revision a09a35458c702b33eeacc393d103063234e8bc28을 고정했다. 13개 파일의 SHA-256을 설치·로드 때 확인한다. 기존 Torch/Transformers extra에 accelerate1.15.0/bitsandbytes0.50.2를 더한 planner extra는 model extra를 포함한다. 실제 CUDA NF4/double quant/BF16·frozen/eval, greedy(실효 온도0)·max_new_tokens256·입출력 합8192 상한이다. CPU/임의 가중치로 대체하지 않는다.
+- 공개 smoke-planner는 mock/실제 게임을 구분하고 기존 고정 선택기로 목표→후보→실행→출처별 요약을 확인한다. 실제 G1 연결 진단을 8결정/240초로 제한했다. 게임 bridge/runtime/snapshot/fingerprint 입력을 바꾸지 않으므로 기존 인증을 확인하며63조건을 불필요하게 반복하지 않는다. 검증 후 G1 reset/observe와 서버 종료를 확인한다.
+- 문서의 `smoke-planner --config configs/pilot.yaml`은 planner 설정이 없으면 고정 local_7b를 사용한다. 다른 명령의 고정 목표 동작은 유지한다. 이 기본값 경로도 공개 CLI에서 실패 재현 후 통과를 확인했다.
+- Astra는 표준 라이브러리 HTTPS Chat Completions adapter를 제공하고 redirect를 차단한다. PLAN 후보의 공개 페이지를2026-11-09 재확인했지만 계정 접근·실제 버전/지원 설정/청구는 미확인이다. 유료 호출은 명시적 별도 승인/금액·호출 한도/제공처 검증 요청당 최악 금액과 ASTRA_API_KEY 없이는 실행하지 않는다. 영속 잠금·원자 ledger는 실패/재생성/재시작도 보수적으로 예약하고 자동 환불하지 않는다. 실제 상한 준수는 제공처의 검증된 요청당 비용 상한을 전제로 하며, 토큰 요율 추정을 실제 청구 확인으로 표시하지 않는다.
+- 잘못된 목표는 한 번 재생성/공통 복구하지만 제공처 접속 실패·응답 계약 오류·승인/예산 부족은 별도로 중단한다. 실제 평가의 군별 backend와 Jev 연결/lock은 후속 티켓이다. 한 episode 설정의 Astra를 A/B/J/S에도 잘못 적용하지 않도록 실제 planner를 evaluate에 넣으면 거부한다. mock 평가/기존 scripted 설정은 보존한다.
+- 테스트 경계는 #1에 승인된 공개 CLI 흐름·공통 Planner 계약이다. 실제 공개 모델과 게임 물리는 별도 실제 실행으로 확인한다. dict/list 목표 값이 set membership에서 TypeError를 일으키던 신뢰 경계 결함을 재현 후 수정했다.
+
 ## 2026-11-09 — #11 T10 커밋·푸시·원격 main 병합·이슈 종료 승인 (사용자 결정)
 
 - 사용자가 두 축 code-review(Standards0/Spec0) 결과를 확인하고 "푸쉬하고 머지하고 이슈 클로스"를 명시적으로 요청했다. 앞 T10의 미승인/미수행 Git 상태는 당시 이력이며 이 요청으로 commit/push/PR/원격 main 병합/#11 완료 종료를 진행한다.

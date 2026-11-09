@@ -9,7 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 
 from .rpc import EpisodeError, PolicyEnvironment
-from .goals import COMPLETION_EVENT, ESCAPE_DISTANCE, ActiveGoal, Planning, completed, failed, tally
+from .goals import COMPLETION_EVENT, ESCAPE_DISTANCE, ActiveGoal, Ask, Planning, completed, failed, tally
 from .navigation import (
     ORE_TOP, PICKS, escape_candidates, fresh_movement_candidates, generate_descent_candidates, generate_movement_candidates,
     hazard_distance, hold_candidate, ore_search_choices, safe_ground,
@@ -101,7 +101,7 @@ STALL_LIMIT = 20  # consecutive <=1-tick steps with no position/map/inventory/du
 def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 reset: Callable[[], Observation], episode_id: str, attempt_id: str,
                 *, movement: bool = False, macros: bool = False, select: Selector = first_candidate,
-                verification: Callable[[], dict[str, Any]] | None = None) -> EpisodeSummary:
+                verification: Callable[[], dict[str, Any]] | None = None, planner: Ask | None = None) -> EpisodeSummary:
     """`verification` reads the administrator log only after the last decision, so no policy input can see it.
 
     `config.goal` is the task. Without a planner it is also the one fixed goal, re-adopted at every replan trigger.
@@ -125,7 +125,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     verified: dict[str, int] = {}
     stalled = 0
     terminated = truncated = invalid = done = False
-    planning = Planning(config.goal, config.planner)
+    planning = Planning(config.goal, config.planner, planner)
     active: ActiveGoal | None = None
     trigger = "episode_start"
     outcomes: list[GoalOutcome] = []

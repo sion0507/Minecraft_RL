@@ -1,3 +1,13 @@
+# #10 T09 — 공통 계획기 구현·실제 Qwen/G1 검증, Astra 승인 대기
+
+사용자 `$implement 다음 이슈10` 요청으로 main의 작업시작 HEAD `7a7f8c8`부터 구현했다. 선행 #9 Closed/completed, #10/#1 본문·댓글과 관련 PLAN을 확인했다. 현재 브랜치 로컬 커밋 범위이며 push/merge/#10종료는 요청되지 않아 실행하지 않는다. 최종 커밋은 git log/evidence를 따른다.
+- 공통 프롬프트·제한 입력, 고정 Qwen NF4 4비트CUDA와 Astra HTTPS adapter, 공개 smoke-planner를 기존 목표 검증/한 번 재생성/복구·출처별 실행에 연결했다. revision/hash/설정은 소스manifest와로그에고정했다. DECISIONS/PROGRESS 최신 #10절을 따른다.
+- 실제 Qwen+mock 게임exit0. 실제 Qwen+자연G1도exit0:5결정216틱·원목1직접획득·pause_verified=true·초기오류0/1·재생성0/0·복구0/1. G1기준reset=observe·0틱·빈인벤토리·체력20과서버종료확인. bridge/runtime/fingerprint입력변경없음/63조건재실행없음. 원시artifacts/issue-10.
+- Standards2/Spec3 지적(중복 포함 결함3건)을 3failed→17passed로 수정: 비용 위반 후 영속 차단/비용 보존, HTTP 요청 오류와 접근 불가 구분, CUDA 오류 call/summary 보존. 기본 pilot 명령의 local_7b 연결도 실패 재현 후 수정했다(Planner18개 통과). 최종 pytest229·mypy src/tests31파일 통과. 수정 뒤 독립 재리뷰는 하지 않았다.
+- Astra는공개후보만확인. 실제계정/버전/지원옵션/과금/별도금액·호출상한은승인대기이며유료호출0·키읽기0. F핵심비교를유지한다. Jev#12/6상태#17/예산lock#20후속. 학습/전체C4·G4/7B+NanoJev동시VRAM은미실행.
+- 로컬PDF2개: reports/issue-010-T09-{report,code-guide}.pdf. 중간파일은/tmp/Git제외·보고서때문에게임재실행금지. 코드기준/검수근거는evidence와PROGRESS에기록한다.
+- 사용자가 한국어 안내를 재요청했으므로 설명/승인 요청을 모두 한국어로 한다.
+
 # #11 T10 — 실제 공개 NanoJev 검증 완료, 사용자 승인으로 게시·병합·종료 진행
 
 전용 worktree `Minecraft_learning-issue11`, 브랜치 `feat/issue-11-nanojev`, 시작 HEAD `e839a8e`. 사용자 요청으로 #11/#5/#1 본문·댓글과 관련 PLAN·현재 코드를 확인했다. #5는 Closed이며, main/다른 작업공간은 수정하지 않았다.
