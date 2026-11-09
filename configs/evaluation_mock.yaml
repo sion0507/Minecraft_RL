@@ -1,0 +1,10 @@
+# Mock evaluation schedule (#13): exercises slots, retries and denominators only; never a Minecraft or model result.
+# The final experiment fixes scale, seeds, budget and reference availability in experiment_lock.json (T19).
+episodes:
+  C4: pilot.yaml
+  G4: pilot.yaml
+scale: core
+evaluation_seeds: [101, 102, 103, 104, 105]
+g4_seeds: [201, 202, 203]
+fixed_seed: 0
+budget_usd: 5.0

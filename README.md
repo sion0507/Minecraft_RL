@@ -209,6 +209,14 @@ uv run python tools/verify_t07.py --output artifacts/t07-new clock information t
 uv run mc-diamond smoke-macros --config configs/pilot.yaml --select rule
 ```
 
+## 평가 슬롯 (T12)
+
+`evaluate`는 예정 슬롯(핵심 C4 22 또는 축소 14, G4 6, 별도 S 1)을 실행하고 슬롯마다 결과 하나를 남깁니다. 서버 오류만 같은 snapshot·난수로 1회 재시도하고, 비용 중단·불가 군도 미실행으로 분모에 남습니다. 지금은 S만 실제 선택기이고 A/B/J/F는 mock backend의 대체 선택기입니다.
+
+```bash
+uv run mc-diamond evaluate --config configs/evaluation_mock.yaml --groups A,B,J,F,S --task C4,G4
+```
+
 ## 문서
 
 | 문서 | 내용 |

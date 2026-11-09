@@ -8,6 +8,7 @@ from uuid import uuid4
 import yaml
 from pydantic import ValidationError
 
+from . import evaluation
 from .episode import emit, run_episode
 from .doctor import doctor
 from .clock import verify_clock
@@ -39,7 +40,8 @@ def human_select(observation: Observation, _goal: Goal, saved: CandidateSet, _fa
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="mc-diamond")
-    parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "smoke-macros", "verify-clock", "prepare-world", "audit-information"])
+    parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "smoke-macros", "verify-clock", "prepare-world",
+                                            "audit-information", "evaluate"])
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--diagnostic-fixture", choices=["wood", "wood_tool", "wood_break", "wood_hazard", "wood_drop", "empty",
         "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron", "diamond", "diamond_given"])
@@ -48,10 +50,14 @@ def main() -> int:
     place.add_argument("--g4", type=int, nargs=3, metavar=("X", "Y", "Z"), help="prepare-world: user-confirmed G4 start block")
     parser.add_argument("--select", choices=["fixed", "human", "rule"], default="fixed",
                         help="human = operator picks candidates (#36 feasibility diagnostic, no wall limit); rule = selector S")
+    parser.add_argument("--groups", default="A,B,J,F,S", help="evaluate: comma-separated groups of the planned slots to run")
+    parser.add_argument("--task", default="C4,G4", help="evaluate: C4, G4 or both")
     args = parser.parse_args()
     if args.command == "prepare-world" and args.start is None and args.g4 is None:
         parser.error("prepare-world requires --start X Y Z or --g4 X Y Z")
     try:
+        if args.command == "evaluate":
+            return evaluation.main(args.config, args.groups, args.task, emit)
         with args.config.open(encoding="utf-8") as handle:
             config = EpisodeConfig.model_validate(yaml.safe_load(handle))
         if args.select == "human":

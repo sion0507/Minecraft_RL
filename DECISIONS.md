@@ -5,6 +5,22 @@
 
 현행 결정은 2026-10-10 기록이다. 같은 날의 S 필수 진단 보완이 과거 선택 S=규칙 계획/규칙 행동 정의를 대체하며 핵심 F/조건부 7B 학습 결정은 유지한다. 아래 과거 F 제외·계획기 학습 미허용·최종 23회/축소 17회 문구는 당시 결정의 이력이며 해당 부분은 현행 결정으로 대체한다. 과거 기록은 삭제하지 않는다.
 
+## 2026-11-09 — T12 공통 평가 슬롯과 서버 오류 재시도 (#13)
+
+구현 위치: `src/mc_diamond/evaluation.py`, CLI `evaluate --config <평가 설정> --groups <군> --task <C4,G4>`. 사용자 지시로 pathfinder 비교 결정을 기다리지 않고 진행했다. 슬롯 코드는 후보 형식을 읽지 않는다.
+
+- **예정 슬롯(§9.3–9.5):** 핵심 C4는 A·B sampling 5(축소 3)+argmax 1, J·F 주 모드 5(축소 3)로 22/14개. G4는 A·B sampling 각 3으로 6개. S는 C4 결정적 1개를 별도 표(`s`)로 둔다. 합계 29/21이다. 규모(`scale`)·난수·예산은 평가 설정에서 결과 전에 고정하고, 본 실험 값은 T19 lock이 정한다. `--groups`·`--task`는 실행할 슬롯만 고르고, 각 슬롯의 ID·난수는 전체 일정에서 정해진 그대로다.
+- **난수:** A·B sampling은 같은 5개(축소 시 앞 3개)를 공유하고, G4는 3개를 공유한다. J·F도 같은 목록을 기록한다(native choice면 외부 API 내부 난수는 통제하지 않는다). argmax와 S는 `fixed_seed`. 재시도는 같은 난수·snapshot이다. 지금 mock 선택기는 난수를 쓰지 않는다. sampling 선택기는 T10/T11에서 이 난수를 받는다.
+- **시도:** 슬롯마다 attempt ID `<slot_id>:<n>`, 시도마다 새 bridge 세션과 reset, snapshot은 과제 snapshot 파일(mock은 fixture) sha256으로 기록한다.
+- **서버 오류만 재시도(최대 1회):** `backend_error`·`timeout`·`protocol_error`. 행동 실패·사망·탐색 실패·계약 오류(`invalid_step` 등)는 재시도하지 않는다. 슬롯 결과는 마지막 허용 시도의 결과다. 최초 오류(`first_error`)와 모든 시도의 시간·비용을 보존한다. 재시도도 서버 오류면 `error`, 성공 0.
+- **비용 중단:** 유료 군(J·F)은 시도 시작 전에 누적 비용이 `budget_usd` 이상이면 실행하지 않는다. 최초 시도면 `not_run`(`budget_stopped`), 재시도면 `retry=not_run_budget`이다. 둘 다 예정 분모에 남는다. 진행 중 에피소드의 비용 상한 중단은 Jev 비용 통제(T11 #12)가 맡는다.
+- **불가 군:** Jev 불가면 J·F, Astra 불가면 F 슬롯을 `not_run`(사유 `jev_unavailable`/`astra_unavailable`)으로 남긴다. 분모에서 빼지 않는다.
+- **성공:** 과제 목표가 `mine_diamond`면 `diamond_success`(관리자 검증)만 성공이다. 그 밖의 목표는 mock·smoke 설정에서만 쓰며 `goal_completed`를 쓴다. mock 실행이 하나라도 있으면 요약에 `mock: true`.
+- **최고 진행 단계(§10):** 그 에피소드의 직접 사건으로 1 원목·2 돌 곡괭이·3 철 광석·4 철 곡괭이·5 y=5–12에서 20틱 safe_hold·6 다이아.
+- **요약:** 표(`core_c4`·`g4`·`s`)마다 예정·성공·실패·오류·미실행·시도·재시도 사용/미실행·활성 틱·실제 시간·비용. S 진단은 따로 성공 x/1·최고 단계·시간·선택 수·7B 계획 호출 수·실패 사유·비용.
+- **선택기 연결:** S는 T08의 규칙 선택기(`rule_select`)를 그대로 쓴다. A/B/J/F는 mock backend에서만 첫 후보 mock 선택기로 대신하고(J/F는 설정한 mock 결정당 비용), 실제 backend에서는 연결 전이라 설정 오류(exit 2)로 거부한다. T10/T11이 실제 선택기를 붙인다.
+- **mock 서버 오류:** mock fixture의 `server_error_attempts`에 적은 attempt ID는 첫 step에서 `backend_error`를 낸다(검사용).
+
 ## 2026-11-09 — #9 병합, 이슈는 Open 유지 (사용자 결정)
 
 - 사용자 지시로 `issue-9-t08`을 push하고 PR로 main에 병합한다. #9는 #13 S 슬롯 연결이 남아 있으므로 닫지 않는다.
