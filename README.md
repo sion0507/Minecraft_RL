@@ -199,6 +199,16 @@ uv run python tools/verify_t07.py --output artifacts/t07-new clock information t
 
 다이아 성공(`diamond_success`)은 자연 에피소드에서 관리자 검증 로그가 광석 직접 파괴·철 이상 서버 도구·그 광석의 드롭·인벤토리 획득 사건을 모두 잇는 경우만입니다. 관리자 로그는 마지막 결정 뒤에만 읽으며 정책 입력에 들어가지 않습니다. `diamond`·`diamond_given` fixture는 관리자 배치·지급 진단(`natural=false`)이라 성공으로 세지 않습니다. G4 smoke에서 다이아 성공은 필수가 아닙니다. 자연 G2 철 3개(`admin_verified.iron_ore ≥ 3`, `configs/g2_natural.yaml`)는 T07 인수 조건이며 사전 등록한 상한·종료 기준은 DECISIONS 2026-11-08 절에 있습니다.
 
+## 목표 처리와 규칙 선택기 S (T08)
+
+설정에 `planner`가 없으면 `goal`이 고정 목표이고, 재계획 사건(완료·연속 실패 3회·목표 활성 3분·매크로 20회)마다 같은 목표를 새 ID로 다시 채택합니다. `planner: {backend: scripted, outputs: [...]}`를 넣으면 모의 계획기의 JSON 응답을 GoalRegistry가 검사하고, 오류면 한 번 재생성한 뒤 규칙 복구 목표(위험 근처 escape, 아니면 explore)를 씁니다. 결정마다 `goal_decision` 기록과 summary의 계획기 오류·재생성·복구 분자/분모, 출처별 진행(`progress_by_source`), 목표별 결과(`goal_outcomes`)가 남습니다. 실제 7B·Astra 계획기는 T09에서 연결합니다.
+
+`--select rule`은 규칙 기반 선택기 S(`s-rules-v1`)입니다. 결정마다 규칙 version/hash와 후보별 비교 키를 남기며 확률·모델 정보는 null입니다. S 경험은 actor 학습에 쓰지 않습니다.
+
+```bash
+uv run mc-diamond smoke-macros --config configs/pilot.yaml --select rule
+```
+
 ## 문서
 
 | 문서 | 내용 |

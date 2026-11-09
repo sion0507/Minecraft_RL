@@ -231,15 +231,17 @@ def test_actual_driver_restores_world_after_failed_clock_check(tmp_path: Path, m
 def test_human_selector_only_accepts_a_listed_candidate(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     import io
     from mc_diamond.cli import human_select
-    from mc_diamond.schema import CandidateSet
+    from mc_diamond.schema import CandidateSet, Goal
     observation = Observation.model_validate({**wood_fixture()["initial"], "observed_map": [
         {"block": "iron_ore", "position": [3.0, 60.0, 0.0], "support": True}]})
     saved = CandidateSet.model_validate({"candidates": [{"candidate_id": f"c{i}", "action_kind": "wait", "params": {},
         "max_ticks": 20, "stop_rule_id": "wait", "source_obs_id": observation.obs_id, "description": f"wait {i}"} for i in (1, 2)],
         "mask": [True, True], "generated": 2})
     monkeypatch.setattr("sys.stdin", io.StringIO("x\n3\n2\n"))
-    assert human_select(saved, observation).candidate_id == "c2"
+    goal = Goal(goal_id="wood", kind="collect", target="oak_log", quantity=1)
+    chosen = human_select(observation, goal, saved, ())
+    assert (chosen.candidate_id, chosen.selector_mode) == ("c2", "human")
     assert "iron_ore [3, 60, 0]" in capsys.readouterr().err
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
     with pytest.raises(EOFError):
-        human_select(saved, observation)
+        human_select(observation, goal, saved, ())

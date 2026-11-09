@@ -17,7 +17,8 @@ import yaml
 
 from mc_diamond.episode import run_episode
 from mc_diamond.rpc import RpcSession
-from mc_diamond.schema import Candidate, CandidateSet, EpisodeConfig
+from mc_diamond.schema import Candidate, CandidateSet, EpisodeConfig, SelectionResult
+from mc_diamond.selectors import Selector, result
 
 # scope, variant, stairs, max_ticks, expected reason. Administrator scenes, never a natural task result.
 SCENES = [("stair", "ore", 4, 400, "stairs_completed"), ("stair_exposed", "ore", 2, 400, "ore_exposed"),
@@ -28,11 +29,11 @@ SCENES = [("stair", "ore", 4, 400, "stairs_completed"), ("stair_exposed", "ore",
           ("stair_gravel", "ore", 1, 400, "stairs_completed"), ("stair_hold", "ore", 1, 20, "observed_hazard")]
 
 
-def prefer(direction: list[int]) -> Callable[[CandidateSet, Any], Candidate]:
+def prefer(direction: list[int]) -> Selector:
     """Fixed diagnostic selector: hold one heading while the generator offers it."""
-    def select(saved: CandidateSet, _observation: Any) -> Candidate:
-        return next((c for c in saved.candidates if c.action_kind == "stair_down" and c.params["direction"] == direction),
-                    saved.candidates[0])
+    def select(_observation: Any, _goal: Any, saved: CandidateSet, _failures: Any) -> SelectionResult:
+        return result(next((c for c in saved.candidates if c.action_kind == "stair_down" and c.params["direction"] == direction),
+                           saved.candidates[0]), "mock_fixed")
     return select
 
 

@@ -68,12 +68,44 @@ class Observation(Contract):
     furnaces: list[FurnaceState] = Field(default_factory=list)
 
 
+GoalSource = Literal["fixed", "planner", "regenerated", "rule_recovery"]
+
+
 class Goal(Contract):
     goal_id: Identifier
-    kind: Literal["collect", "craft", "smelt", "descend", "mine_diamond"]
+    kind: Literal["collect", "craft", "smelt", "descend", "explore", "escape", "mine_diamond"]
     target: Identifier
     quantity: Positive
-    source: Literal["fixed"] = "fixed"
+    direction: Literal["north", "south", "east", "west"] | None = None
+    preconditions: list[str] = Field(default_factory=list)  # what GoalRegistry checked when it adopted the goal
+    active_budget_ticks: Positive = 3600  # replan after 3 active minutes at 20 ticks/s (PLAN §5.1)
+    completion_rule_id: Identifier | None = None
+    source: GoalSource = "fixed"
+
+
+class PlannerConfig(Contract):
+    """Scripted mock planner replies; the shared 7B and Astra backends connect in T09 (#10)."""
+    backend: Literal["scripted"]
+    model: Identifier = "mock-scripted"
+    version: Identifier = "fixture"
+    outputs: list[str]
+
+
+class GoalOutcome(Contract):
+    """GoalStats row: one adopted goal from its decision to its replan trigger or the episode end."""
+    goal_id: Identifier
+    source: GoalSource
+    kind: str
+    target: str
+    start_tick: Count
+    end_tick: Count
+    planner_retries: Count  # regeneration requests before this goal was adopted
+    macros: Count
+    failures: Count
+    failure_reasons: dict[str, Count]  # step reason of each failed step
+    completed: bool
+    end_reason: str
+    direct: dict[str, Count]
 
 
 class Candidate(Contract):
@@ -144,7 +176,8 @@ class ErrorInfo(Contract):
 
 class SelectionResult(Contract):
     candidate_id: Identifier
-    selector_mode: Literal["mock_fixed", "human", "forced_wait", "sampling", "argmax", "native_choice", "fallback"]
+    selector_mode: Literal["mock_fixed", "human", "forced_wait", "rule_deterministic", "sampling", "argmax", "native_choice",
+                           "fallback"]
     probabilities: dict[Identifier, Annotated[float, Field(ge=0, le=1)]] | None
     latency_seconds: float = Field(ge=0)
     provider: str | None
@@ -153,6 +186,9 @@ class SelectionResult(Contract):
     retries: Count = 0
     error: ErrorInfo | None = None
     fallback: bool = False
+    rule_version: str | None = None  # rule selector S only: fixed rules and their hash
+    rule_hash: str | None = None
+    rule_keys: dict[Identifier, list[float]] | None = None  # per candidate: the lexicographic key S compared
 
 
 class Event(Contract):
@@ -207,6 +243,8 @@ class MacroEvidence(Contract):
     stable_boundary: bool
     distance_moved: float = Field(ge=0)
     cancelled: bool = False
+    goal_id: Identifier | None = None
+    goal_source: GoalSource | None = None
 
 
 class EpisodeSummary(Contract):
@@ -240,6 +278,17 @@ class EpisodeSummary(Contract):
     direct_crafted: dict[str, Count] = Field(default_factory=dict)
     direct_smelted: dict[str, Count] = Field(default_factory=dict)
     direct_acquired: dict[str, Count] = Field(default_factory=dict)
+    # Planner accounting (PLAN §5.1): each numerator keeps its own denominator.
+    planner_model: str | None = None
+    planner_version: str | None = None
+    planner_initial_requests: Count = 0
+    planner_initial_errors: Count = 0
+    planner_regeneration_requests: Count = 0
+    planner_regeneration_errors: Count = 0
+    rule_recoveries: Count = 0
+    goal_decisions: Count = 0
+    progress_by_source: dict[str, dict[str, Count]] = Field(default_factory=dict)
+    goal_outcomes: list[GoalOutcome] = Field(default_factory=list)
 
 
 class RpcRequest(Contract):
@@ -268,7 +317,8 @@ class EpisodeConfig(Contract):
     rpc_timeout_seconds: float = Field(default=5.0, gt=0, le=180)
     max_decisions: Positive = 8
     wall_limit_seconds: float | None = Field(default=None, gt=0)
-    goal: Goal
+    goal: Goal  # the task; without a planner it is also the one fixed goal
+    planner: PlannerConfig | None = None
 
     @model_validator(mode="after")
     def configured_backend(self) -> Self:
