@@ -19,7 +19,7 @@ from verify_t06 import access_report
 from mc_diamond.information import step_choice
 from mc_diamond.navigation import escape_candidates, generate_movement_candidates, hazard_distance, observed_routes
 from mc_diamond.rpc import RpcSession
-from mc_diamond.schema import Candidate, EpisodeConfig
+from mc_diamond.schema import MAX_CANDIDATES, Candidate, EpisodeConfig
 
 CHECKS = ["clock", "information", "tunnels", "steps", "diamond", "g4", "g2"]
 # scope, cells, height, max_ticks, expected reason. Administrator scenes, never a natural task result.
@@ -236,7 +236,8 @@ def main() -> None:
             report = access_report(args.output / f"{name}.jsonl")
             rows = [json.loads(line) for line in (args.output / f"{name}.jsonl").read_text().splitlines()]
             steps = [row["data"] for row in rows if row["type"] == "step"]
-            candidates = [row["data"]["candidates"] for row in rows if row["type"] == "candidates"]
+            sets = [row["data"] for row in rows if row["type"] == "candidates"]
+            candidates = [saved["candidates"] for saved in sets]
             kinds = {c["candidate_id"]: c["action_kind"] for cs in candidates for c in cs}
             chosen: dict[str, int] = {}
             for row in rows:
@@ -245,7 +246,11 @@ def main() -> None:
                     chosen[kind] = chosen.get(kind, 0) + 1
             report.update(tunnels=sum(e["kind"] == "tunneled" for s in steps for e in s["events"]),
                           exposed=[[e["item"], e["position"]] for s in steps for e in s["events"] if e["kind"] == "exposed"],
-                          candidate_counts={str(n): sum(len(c) == n for c in candidates) for n in range(9)}, selected_kinds=chosen)
+                          candidate_counts={str(n): sum(len(c) == n for c in candidates) for n in range(MAX_CANDIDATES + 1)},
+                          cut_decisions=sum(saved["generated"] > len(saved["candidates"]) for saved in sets),
+                          truncated={kind: sum(saved["truncated"].get(kind, 0) for saved in sets)
+                                     for kind in sorted({kind for saved in sets for kind in saved["truncated"]})},
+                          selected_kinds=chosen)
             result["access"] = report
             (args.output / f"{name}-access.json").write_text(json.dumps(report, indent=2))
             provided, limit, item, needed = ({"iron_pickaxe": 1}, 18000, "diamond", 1) if name == "g4" else ({"stone_pickaxe": 1}, 12000, "iron_ore", 3)

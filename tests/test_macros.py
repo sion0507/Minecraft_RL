@@ -152,19 +152,22 @@ def test_macro_cli_rejects_duplicate_event_instead_of_rewarding_it_twice(tmp_pat
     assert output[-1]["data"]["reward_total"] == 0
 
 
-def test_macro_cli_deduplicates_visible_targets_before_eight_candidate_cap(tmp_path: Path) -> None:
+def test_macro_cli_deduplicates_visible_targets_before_the_shared_cap(tmp_path: Path) -> None:
     fixture = wood_fixture()
     cells = [{"block": "oak_log", "position": [float(x), float(y), float(z)], "visible": True}
-             for x in [-1, 0, 1] for y in [64, 65] for z in [-1, 0, 1]]
+             for x in [-1, 0, 1] for y in [64, 65, 66] for z in [-1, 0, 1]]
     fixture["initial"]["observed_map"] = cells * 2 + [
-        {"block": "oak_log", "position": [0.0, 66.0, 0.0], "visible": False}]
+        {"block": "oak_log", "position": [0.0, 67.0, 0.0], "visible": False}]
     result, output = run_macros(tmp_path, fixture)
     assert result.returncode == 0, result.stderr
     saved = next(row["data"] for row in output if row["type"] == "candidates")
-    assert len(saved["candidates"]) == 8 and saved["mask"] == [True] * 8
+    assert len(saved["candidates"]) == 16 and saved["mask"] == [True] * 16
+    # Eight columns in reach x three heights, one target each. Mining has one slot of its own (#38); with no walking or
+    # cutting candidates the free slots take the next targets in generation order, nearest first.
+    assert saved["generated"] == 24 and saved["truncated"] == {"mine_visible_cluster": 8}
     targets = [candidate["params"]["blocks"] for candidate in saved["candidates"]]
-    assert len({json.dumps(target) for target in targets}) == 8
-    assert [[0.0, 66.0, 0.0]] not in targets
+    assert len({json.dumps(target) for target in targets}) == 16
+    assert [[0.0, 67.0, 0.0]] not in targets
 
 
 def test_macro_cli_uses_actual_position_for_drop_pickup_distance(tmp_path: Path) -> None:
@@ -233,7 +236,7 @@ def test_human_selector_only_accepts_a_listed_candidate(monkeypatch: pytest.Monk
         {"block": "iron_ore", "position": [3.0, 60.0, 0.0], "support": True}]})
     saved = CandidateSet.model_validate({"candidates": [{"candidate_id": f"c{i}", "action_kind": "wait", "params": {},
         "max_ticks": 20, "stop_rule_id": "wait", "source_obs_id": observation.obs_id, "description": f"wait {i}"} for i in (1, 2)],
-        "mask": [True, True]})
+        "mask": [True, True], "generated": 2})
     monkeypatch.setattr("sys.stdin", io.StringIO("x\n3\n2\n"))
     assert human_select(saved, observation).candidate_id == "c2"
     assert "iron_ore [3, 60, 0]" in capsys.readouterr().err

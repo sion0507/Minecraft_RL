@@ -680,7 +680,7 @@ def test_zero_candidates_force_wait_without_actor_experience(tmp_path: Path) -> 
                                 terminated=False, truncated=True, reason="mock_time_limit")
     fixture["steps"][0]["observation"]["inventory"] = {}
     output = records(run_cli(fixture_config(tmp_path, fixture)))
-    assert output[3]["data"] == {"candidates": [], "mask": []}
+    assert output[3]["data"] == {"candidates": [], "mask": [], "generated": 0, "truncated": {}}
     assert output[4]["data"]["selector_mode"] == "forced_wait"
     assert output[-1]["data"]["actor_transitions"] == 0
     assert output[-1]["data"]["reward_total"] == 0.0

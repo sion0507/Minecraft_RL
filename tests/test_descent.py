@@ -195,7 +195,6 @@ def test_cli_g4_offers_level_tunnels_in_each_direction_with_a_taller_section(tmp
     assert [c["params"]["height"] for c in found] == [2, 2, 2, 2, 3]
     assert all(c["params"]["cells"] == 8 and c["params"]["stop_blocks"] == ["diamond_ore"] and c["max_ticks"] == 400
                and c["stop_rule_id"] == "tunnel_ore_or_hazard" for c in found)
-    assert len(first_candidates(output)) <= 8
 
 
 def test_cli_g4_walks_new_ground_before_cutting_below_the_diamond_layers(tmp_path: Path) -> None:
@@ -214,7 +213,7 @@ def test_cli_g2_tunnels_first_inside_the_iron_layers_and_keeps_durability_for_th
     assert candidates[0]["action_kind"] == "tunnel"
     assert candidates[0]["params"]["stop_blocks"] == ["diamond_ore", "iron_ore"]
     assert {c["params"]["cells"] for c in tunnels(candidates)} == {3, 2}, "(10 - 3 ores) // 2 and // 3 cells"
-    assert {c["params"]["stairs"] for c in candidates if c["action_kind"] == "stair_down"} == {2}, "(10 - 3) // 3 stairs"
+    assert {c["params"]["stairs"] for c in candidates if c["action_kind"] == "stair_down"} == {2, 1}, "(10 - 3) // 3 stairs and one"
     _, output = run(tmp_path, {**state, "tool_durability": 4}, [stop_step()], goal=IRON)
     assert [c for c in first_candidates(output) if c["action_kind"] in {"tunnel", "stair_down"}] == []
 
@@ -224,6 +223,45 @@ def test_cli_g2_still_descends_first_above_the_iron_layers(tmp_path: Path) -> No
     _, output = run(tmp_path, state, [stop_step()], goal=IRON)
     kinds = [c["action_kind"] for c in first_candidates(output)]
     assert kinds[:4] == ["stair_down"] * 4 and "tunnel" in kinds
+
+
+# T07C (#38): one shared cap of 16 with slots per kind (walk 6, tunnel 5, stair 4, any other kind 1).
+def open_ground(y: int = 64) -> list[dict[str, Any]]:
+    """Observed floor and headroom two cells around the start: a walk in each of the eight directions."""
+    span = range(-2, 3)
+    return ([cell("stone", x, y - 1, z, support=True) for x in span for z in span]
+            + [cell("air", x, h, z, passable=True) for x in span for h in (y, y + 1) for z in span])
+
+
+def saved_set(output: list[dict[str, Any]]) -> dict[str, Any]:
+    return next(row["data"] for row in output if row["type"] == "candidates")
+
+
+def test_cli_cuts_ore_search_to_sixteen_by_kind_slots_and_records_the_cut(tmp_path: Path) -> None:
+    state = surface(inventory={"stone_pickaxe": 1}, tool="stone_pickaxe", tool_durability=131, remaining_ticks=12000,
+                    observed_map=open_ground())
+    step = stop_step(observation={"active_ticks": 40, "remaining_ticks": 11960})
+    _, output = run(tmp_path, state, [step], goal=IRON)
+    saved = saved_set(output)
+    # Generated above the iron layers: 4 full stairs, 5 tunnels, 8 walks, 4 single stairs (21). Slots keep 15; the free
+    # 16th goes to the first cut candidate in generation order, the seventh walk. Kept candidates stay in that order.
+    assert [c["action_kind"] for c in saved["candidates"]] == ["stair_down"] * 4 + ["tunnel"] * 5 + ["move_observed"] * 7
+    assert {c["params"]["stairs"] for c in saved["candidates"] if c["action_kind"] == "stair_down"} == {4}
+    assert saved["mask"] == [True] * 16
+    assert saved["generated"] == 21 and saved["truncated"] == {"move_observed": 1, "stair_down": 4}
+    selection = next(row["data"] for row in output if row["type"] == "selection")
+    executed = output[-1]["data"]["macro_steps"][0]
+    assert selection["candidate_id"] == executed["candidate_id"] == saved["candidates"][0]["candidate_id"]
+    assert executed["source_obs_id"] == saved["candidates"][0]["source_obs_id"]
+    _, again = run(tmp_path, state, [step], goal=IRON)
+    assert saved_set(again) == saved, "the same observation always saves the same IDs, contents and order"
+
+
+def test_cli_keeps_every_candidate_up_to_the_cap(tmp_path: Path) -> None:
+    _, output = run(tmp_path, chamber(), [stop_step()], goal=DIAMOND)
+    saved = saved_set(output)
+    assert len(saved["candidates"]) == saved["generated"] == 13, "4 full and 4 single stairs, 5 tunnels"
+    assert saved["truncated"] == {}
 
 
 @pytest.mark.parametrize("veto", [

@@ -14,7 +14,7 @@ from .macros import generate_wood_candidates
 from .production import generate_production_candidates
 from .schema import (
     Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Event, Goal, MacroEvidence, Observation, SelectionResult,
-    StepResult,
+    StepResult, allocate,
 )
 
 
@@ -29,8 +29,24 @@ def generate_candidates(observation: Observation, goal: Goal) -> CandidateSet:
         params=surface.model_dump(mode="json"), max_ticks=min(400, observation.remaining_ticks),
         stop_rule_id="goal_or_hazard", source_obs_id=observation.obs_id,
         description=f"Collect exposed {surface.block}",
-    ) for index, surface in enumerate(observation.observed_map[:8]) if surface.block == goal.target]
-    return CandidateSet(candidates=candidates, mask=[True] * len(candidates))
+    ) for index, surface in enumerate(observation.observed_map) if surface.block == goal.target]
+    return allocate(candidates)
+
+
+def policy_candidates(observation: Observation, goal: Goal, *, movement: bool = False, macros: bool = False) -> CandidateSet:
+    """The generator the episode uses for this goal; inside an observed hazard radius only escape walks."""
+    escape = escape_candidates(observation) if macros else None
+    if escape is not None:
+        return escape
+    if movement:
+        return generate_movement_candidates(observation)
+    if not macros:
+        return generate_candidates(observation, goal)
+    if goal.kind == "descend":
+        return generate_descent_candidates(observation)
+    if goal.target.endswith("_log"):
+        return generate_wood_candidates(observation, goal)
+    return generate_production_candidates(observation, goal)
 
 
 VERIFIED_ORES = {"diamond_ore": ("diamond", PICKS[:3]), "iron_ore": ("iron_ore", PICKS[:4])}  # block: (drop, tools)
@@ -121,11 +137,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             if config.wall_limit_seconds is not None and time.monotonic() - started >= config.wall_limit_seconds:
                 truncated, reason = True, "wall_time_limit"
                 break
-            escape = escape_candidates(observation) if macros else None
-            saved = escape if escape is not None else (generate_movement_candidates(observation) if movement else
-                     (generate_descent_candidates(observation) if config.goal.kind == "descend" else
-                      generate_wood_candidates(observation, config.goal) if config.goal.target.endswith("_log") else
-                      generate_production_candidates(observation, config.goal)) if macros else generate_candidates(observation, config.goal))
+            saved = policy_candidates(observation, config.goal, movement=movement, macros=macros)
             emit("candidates", saved)
             candidate = select(saved, observation) if saved.candidates else Candidate(
                 candidate_id=f"{observation.obs_id}:wait", action_kind="wait", params={},
