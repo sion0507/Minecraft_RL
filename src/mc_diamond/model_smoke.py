@@ -155,10 +155,12 @@ def smoke_model(config: EpisodeConfig, config_path: Path) -> int:
             assert config.fixture is not None
             command = [sys.executable, "-m", "mc_diamond.mock_bridge", "--fixture", str((config_path.parent / config.fixture).resolve())]
         assert command is not None
+        from .planner import load_planner
+        planner = load_planner(config.planner, config_path, emit) if config.planner else None
         episode_id, attempt_id = str(uuid4()), str(uuid4())
         with RpcSession(command, config.rpc_timeout_seconds) as session:
             summary = run_episode(config, session.policy(), lambda: session.reset(episode_id, attempt_id), episode_id, attempt_id,
-                                  macros=True, select=select, verification=session.verification_log)
+                                  macros=True, select=select, verification=session.verification_log, planner=planner)
         verified = diagnostic is not None and not summary.error and not summary.invalid and (
             config.backend == "mock" or summary.pause_verified)
         emit("model_summary", {"model_verified": verified, "model_backend": "public_nanojev", "environment_backend": config.backend,

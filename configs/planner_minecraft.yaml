@@ -1,0 +1,15 @@
+# Actual fixed Qwen + existing natural G1, bounded connection diagnostic (not C4 evaluation).
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G1]
+rpc_timeout_seconds: 60.0
+max_decisions: 8
+wall_limit_seconds: 240.0
+goal:
+  goal_id: planner-wood
+  kind: collect
+  target: oak_log
+  quantity: 1
+planner:
+  backend: local_7b
+  checkpoint: ../checkpoints/qwen2.5-7b
+  max_new_tokens: 256

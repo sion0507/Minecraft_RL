@@ -1,3 +1,20 @@
+# #10 게시·병합·종료 승인 / 관측 확대는 #44 후속
+
+2026-11-09 사용자가 현재 #10의 push·PR 병합·이슈 종료를 요청했다. 구현 e887f4a를 보존해 feat/issue-10-planner에서 사용자 결정 기록과 함께 게시한다. 최종 실제 Git/원격/이슈 상태는 artifacts/issue-10/publication.json과 최신 PDF를 따른다. 이전 아래 미푸시/Open 표기는 당시 이력이다.
+- GitHub 작업은 사용자가 요청한 gh CLI만 사용한다. 관측 확대 [#44](https://github.com/sion0507/Minecraft_RL/issues/44)는 CLI로 생성했다. 반경32·모델 정보 최소256개 수준과 정보 보존/처리량·실제63조건/정보 감사/회귀·G4 시작 노출 변화는 **#44 구현 시** 확인한다. 지금은 새 이슈에 기록만 하며 구현/게임 검사를 시작하지 않는다. 현재8/64 규칙은 그대로다.
+- **Astra 실제 연결·응답·설정·사용량/과금·지연 검증은 추후 비교 단계로 이연**한다. 호출0/실제 미검증이며 #10 종료를 막지 않는다. 단순 접근 확인을 위한 유료 호출은 지금 하지 않는다. 사용자 예상은 검증 성공이 아니다. 실제 비교 직전 키/계정·별도 Astra 금액/호출 상한 승인과 metadata/실제 청구 확인은 유지한다. F핵심/연구량/분모/예산은 바꾸지 않는다.
+- #1/#10/#17/#20·PLAN/PRD/DECISIONS에 동일 결정을 남긴다. 개발 pytest/mypy·diff만 게시 전 수행하고 실제 모델/게임은 보고서 상태 갱신 때문에 재실행하지 않는다. PDF2개는 reports에서 최신 교체하고 Git에서 제외한다.
+
+# #10 T09 — 공통 계획기 구현·실제 Qwen/G1 검증, Astra 승인 대기 (이전 기록)
+
+사용자 `$implement 다음 이슈10` 요청으로 main의 작업시작 HEAD `7a7f8c8`부터 구현했다. 선행 #9 Closed/completed, #10/#1 본문·댓글과 관련 PLAN을 확인했다. 현재 브랜치 로컬 커밋 범위이며 push/merge/#10종료는 요청되지 않아 실행하지 않는다. 최종 커밋은 git log/evidence를 따른다.
+- 공통 프롬프트·제한 입력, 고정 Qwen NF4 4비트CUDA와 Astra HTTPS adapter, 공개 smoke-planner를 기존 목표 검증/한 번 재생성/복구·출처별 실행에 연결했다. revision/hash/설정은 소스manifest와로그에고정했다. DECISIONS/PROGRESS 최신 #10절을 따른다.
+- 실제 Qwen+mock 게임exit0. 실제 Qwen+자연G1도exit0:5결정216틱·원목1직접획득·pause_verified=true·초기오류0/1·재생성0/0·복구0/1. G1기준reset=observe·0틱·빈인벤토리·체력20과서버종료확인. bridge/runtime/fingerprint입력변경없음/63조건재실행없음. 원시artifacts/issue-10.
+- Standards2/Spec3 지적(중복 포함 결함3건)을 3failed→17passed로 수정: 비용 위반 후 영속 차단/비용 보존, HTTP 요청 오류와 접근 불가 구분, CUDA 오류 call/summary 보존. 기본 pilot 명령의 local_7b 연결도 실패 재현 후 수정했다(Planner18개 통과). 최종 pytest229·mypy src/tests31파일 통과. 수정 뒤 독립 재리뷰는 하지 않았다.
+- Astra는공개후보만확인. 실제계정/버전/지원옵션/과금/별도금액·호출상한은승인대기이며유료호출0·키읽기0. F핵심비교를유지한다. Jev#12/6상태#17/예산lock#20후속. 학습/전체C4·G4/7B+NanoJev동시VRAM은미실행.
+- 로컬PDF2개: reports/issue-010-T09-{report,code-guide}.pdf. 중간파일은/tmp/Git제외·보고서때문에게임재실행금지. 코드기준/검수근거는evidence와PROGRESS에기록한다.
+- 사용자가 한국어 안내를 재요청했으므로 설명/승인 요청을 모두 한국어로 한다.
+
 # #11 T10 — 실제 공개 NanoJev 검증 완료, 사용자 승인으로 게시·병합·종료 진행
 
 전용 worktree `Minecraft_learning-issue11`, 브랜치 `feat/issue-11-nanojev`, 시작 HEAD `e839a8e`. 사용자 요청으로 #11/#5/#1 본문·댓글과 관련 PLAN·현재 코드를 확인했다. #5는 Closed이며, main/다른 작업공간은 수정하지 않았다.

@@ -7,6 +7,11 @@ dependencies = ["pydantic>=2.12,<3", "PyYAML>=6,<7"]
 
 [project.optional-dependencies]
 model = ["torch==2.14.0", "transformers==5.17.0", "safetensors==0.8.0", "huggingface-hub>=1,<2"]
+planner = [
+    "mc-diamond[model]",
+    "accelerate>=1,<2",
+    "bitsandbytes>=0.48,<1",
+]
 
 [project.scripts]
 mc-diamond = "mc_diamond.cli:main"

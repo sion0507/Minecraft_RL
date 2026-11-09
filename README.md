@@ -71,6 +71,30 @@ RPC backend는 `--admin-fd <fd>`로 전달받은 파이프에서 reset·snapshot
 시계·정보 경계·모델·학습 연결 진단 및 예산 확인 후 실험 설정을 고정합니다.
 `smoke-model`은 아래 절을 따릅니다. PPO 본 학습 등 후속 실험 명령의 전체 계약은 [PLAN.md §14](PLAN.md#14-구현-후-사용할-명령), 개발 지침은 [AGENTS.md](AGENTS.md)에 있습니다.
 
+## 공통 계획기 smoke-planner (#10 / T09)
+
+공개 고정 Qwen2.5-7B-Instruct를 실제 CUDA에서 NF4 4비트로 로드하고 기존 목표 검증·한 번 재생성·규칙 복구·매크로 실행을 사용합니다. 직접 작성한 공통 프롬프트와 SHA-256은 `planner_prompt.txt`/`planner_loaded`에, immutable revision과 13개 파일의 SHA-256은 `src/mc_diamond/qwen_files.json`에 있습니다. 모델은 학습하지 않습니다.
+
+```bash
+uv sync --extra planner
+HF_HOME=.cache/huggingface HF_HUB_DISABLE_XET=1 uv run --extra planner python tools/install_planner.py
+uv run --extra planner mc-diamond smoke-planner --config configs/planner_smoke.yaml
+# 기존 실제 G1 snapshot과 유효 시계 인증이 필요합니다(최대 8결정·240초).
+uv run --extra planner mc-diamond smoke-planner --config configs/planner_minecraft.yaml
+uv run --extra planner pytest
+uv run --extra planner mypy src tests
+```
+
+`planner_smoke.yaml`의 **모델은 실제, 게임은 mock**입니다. `planner_minecraft.yaml`은 실제 모델+자연 G1의 짧은 연결 진단이며 C4/G4 평가가 아닙니다. 문서의 기본 명령 `smoke-planner --config configs/pilot.yaml`도 planner 설정이 없으면 고정 local_7b를 사용합니다. 다른 smoke 명령은 기존 고정 목표를 유지합니다. 설정의 checkpoint는 YAML 기준 상대 경로입니다. 온도 0은 `do_sample=False`의 greedy decoding으로 구현합니다(Transformers는 sampling을 끄면 temperature를 적용하지 않습니다).
+
+7B/Astra는 같은 자기 상태·거리순 관측 표면 64개·최근 방문 32개·결과 8개·과제·검증 오류를 받습니다. 후보/관리자 정보는 제공하지 않습니다. 로컬 입력은 생성까지 8192토큰 상한이며 초과 시 조용히 자르지 않고 실패합니다. 지식 조회는 PLAN §5.5의 조건부 후속 작업으로 현재 `knowledge=null`입니다. `planner_call`에 입력 hash·토큰·지연·응답을, 기존 `goal_decision`/`summary`에 검증 오류·각 요청 분모·목표 출처별 직접 진행을 기록합니다. 실제 API 접근 오류는 잘못된 목표와 구분해 종료하며 규칙 복구 성과로 바꾸지 않습니다.
+
+Astra는 HTTPS Chat Completions 계약을 구현했습니다. PLAN의 후보는 OpenRouter `https://openrouter.ai/api/v1/chat/completions` / `openai/gpt-6-astra`이며 실제 계정 접근·버전·지원 추론 옵션·과금은 **미확인**입니다. 사용자는 제공처/model/version/endpoint/실제 지원 설정과 `rates_checked_on`, 입·출력 백만 토큰당 USD 요율을 확인한 뒤 별도 지출 승인을 해야 합니다. 키는 환경변수 `ASTRA_API_KEY`로만 읽습니다. 설정에는 키를 쓰지 않습니다.
+
+`planner.backend: astra`의 유료 실행에는 `approved: true`, `approval_reference`, `max_calls`, `max_usd`, 제공처에서 검증한 **추론·실패 과금까지 포함한 요청당 최악 금액** `request_usd_ceiling`, 지속 `budget_file`이 필요합니다. `supported_settings`는 확인한 temperature/top_p/reasoning_effort만 명시하고 미지원 값을 동일 적용했다고 가정하지 않습니다. 예약 ledger는 재생성·실패·재실행도 호출/금액 상한을 소비하며 자동 환불하지 않습니다. 같은 승인에는 같은 ledger를 사용하고 삭제·새 경로로 한도를 초기화하지 않습니다. 호출 상한은 제공처가 실제로 지키는 요청당 금액 상한을 전제로 합니다. 실제 청구는 별도 확인해야 하며 토큰×기재 요율은 추정치입니다.
+
+실제 Astra 호출은 아직 하지 않았습니다. **2026-11-09 사용자 결정으로 실제 연결·응답·지원 설정·사용량/과금·지연 검증은 추후 비교 단계에 수행하며, 미실행은 #10 종료의 장애가 아닙니다.** 연결 가능성에 대한 기대를 실제 성공으로 표시하지 않습니다. 실제 호출 직전 키/계정·별도 금액/호출 상한 승인과 제공처/버전/지원 설정/청구를 확인하는 계약은 유지합니다. 정상/오류/재생성·공통 복구는 mock 계약 검사이며 실제 Astra 성능이나 F 완료가 아닙니다. F의 Jev 행동 선택은 #12, 6상태 비교는 #17, 본 학습 전 예산/lock은 #20 책임입니다. 실제 `evaluate`의 군별 계획기 연결/lock은 후속 작업이며 현재 실제 계획기 설정으로 평가를 시작하면 거부합니다. 관측 반경32/입력 최소256개 수준의 확대와 실제 검증은 [#44](https://github.com/sion0507/Minecraft_RL/issues/44) 구현 시 수행하며 현재 반경8/64개는 그대로입니다. `mypy .`는 Git 제외 artifacts의 중복 모듈을 읽을 수 있으므로 개발 검사에는 저장소가 설정한 `mypy src tests` 범위를 사용합니다.
+
 ## 공개 NanoJev smoke-model (#11 / T10)
 
 실제 공개 모델과 mock Minecraft를 연결하는 최소 진단입니다. CUDA/BF16 GPU와 모델 extra가 필요합니다.

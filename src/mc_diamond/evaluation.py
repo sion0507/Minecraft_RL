@@ -196,6 +196,9 @@ def evaluate(config: EvaluationConfig, path: Path, groups: set[str], tasks: set[
         raise ValueError(f"groups must be within {sorted(GROUPS)} and tasks within {sorted(TASKS)}")
     chosen = [slot for slot in schedule(config) if slot.group in groups and slot.task in tasks]
     for slot in chosen:  # refuse unconnected selectors and unknown reset states before any attempt
+        planner = episodes[slot.task].planner
+        if planner is not None and planner.backend != "scripted":
+            raise ValueError("Actual evaluation planners require per-group wiring and the pre-training lock; use smoke-planner")
         attempt_selector(slot, config, episodes[slot.task].backend)
         reset_state(episodes[slot.task], files[slot.task], slot.task)
     spent = config.jev_spent_usd

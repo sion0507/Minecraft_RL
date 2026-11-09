@@ -3,6 +3,12 @@
 이슈 #2는 배포 패키지를 의존성으로 설치한다. 외부 데모 코드·프롬프트 파일을 복사·번역·변형하지 않았다. schema/RPC/실행기/모의 backend와 PTX 커널은 자체 구현이다.
 모델의 현재 다운로드·검증 상태는 아래 T10 절을 따른다. 이슈 #3에서 사용자 EULA 승인 후 Minecraft/Fabric/Carpet 공식 바이너리를 설치했다. 외부 게임 실행 코드·프롬프트를 복사하지 않았으며 Node 실행기·snapshot 처리·정지 진단·플레이어 정지 확장은 자체 구현이다.
 
+## T09 공개 Qwen 계획기 연결 (2026-11-09, #10)
+
+- [Qwen/Qwen2.5-7B-Instruct 공식 배포](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/tree/a09a35458c702b33eeacc393d103063234e8bc28), immutable revision `a09a35458c702b33eeacc393d103063234e8bc28`, Apache-2.0. 인증·새 약관 동의·결제 없이 공개13파일을 받았다. 원본 LICENSE/README를 checkpoint에 보존하고 정확한 SHA-256은 `src/mc_diamond/qwen_files.json`에 고정했다. 공식 가중치의 로컬 NF4 추론이며 외부 양자화 재배포본·외부 코드/프롬프트를 복사하지 않는다.
+- [Transformers 공식 4비트 API](https://huggingface.co/docs/transformers/quantization/bitsandbytes)를 사용하는 자체 backend·프롬프트·입력 요약·예산 guard다. 기존 Torch2.14.0/Transformers5.17.0에 accelerate1.15.0(Apache-2.0), bitsandbytes0.50.2(MIT), psutil7.2.2(BSD-3-Clause)를 설치했다. 배포 라이선스는 설치 패키지에 보존하고 정확한 전이 의존성/hash는 uv.lock이다.
+- Astra는 [OpenRouter Chat Completions](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion) 공개 요청/응답 형식에 맞춘 자체 표준 라이브러리 adapter다. [Astra 후보 모델 페이지](https://openrouter.ai/openai/gpt-6-astra)를2026-11-09 확인했다(공개 표준 입력$10/출력$50 per1M). 실제 계정·버전·지원 설정·사용량·청구는 미확인, 유료 호출·키 읽기·결제는 하지 않았다. 참고 데모 저장소의 코드/프롬프트는 재사용하지 않았다.
+
 ## T10 공개 NanoJev 연결 (2026-11-09, #11)
 
 - 배포: [C-Tianyu/NanoJev unified-games-v1](https://huggingface.co/C-Tianyu/NanoJev/tree/047b927b30882a1138fc504821b82ac145a4b81a), immutable revision `047b927b30882a1138fc504821b82ac145a4b81a`.
