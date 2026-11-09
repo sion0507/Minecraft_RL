@@ -177,6 +177,25 @@ def test_movement_cli_offers_only_observed_one_block_steps(tmp_path: Path, rise:
     assert [c["params"]["path"][-1] for c in candidates] == ([end] if end else [])
 
 
+def test_movement_cli_never_offers_a_walk_back_into_the_start_column(tmp_path: Path) -> None:
+    # A ramp drops east from (0,64,0) to y=61 and a corridor leads back under the start: (0,61,0) has no direction.
+    # Natural G4 (#37 run 2) reached such a cell above its start, and the ninth "direction" broke the 8-candidate cap.
+    def cell(x: int, y: int, z: int, block: str) -> dict[str, Any]:
+        return {"position": [float(x), float(y), float(z)], "block": block, "passable": block == "air",
+                "support": block == "stone", "hazard": False}
+    cells = [cell(0, 63, 0, "stone"), cell(0, 64, 0, "air"), cell(0, 65, 0, "air")]
+    for x, feet in [(1, 63), (2, 62), (3, 61)]:  # The ramp: floor, feet, head and the drop's front head cell.
+        cells += [cell(x, feet - 1, 0, "stone"), cell(x, feet, 0, "air"), cell(x, feet + 1, 0, "air"), cell(x, feet + 2, 0, "air")]
+    for x, z in [(3, 1), (2, 1), (1, 1), (0, 1), (0, 0)]:  # The corridor back under the start.
+        cells += [cell(x, 60, z, "stone"), cell(x, 61, z, "air"), cell(x, 62, z, "air")]
+    fixture = mock_fixture()
+    fixture["initial"].update(position=[0.5, 64.0, 0.5], observed_map=cells, map_version=1)
+    result = subprocess.run(["mc-diamond", "smoke-movement", "--config", str(fixture_config(tmp_path, fixture))],
+                            text=True, capture_output=True, timeout=15)
+    ends = [c["params"]["path"][-1] for c in next(r["data"] for r in records(result) if r["type"] == "candidates")["candidates"]]
+    assert ends and all((e[0] // 1, e[2] // 1) != (0, 0) for e in ends), ends
+
+
 def test_live_terrain_never_queries_behind_opaque_wall_and_rejects_unknown_route() -> None:
     script = r"""
 const assert = require('node:assert/strict')

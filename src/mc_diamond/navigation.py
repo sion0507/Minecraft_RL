@@ -74,9 +74,11 @@ def generate_movement_candidates(observation: Observation) -> CandidateSet:
     visited = {tuple(point) for point in observation.visited}
     directions: dict[tuple[int, int], list[list[float]]] = {}
     for point, path in observed_routes(observation).items():
-        if path:
-            x, _, z = point
-            direction = ((x > sx) - (x < sx), (z > sz) - (z < sz))
+        x, _, z = point
+        direction = ((x > sx) - (x < sx), (z > sz) - (z < sz))
+        # One walk per horizontal direction (at most 8). With steps a route can end above or below the start, in its own
+        # column: that has no direction and would be a ninth choice (#37 run 2, natural G4).
+        if direction != (0, 0):
             previous = directions.get(direction)
             if previous and point in visited and tuple(math.floor(v) for v in previous[-1]) not in visited:
                 continue
