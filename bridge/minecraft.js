@@ -286,15 +286,31 @@ async function moveObserved (candidate) {
   let reason = allowed ? 'path_completed' : 'invalid_path'
   let state = initial
   let interrupted = false
+  const from = () => index ? route[index - 1] : initial.position
+  const heightChange = () => route[index][1] - Math.floor(from()[1]) // +1 climb, -1 drop, 0 level, for route[index].
+  const across = point => Math.hypot(point[0] - state.position[0], point[2] - state.position[2])
+  // A walk that begins inside the hazard radius (validPath: only away) may go on while no closer than its start.
+  const start = terrain.hazardDistance(initial.position)
+  const escape = start < 1.5 ? start - 0.05 : 1.5
   while (allowed && ticks < limit) {
-    if (terrain.danger(state) || state.health < initial.health) { reason = 'observed_hazard'; interrupted = true; break }
-    if (index < route.length && Math.hypot(route[index][0] - state.position[0], route[index][2] - state.position[2]) < 0.15) index++
-    const settling = index >= route.length || distance >= 15
+    if (terrain.danger(state, index < route.length ? terrain.transit(from(), route[index]) : null, escape) ||
+        state.health < initial.health) { reason = 'observed_hazard'; interrupted = true; break }
+    // A step's point is reached only after landing at its height; level points keep the plain horizontal check.
+    if (index < route.length && across(route[index]) < 0.15 &&
+        (!heightChange() || (state.on_ground && Math.abs(route[index][1] - state.position[1]) < 0.15))) index++
+    const target = route[index]
+    const rise = target ? heightChange() : 0
+    // No step is begun after 12 blocks, so the jump or drop and its landing stay inside the 16-block cap. A step already
+    // begun (the bot left the start column or its floor) is finished: stopping on an edge would never become stable.
+    const before = rise && state.on_ground && Math.abs(state.position[1] - from()[1]) < 0.15 &&
+      [0, 2].every(axis => Math.floor(state.position[axis]) === Math.floor(from()[axis]))
+    const settling = index >= route.length || distance >= 15 || (before && distance >= 12)
     if (settling && terrain.stable(state)) { reason = index >= route.length ? 'path_completed' : 'distance_limit'; break }
-    if (index < route.length && !terrain.safe(route[index])) { reason = 'path_changed'; interrupted = true; break }
+    if (index < route.length && !terrain.safe(target)) { reason = 'path_changed'; interrupted = true; break }
     if (!settling) {
-      await bot.lookAt(new Vec3(...route[index]).offset(0, bot.entity.eyeHeight, 0), true)
-      bot.setControlState('forward', true)
+      await bot.lookAt(new Vec3(...target).offset(0, bot.entity.eyeHeight, 0), true)
+      if (across(target) >= 0.15) bot.setControlState('forward', true)
+      if (rise > 0 && state.position[1] < target[1] - 0.05) bot.setControlState('jump', true)
     }
     const previous = state.position
     ticks += await advance(1, true)
@@ -817,41 +833,73 @@ async function cancelSelection (candidate) {
   return result
 }
 
-async function prepareWorld () {
+const blockCell = (cell, low, high) => Array.isArray(cell) && cell.length === 3 && cell.every(Number.isSafeInteger) && cell[1] >= low && cell[1] <= high
+
+// The bot stands centred on a natural cell: solid non-falling floor, dry clear feet and head.
+function standsOn ([x, y, z]) {
+  const block = dy => bot.blockAt(new Vec3(x, y + dy, z))
+  const position = clientState().position
+  if (isDeepStrictEqual(position, [x + 0.5, y, z + 0.5]) && block(-1)?.boundingBox === 'block' &&
+    !['sand', 'red_sand', 'gravel'].includes(block(-1).name) &&
+    [0, 1].every(dy => block(dy)?.boundingBox === 'empty' && !['water', 'lava'].includes(block(dy).name))) return position
+  process.stderr.write(JSON.stringify({ diagnostic: 'start_not_standable', cell: [x, y, z], position, blocks: [-1, 0, 1].map(dy => block(dy)?.name ?? null) }) + '\n')
+  fail('backend_error')
+}
+
+async function prepareWorld (start) {
+  // C4–G3 start on the user-provided surface block (#36). G4 is prepared separately once the user confirms it.
+  if (!blockCell(start, 1, 254)) fail('invalid_request')
   if (await fsp.stat(server.snapshots).catch(() => null)) fail('invalid_request')
+  const [x, y, z] = start
+  const seed = (await fsp.readFile(path.join(server.root, 'server.properties'), 'utf8')).match(/^level-seed=(\S+)$/m)?.[1]
+  if (!seed) fail('invalid_request')
+  await server.start()
+  // Radius 0 spawns a new player on exactly this column; the restart loads the spawn chunks around it.
+  for (const command of ['gamerule spawnRadius 0', `setworldspawn ${x} ${y} ${z}`]) await server.command(command)
+  await server.stop()
   await server.start()
   frozen = server.initiallyFrozen
   await connect()
-  const spawn = clientState().position
-  const x = Math.floor(spawn[0]); const y = Math.floor(spawn[1]); const z = Math.floor(spawn[2])
-  for (const command of ['difficulty peaceful', 'gamemode survival ResearchBot', 'gamerule spawnRadius 0',
-    'setworldspawn ' + x + ' ' + y + ' ' + z, 'clear ResearchBot', 'effect clear ResearchBot',
+  const spawn = standsOn(start)
+  for (const command of ['difficulty peaceful', 'gamemode survival ResearchBot', 'clear ResearchBot', 'effect clear ResearchBot',
     'effect give ResearchBot minecraft:instant_health 1 10 true', 'effect give ResearchBot minecraft:saturation 1 10 true', 'time set 1000']) await server.command(command)
   await pause()
   await disconnect()
   await server.stop()
+  const origin = { seed, start_block: start, position: spawn }
   const result = []
-  for (const name of ['C4', 'G1']) result.push(await server.saveSnapshot(name, { position: spawn, inventory: {}, preparation: 'natural surface spawn; no ore search' }))
-  for (const name of ['G2', 'G3', 'G4']) {
+  for (const name of ['C4', 'G1']) result.push(await server.saveSnapshot(name, { ...origin, inventory: {}, preparation: 'user-provided start block (#36); natural surface; no ore search' }))
+  for (const name of ['G2', 'G3']) {
     await server.restore('C4')
     frozen = server.initiallyFrozen
     await connect()
     const tool = name === 'G2' ? 'stone_pickaxe' : 'iron_pickaxe'
     await server.command('give ResearchBot minecraft:' + tool)
-    let position = spawn
-    if (name === 'G4') {
-      // Fixed coordinates chosen independently of ores; preparation is administrator assistance.
-      await server.command(`fill ${x - 1} 10 ${z - 1} ${x + 1} 10 ${z + 1} minecraft:stone`)
-      await server.command(`fill ${x - 1} 11 ${z - 1} ${x + 1} 13 ${z + 1} minecraft:air`)
-      position = [x + 0.5, 11, z + 0.5]
-      await server.command('tp ResearchBot ' + position.join(' '))
-    }
     await pause()
     await disconnect()
     await server.stop()
-    result.push(await server.saveSnapshot(name, { position, inventory: { [tool]: 1 }, preparation: name === 'G4' ? 'fixed chamber at y=11 directly below spawn, administrator carved/provided; no ore search' : 'surface spawn; provided tool; no ore search' }))
+    result.push(await server.saveSnapshot(name, { ...origin, inventory: { [tool]: 1 }, preparation: 'user-provided start block (#36); provided tool; no ore search' }))
   }
   return { snapshots: result, minecraft_verified: true, pause_verified: false }
+}
+
+async function prepareG4 (cell) {
+  // User-confirmed natural diamond-cave cell (#36): no liquid within 8, no falling block within 4, no diamond within 8.
+  const exists = name => fsp.stat(path.join(server.snapshots, name)).then(() => true, () => false)
+  if (!blockCell(cell, 5, 12) || !(await exists('C4')) || await exists('G4')) fail('invalid_request')
+  const { seed } = JSON.parse(await fsp.readFile(path.join(server.snapshots, 'C4', 'snapshot.json'), 'utf8'))
+  await server.restore('C4')
+  frozen = server.initiallyFrozen
+  await connect()
+  await server.command('give ResearchBot minecraft:iron_pickaxe')
+  await server.command(`tp ResearchBot ${cell[0] + 0.5} ${cell[1]} ${cell[2] + 0.5}`)
+  await pause()
+  const position = standsOn(cell)
+  await disconnect()
+  await server.stop()
+  return { snapshots: [await server.saveSnapshot('G4', { seed, start_block: cell, position, inventory: { iron_pickaxe: 1 },
+    preparation: 'user-confirmed natural diamond-cave cell (#36); provided tool; operator-only survey, never in observations' })],
+  minecraft_verified: true, pause_verified: false }
 }
 
 async function sample () {
@@ -907,7 +955,7 @@ async function informationFixture (payload) {
       'production', 'production_no_tool', 'production_no_fuel', 'production_hazard', 'iron',
       'production_craft', 'production_place', 'production_furnace', 'stair', 'stair_exposed', 'stair_coal', 'stair_floor',
       'stair_gap', 'stair_break', 'stair_limit', 'stair_budget', 'stair_no_tool', 'stair_gravel', 'stair_hold', 'stair_iron',
-      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'tunnel_sand', 'diamond', 'diamond_given'].includes(payload.scope)) ||
+      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'tunnel_sand', 'diamond', 'diamond_given', 'steps', 'escape'].includes(payload.scope)) ||
     (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
   await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
   natural = false
@@ -923,7 +971,9 @@ async function informationFixture (payload) {
   const target = payload.scope === 'stair_coal' ? 'coal_ore' : payload.variant === 'lava' ? 'lava'
     : ['stair_iron', 'tunnel_iron'].includes(payload.scope) ? 'iron_ore' : 'diamond_ore'
   // Tunnels: a side-wall cell that only the third cut opens; other tunnel scenes keep it out of every cut's view.
-  const cell = ['stair_exposed', 'stair_coal', 'stair_iron'].includes(payload.scope) ? `${x + 3} ${y - 1} ${z}`
+  // Steps: right under the climb's landing floor, enclosed by the scene's stone.
+  const cell = payload.scope === 'steps' ? `${x} ${y - 1} ${z - 2}`
+    : ['stair_exposed', 'stair_coal', 'stair_iron'].includes(payload.scope) ? `${x + 3} ${y - 1} ${z}`
     : payload.scope === 'stair_floor' ? `${x + 2} ${y - 3} ${z}` : ['tunnel', 'tunnel_iron'].includes(payload.scope) ? `${x + 3} ${y} ${z + 1}`
       : tunnel ? `${x + 4} ${y - 3} ${z}` : `${x + 4} ${y} ${z}`
   await server.command(`setblock ${cell} minecraft:${target}`)
@@ -946,6 +996,16 @@ async function informationFixture (payload) {
     await server.command(`fill ${x - 1} ${y} ${z - 1} ${x + 1} ${y + 2} ${z + 1} minecraft:stone`)
     await server.command(`fill ${x} ${y} ${z} ${x} ${y + 1} ${z} minecraft:air`)
   }
+  if (payload.scope === 'steps') {
+    // A platform one block up north of the bot (#37): a stone over the east column's jump space blocks that climb,
+    // a ceiling one higher over the west column leaves a 3-high climb, and stone under it encloses the hidden cell.
+    await server.command(`fill ${x - 1} ${y} ${z - 8} ${x + 1} ${y} ${z - 2} minecraft:stone`)
+    await server.command(`fill ${x - 1} ${y - 2} ${z - 8} ${x + 1} ${y - 2} ${z - 2} minecraft:stone`)
+    await server.command(`setblock ${x + 1} ${y + 2} ${z - 1} minecraft:stone`)
+    await server.command(`fill ${x - 1} ${y + 3} ${z - 2} ${x - 1} ${y + 3} ${z - 1} minecraft:stone`)
+  }
+  // A non-flowing hazard 1.0 block from the bot's start: only walks away may run (#36 stalls, #37).
+  if (payload.scope === 'escape') await server.command(`setblock ${x - 1} ${y} ${z} minecraft:magma_block`)
   if (payload.scope === 'production') {
     await server.command('clear ResearchBot')
     await server.command(`fill ${x + 1} ${y} ${z - 1} ${x + 1} ${y + 3} ${z - 1} minecraft:oak_log`)
@@ -1048,7 +1108,11 @@ async function dispatch (request, admin) {
     pauseVerified = true
     return certificate
   }
-  if (request.method === 'prepare_world') { if (!exactKeys(request.payload, [])) fail('invalid_request'); return await prepareWorld() }
+  if (request.method === 'prepare_world') {
+    if (exactKeys(request.payload, ['start'])) return await prepareWorld(request.payload.start)
+    if (exactKeys(request.payload, ['g4'])) return await prepareG4(request.payload.g4)
+    fail('invalid_request')
+  }
   if (request.method === 'observe') { if (!exactKeys(request.payload, [])) fail('invalid_request'); return await observation() }
   if (!exactKeys(request.payload, ['candidate'])) fail('invalid_request')
   const candidate = request.payload.candidate

@@ -9,7 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 
 from .rpc import EpisodeError, PolicyEnvironment
-from .navigation import PICKS, SAFE_BAND, generate_descent_candidates, generate_movement_candidates
+from .navigation import PICKS, SAFE_BAND, escape_candidates, generate_descent_candidates, generate_movement_candidates
 from .macros import generate_wood_candidates
 from .production import generate_production_candidates
 from .schema import (
@@ -69,10 +69,15 @@ def descent_completed(step: StepResult) -> bool:
             and any(event.kind == "safe_hold" and event.quantity >= 20 for event in step.events))
 
 
+def first_candidate(saved: CandidateSet, _observation: Observation) -> Candidate:
+    return saved.candidates[0]
+
+
 def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 reset: Callable[[], Observation], episode_id: str, attempt_id: str,
                 *, movement: bool = False, macros: bool = False,
-                select: Callable[[CandidateSet], Candidate] = lambda saved: saved.candidates[0],
+                select: Callable[[CandidateSet, Observation], Candidate] = first_candidate,
+                selector_mode: Literal["mock_fixed", "human"] = "mock_fixed",
                 verification: Callable[[], dict[str, Any]] | None = None) -> EpisodeSummary:
     """`verification` reads the administrator log only after the last decision, so no policy input can see it."""
     started = time.monotonic()
@@ -116,18 +121,19 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             if config.wall_limit_seconds is not None and time.monotonic() - started >= config.wall_limit_seconds:
                 truncated, reason = True, "wall_time_limit"
                 break
-            saved = (generate_movement_candidates(observation) if movement else
+            escape = escape_candidates(observation) if macros else None
+            saved = escape if escape is not None else (generate_movement_candidates(observation) if movement else
                      (generate_descent_candidates(observation) if config.goal.kind == "descend" else
                       generate_wood_candidates(observation, config.goal) if config.goal.target.endswith("_log") else
                       generate_production_candidates(observation, config.goal)) if macros else generate_candidates(observation, config.goal))
             emit("candidates", saved)
-            candidate = select(saved) if saved.candidates else Candidate(
+            candidate = select(saved, observation) if saved.candidates else Candidate(
                 candidate_id=f"{observation.obs_id}:wait", action_kind="wait", params={},
                 max_ticks=min(20, observation.remaining_ticks), stop_rule_id="no_candidates",
                 source_obs_id=observation.obs_id, description="Wait when no candidate is available",
             )
             selection = SelectionResult(
-                candidate_id=candidate.candidate_id, selector_mode="mock_fixed" if saved.candidates else "forced_wait",
+                candidate_id=candidate.candidate_id, selector_mode=selector_mode if saved.candidates else "forced_wait",
                 probabilities={candidate.candidate_id: 1.0} if macros and len(saved.candidates) <= 1 else None,
                 latency_seconds=0.0, provider=None, model=None, usage=None,
             )

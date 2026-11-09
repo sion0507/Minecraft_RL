@@ -28,9 +28,9 @@ SCENES = [("stair", "ore", 4, 400, "stairs_completed"), ("stair_exposed", "ore",
           ("stair_gravel", "ore", 1, 400, "stairs_completed"), ("stair_hold", "ore", 1, 20, "observed_hazard")]
 
 
-def prefer(direction: list[int]) -> Callable[[CandidateSet], Candidate]:
+def prefer(direction: list[int]) -> Callable[[CandidateSet, Any], Candidate]:
     """Fixed diagnostic selector: hold one heading while the generator offers it."""
-    def select(saved: CandidateSet) -> Candidate:
+    def select(saved: CandidateSet, _observation: Any) -> Candidate:
         return next((c for c in saved.candidates if c.action_kind == "stair_down" and c.params["direction"] == direction),
                     saved.candidates[0])
     return select
@@ -196,7 +196,8 @@ def main() -> None:
                 assert restored == session.policy().observe()
                 (args.output / "restore.json").write_text(restored.model_dump_json())
                 assert restored.active_ticks == 0 and restored.inventory == {"iron_pickaxe": 1} and restored.health == 20
-                assert restored.position == [-240.5, 65.0, 186.5] and restored.remaining_ticks == 18000
+                assert restored.position == json.loads(Path("worlds/snapshots/G3/snapshot.json").read_text())["position"]
+                assert restored.remaining_ticks == 18000
                 results["reset"] = {"passed": True}
         except Exception as failure:
             results["reset"] = {"passed": False, "error_type": type(failure).__name__}

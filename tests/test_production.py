@@ -143,3 +143,30 @@ def test_cli_explores_unvisited_routes_when_farthest_endpoint_was_visited(tmp_pa
     assert [float(int(v // 1)) for v in moves[0]["params"]["path"][-1]] not in fixture["initial"]["visited"]
     stairs = [c for c in saved["candidates"] if c["action_kind"] == "stair_down"]
     assert len(stairs) == len(saved["candidates"]) - 1 and all(c["params"]["stop_blocks"] == ["diamond_ore", "iron_ore"] for c in stairs)
+
+
+def corridor(hazard: list[float], visited: list[list[float]] | None = None) -> dict[str, Any]:
+    """A level corridor x=0..4 on y=63 with one observed hazard cell; the bot stands at x=0."""
+    fixture = production_fixture()
+    cells = [{"block": block, "position": [float(x), float(y), 0.0], "passable": block == "air", "support": block == "stone"}
+             for x in range(5) for y, block in [(63, "stone"), (64, "air"), (65, "air")]]
+    fixture["initial"].update(inventory={"stone_pickaxe": 1}, tool="stone_pickaxe", visited=visited or [[0.0, 64.0, 0.0]],
+                              observed_map=[*cells, {"block": "lava", "position": hazard, "hazard": True}])
+    return fixture
+
+
+def test_cli_walks_never_enter_the_bridge_hazard_radius(tmp_path: Path) -> None:
+    # Lava beside the corridor floor at x=3: standing at x=3 is 1.41 blocks from it, inside the 1.5 radius.
+    _, output = run_production(tmp_path, corridor([3.0, 63.0, 1.0]), target="iron_ore", kind="collect", quantity=3)
+    saved = next(row["data"] for row in output if row["type"] == "candidates")
+    moves = [c["params"]["path"][-1] for c in saved["candidates"] if c["action_kind"] == "move_observed"]
+    assert moves == [[2.5, 64.0, 0.5]]
+
+
+def test_cli_inside_the_hazard_radius_offers_only_walks_away_even_over_visited_ground(tmp_path: Path) -> None:
+    # Lava exposed beside the bot (1.0 block): every macro would stop at once, so only escape walks remain.
+    visited = [[float(x), 64.0, 0.0] for x in range(5)]
+    _, output = run_production(tmp_path, corridor([0.0, 64.0, 1.0], visited), target="iron_ore", kind="collect", quantity=3)
+    saved = next(row["data"] for row in output if row["type"] == "candidates")
+    assert [c["action_kind"] for c in saved["candidates"]] == ["move_observed"]
+    assert saved["candidates"][0]["params"]["path"][-1] == [4.5, 64.0, 0.5]

@@ -11,7 +11,10 @@ from pydantic import JsonValue, ValidationError
 
 from .schema import Candidate, ErrorInfo, Observation, RpcRequest, RpcResponse, StepResult
 
-MAX_FRAME_BYTES = 1_048_576
+# ponytail: the observation carries the whole observed memory (~125 bytes/cell), so a frame grows with exploration.
+# 16 MiB holds ~130,000 cells (natural G2 reached 9,611 cells / 1.2 MB, #37 run 4); model inputs get their own
+# state summary in T10/T11. Bound memory itself only if a real episode nears this cap.
+MAX_FRAME_BYTES = 16 * 1_048_576
 
 
 class EpisodeError(Exception):
