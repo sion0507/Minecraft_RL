@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from .episode import emit, run_episode
+from .model_input import INPUT_HASH
 from .rpc import EpisodeError, RpcSession
 from .schema import EpisodeConfig, ModelConfig
 
@@ -138,7 +139,8 @@ def smoke_model(config: EpisodeConfig, config_path: Path) -> int:
             "device": torch.cuda.get_device_name(), "torch": torch.__version__, "cuda": torch.version.cuda,
             "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
             "backbone_parameters": sum(p.numel() for p in model.backbone.parameters()),
-            "new_random_heads": ["local_critic", "full_critic"], "precision": "float32_storage_bf16_forward"})
+            "new_random_heads": ["local_critic", "full_critic"], "precision": "float32_storage_bf16_forward",
+            "input_rules_sha256": INPUT_HASH})
 
         def select(observation: Any, goal: Any, saved: Any, failures: Any) -> Any:
             nonlocal diagnostic

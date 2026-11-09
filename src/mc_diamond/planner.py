@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from .model_input import INPUT_HASH, public_state, text
+from .model_input import INPUT_HASH, memory_counts, public_state, text
 from .rpc import EpisodeError
 from .schema import AstraPlannerConfig, ErrorInfo, Goal, LocalPlannerConfig, Observation, PlannerSettings
 
@@ -78,7 +78,11 @@ class LocalPlanner:
         inputs = self.tokenizer.apply_chat_template(prompt, add_generation_prompt=True, tokenize=True,
             return_dict=True, return_tensors="pt").to(self.model.device)
         length = inputs["input_ids"].shape[-1]
+        record = {"backend": "local_7b", "model": self.config.model, "version": self.config.version, "prompt_sha256": PROMPT_HASH,
+                  "input_tokens": length, "memory": memory_counts(json.loads(prompt[1]["content"])["observation"]),
+                  "regeneration": feedback is not None, "cost_usd": 0.0}
         if length + self.config.max_new_tokens > 8192:
+            self.emit("planner_call", {**record, "error": "context_exceeded", "latency_seconds": 0.0})
             raise failure("invalid_request")
         started = time.monotonic()
         try:
@@ -87,15 +91,11 @@ class LocalPlanner:
                     max_new_tokens=self.config.max_new_tokens, pad_token_id=self.tokenizer.eos_token_id)
             reply: str = self.tokenizer.decode(output[0, length:], skip_special_tokens=True)
         except (RuntimeError, ValueError, OSError):
-            self.emit("planner_call", {"backend": "local_7b", "model": self.config.model, "version": self.config.version,
-                "prompt_sha256": PROMPT_HASH, "error": "inference_failed", "regeneration": feedback is not None,
-                "latency_seconds": time.monotonic() - started, "cost_usd": 0.0})
+            self.emit("planner_call", {**record, "error": "inference_failed", "latency_seconds": time.monotonic() - started})
             raise failure() from None
-        self.emit("planner_call", {"backend": "local_7b", "model": self.config.model, "version": self.config.version,
-            "prompt_sha256": PROMPT_HASH, "input_sha256": hashlib.sha256(json.dumps(prompt).encode()).hexdigest(),
-            "input_tokens": length, "output_tokens": output.shape[-1] - length,
-            "latency_seconds": time.monotonic() - started, "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
-            "cost_usd": 0.0, "regeneration": feedback is not None, "reply": reply})
+        self.emit("planner_call", {**record, "input_sha256": hashlib.sha256(json.dumps(prompt).encode()).hexdigest(),
+            "output_tokens": output.shape[-1] - length, "latency_seconds": time.monotonic() - started,
+            "peak_allocated_bytes": torch.cuda.max_memory_allocated(), "reply": reply})
         return reply
 
 
@@ -123,7 +123,8 @@ class AstraPlanner:
         key = os.environ.get("ASTRA_API_KEY")
         if not key:
             raise failure("permission_denied")
-        payload = {"model": self.config.model, "messages": messages(observation, task, feedback),
+        prompt = messages(observation, task, feedback)
+        payload = {"model": self.config.model, "messages": prompt,
                    "max_tokens": self.config.max_new_tokens, **self.config.supported_settings}
         request = urllib.request.Request(self.config.endpoint, data=json.dumps(payload, allow_nan=False).encode(),
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, method="POST")
@@ -131,6 +132,7 @@ class AstraPlanner:
         started = time.monotonic()
         report: dict[str, Any] = {"backend": "astra", "provider": self.config.provider, "model": self.config.model,
             "version": self.config.version, "prompt_sha256": PROMPT_HASH, "regeneration": feedback is not None,
+            "memory": memory_counts(json.loads(prompt[1]["content"])["observation"]),
             "reserved_usd": self.config.request_usd_ceiling, "usage": None, "cost_usd": None}
         try:
             opener = urllib.request.build_opener(NoRedirect())

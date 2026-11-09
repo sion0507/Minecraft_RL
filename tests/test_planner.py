@@ -250,3 +250,41 @@ def test_local_inference_error_preserves_jsonl_failure_and_common_episode_summar
     summary = next(row["data"] for row in rows if row["type"] == "summary")
     assert report["error"] == "inference_failed" and report["latency_seconds"] >= 0
     assert summary["error"]["code"] == "planner_error" and summary["rule_recoveries"] == 0
+
+
+def test_local_context_overflow_fails_loudly_with_its_token_count_and_summary_omissions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#44: an over-long input is never truncated; the call record keeps its tokens and what the summary left out."""
+    from types import SimpleNamespace
+    torch = pytest.importorskip("torch")
+    from mc_diamond.cli import main
+    from mc_diamond.episode import emit
+    from mc_diamond.planner import LocalPlanner
+    from mc_diamond.schema import LocalPlannerConfig
+
+    def generate(**kwargs: Any) -> None:
+        raise AssertionError("an over-long input must never reach generation")
+
+    ask = LocalPlanner.__new__(LocalPlanner)
+    ask.config, ask.emit = LocalPlannerConfig(backend="local_7b"), emit
+    ask.model = SimpleNamespace(device="cpu", generate=generate)
+    ask.tokenizer = SimpleNamespace(eos_token_id=0, apply_chat_template=lambda *a, **kw: SimpleNamespace(
+        to=lambda device: {"input_ids": torch.ones((1, 8000), dtype=torch.long)}))
+    monkeypatch.setattr("mc_diamond.planner.load_planner", lambda *args: ask)
+    config = yaml.safe_load(Path("configs/planner_smoke.yaml").read_text())
+    fixture = json.loads(Path("fixtures/model_episode.json").read_text())
+    fixture["initial"]["observed_map"] += [{"block": "stone", "position": [float(x), 63.0, float(z)], "support": True}
+                                           for x in range(-10, 10) for z in range(-10, 10)]
+    (tmp_path / "fixture.json").write_text(json.dumps(fixture))
+    config["fixture"] = str(tmp_path / "fixture.json")
+    path = tmp_path / "planner.yaml"
+    path.write_text(yaml.safe_dump(config))
+    monkeypatch.setattr("sys.argv", ["mc-diamond", "smoke-planner", "--config", str(path)])
+    assert main() == 1
+    rows = [json.loads(s) for s in capsys.readouterr().out.splitlines()]
+    report = next(row["data"] for row in rows if row["type"] == "planner_call")
+    assert (report["error"], report["input_tokens"]) == ("context_exceeded", 8000)
+    memory = report["memory"]
+    assert memory["shown"] == 256 and memory["cells"] > 400 and memory["omitted"]["stone"] > 0
+    assert sum(memory["omitted"].values()) == memory["cells"] - memory["shown"]

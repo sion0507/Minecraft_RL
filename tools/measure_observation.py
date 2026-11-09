@@ -96,12 +96,12 @@ def models(output: Path) -> None:
         task = path.name.split("-")[0]
         observation = Observation.model_validate_json(path.read_text())
         goal = Goal.model_validate(json.loads((output / "game.json").read_text())[task]["goal"])
-        count = lambda content: len(qwen.apply_chat_template(content, add_generation_prompt=True, tokenize=True))  # noqa: E731
         legacy = [{"role": "system", "content": PROMPT}, {"role": "user", "content": json.dumps(
             {"observation": legacy_planner_state(observation), "task": goal.model_dump(exclude={"goal_id"}), "feedback": None,
              "knowledge": None}, ensure_ascii=False)}]
         saved = policy_candidates(observation, goal, macros=True)
-        row: dict[str, Any] = {"planner_tokens": count(messages(observation, goal, None)), "planner_tokens_legacy_prompt_64": count(legacy),
+        count = [len(qwen.apply_chat_template(m, add_generation_prompt=True, tokenize=True)) for m in (messages(observation, goal, None), legacy)]
+        row: dict[str, Any] = {"planner_tokens": count[0], "planner_tokens_old_64_state": count[1],
                                "state_chars": len(text(public_state(observation))), "candidates": len(saved.candidates)}
         if saved.candidates and any(saved.mask):
             paths = tokenize(choice_input(observation, goal, saved), nanojev.tokenizer, nanojev.max_length)
@@ -128,7 +128,10 @@ def main() -> None:
     parser.add_argument("phase", choices=["game", "models"])
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    game(args.output) if args.phase == "game" else models(args.output)
+    if args.phase == "game":
+        game(args.output)
+    else:
+        models(args.output)
 
 
 if __name__ == "__main__":

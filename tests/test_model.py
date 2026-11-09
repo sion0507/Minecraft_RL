@@ -242,3 +242,13 @@ def test_memory_summary_keeps_rare_resources_hazards_and_facilities_beside_abund
                           source_obs_id=observation.obs_id, description="Wait")
     encoded = choice_input(observation, goal, CandidateSet(candidates=[candidate], mask=[True], generated=1))
     assert {k: v for k, v in json.loads(encoded.payload["states"][0]["state"]).items() if k != "goal"} == state
+
+
+def test_memory_summary_with_more_kinds_than_cells_keeps_the_rarest_kinds() -> None:
+    from mc_diamond.model_input import SUMMARY_CELLS, memory_summary
+    observation, _, _ = inputs()
+    many = [{"block": f"kind_{k:03d}", "position": [float(k), 70.0, float(n)]} for k in range(300) for n in range(1 + (k >= 150))]
+    observation = Observation.model_validate({**observation.model_dump(), "observed_map": many})
+    shown = {k["block"]: len(k["now"]) for k in memory_summary(observation)}
+    assert sum(shown.values()) == SUMMARY_CELLS
+    assert all(shown[f"kind_{k:03d}"] == 1 for k in range(150))  # single-cell kinds first, never squeezed to zero

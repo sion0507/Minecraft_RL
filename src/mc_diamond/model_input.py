@@ -35,12 +35,23 @@ def memory_summary(observation: Observation) -> list[dict[str, Any]]:
     left, summary = SUMMARY_CELLS, []
     for index, kind in enumerate(sorted(kinds, key=lambda k: (len(kinds[k]), k))):
         cells = sorted(kinds[kind], key=lambda c: (sum((a - b) ** 2 for a, b in zip(c.position, observation.position)), c.position))
-        shown = cells[:min(len(cells), left // (len(kinds) - index))]
+        shown = cells[:min(len(cells), -(-left // (len(kinds) - index)))]  # ceil: rare kinds never get 0 while room is left
         left -= len(shown)
         summary.append({"block": kind[0], "passable": kind[1], "support": kind[2], "hazard": kind[3], "total": len(cells),
                         "now": [[int(v) for v in c.position] for c in shown if c.visible],
                         "past": [[int(v) for v in c.position] for c in shown if not c.visible]})
     return sorted(summary, key=lambda k: (k["block"], k["passable"], k["support"], k["hazard"]))
+
+
+def memory_counts(state: dict[str, Any]) -> dict[str, Any]:
+    """Remembered non-air cells before/after the summary and what each block kind left out, for every model call log."""
+    omitted: dict[str, int] = {}
+    for kind in state["memory"]:
+        left = kind["total"] - len(kind["now"]) - len(kind["past"])
+        if left:
+            omitted[kind["block"]] = omitted.get(kind["block"], 0) + left
+    return {"cells": sum(kind["total"] for kind in state["memory"]), "shown": sum(len(k["now"]) + len(k["past"]) for k in state["memory"]),
+            "omitted": omitted}
 
 
 def public_state(observation: Observation) -> dict[str, Any]:
