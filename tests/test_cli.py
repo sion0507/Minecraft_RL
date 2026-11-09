@@ -197,6 +197,48 @@ def test_movement_cli_never_offers_a_walk_back_into_the_start_column(tmp_path: P
     assert ends and all((e[0] // 1, e[2] // 1) != (0, 0) for e in ends), ends
 
 
+def test_far_scan_reaches_radius_32_diagonals_keeps_occlusion_and_near_scans_only_refresh_the_near_view() -> None:
+    """#44: radius 32 needs rays longer than the old 32-step cap; walls still hide, and only near air reaches Python."""
+    script = r"""
+const assert = require('node:assert/strict')
+const {Terrain, FAR_RADIUS, NEAR_RADIUS, AIR_WINDOW} = require('./bridge/terrain')
+const {Vec3} = require('./bridge/node_modules/vec3')
+assert.deepEqual([FAR_RADIUS, NEAR_RADIUS, AIR_WINDOW], [32, 8, 18])
+const cube = [[0,0,0,1,1,1]]
+// Open air around the eye; a stone wall plane at x = 12 hides everything behind it; stone markers on far diagonals.
+const markers = new Set(['-18,82,18', '-18,46,-18', '0,95,0', '0,32,0'])
+let hidden = 0
+const world = p => {
+  if (p.x > 12) hidden++
+  const name = markers.has(`${p.x},${p.y},${p.z}`) || p.x === 12 ? 'stone' : 'air'
+  return {name, shapes: name === 'stone' ? cube : []}
+}
+const bot = position => ({entity: {position, eyeHeight: 1.62}, blockAt: world})
+const terrain = new Terrain()
+terrain.scan(bot(new Vec3(0.5, 62.38, 0.5)))  // eye at 64.0
+assert.equal(hidden, 0)
+for (const id of markers) assert(terrain.visible.has(id), id)  // 54/32-step diagonals and straight up/down at 32
+assert(terrain.memory.get('12,64,0').block === 'stone' && terrain.visible.has('12,64,0'))
+const far = terrain.cells([0.5, 62.38, 0.5])
+assert(far.some(c => c.block === 'stone' && c.position[1] === 95))  // non-air is never windowed
+assert(far.every(c => c.block !== 'air' || c.position.every((v, i) => Math.abs(v - [0, 62, 0][i]) <= 18)))
+assert(terrain.cells().length > far.length)  // the executor keeps the whole memory
+const open = terrain.discoveredOpen
+assert.equal(open, [...terrain.memory.values()].filter(c => c.passable).length)
+const version = terrain.version
+terrain.scan(bot(new Vec3(0.5, 62.38, 0.5)))
+assert.equal(terrain.version, version)
+terrain.scan(bot(new Vec3(0.5, 62.38, 0.5)), NEAR_RADIUS)  // a macro tick: far cells stay remembered, not visible
+assert(!terrain.visible.has('0,95,0') && terrain.memory.has('0,95,0') && terrain.version === version + 1)
+assert.equal(terrain.discoveredOpen, open)
+terrain.reset()
+assert.equal(terrain.discoveredOpen, 0)
+assert.deepEqual(terrain.cells(), [])
+"""
+    result = subprocess.run(["node", "-e", script], text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+
+
 def test_live_terrain_never_queries_behind_opaque_wall_and_rejects_unknown_route() -> None:
     script = r"""
 const assert = require('node:assert/strict')

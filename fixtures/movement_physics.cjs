@@ -56,8 +56,9 @@ async function run (floorName, invalid = false) {
   const physics = Physics(data, world)
   const context = loadBridge({ fixtureBot: bot })
   const terrain = vm.runInContext('terrain', context)
-  // Remember only cells seen during earlier visits along this flat corridor.
-  for (const x of [0.5, 8.5, 16.5]) terrain.scan({ entity: { position: new Vec3(x, height(x), 0.5), eyeHeight: 1.62 }, blockAt: bot.blockAt })
+  // Remember only cells seen during earlier visits along this flat corridor (near scans: the step physics does not
+  // depend on the far radius, and 75k sky cells per far scan would only slow every scene).
+  for (const x of [0.5, 8.5, 16.5]) terrain.scan({ entity: { position: new Vec3(x, height(x), 0.5), eyeHeight: 1.62 }, blockAt: bot.blockAt }, 8)
   if (step.forget) terrain.memory.delete(step.forget)
   changed = step.later ?? {}
   vm.runInContext('bot = fixtureBot; pauseVerified = true; pause = async () => {}', context)

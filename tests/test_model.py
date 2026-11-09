@@ -207,3 +207,48 @@ def test_public_tokenizer_segments_and_eos_never_silently_truncate() -> None:
     assert all(len(p) == 4 and p[-1] == 99 for p in paths)
     with pytest.raises(ValueError, match="not truncated"):
         tokenize(encoded, Tokenizer(), 3)
+
+
+def test_memory_summary_keeps_rare_resources_hazards_and_facilities_beside_abundant_floor() -> None:
+    """#44: nearest-first alone dropped observed ores behind floor; every kind now gets an even share of 256 cells."""
+    from mc_diamond.model_input import SUMMARY_CELLS, memory_summary, public_state
+    from mc_diamond.planner import messages
+    observation, goal, _ = inputs()
+    floor = [{"block": "stone", "position": [float(x), 63.0, float(z)], "support": True, "visible": x < 10}
+             for x in range(-20, 20) for z in range(-20, 20)]  # 1,600 floor cells, all nearer than the rest
+    rare = [{"block": "iron_ore", "position": [30.0, 60.0, float(z)], "support": True, "visible": z != 0} for z in range(4)]
+    rare += [{"block": "lava", "position": [-31.0, 62.0, 0.0], "hazard": True},
+             {"block": "crafting_table", "position": [25.0, 64.0, 5.0], "support": True, "visible": False}]
+    air = [{"block": "air", "position": [0.0, 64.0, 0.0], "passable": True}]
+    observation = Observation.model_validate({**observation.model_dump(), "observed_map": floor + rare + air})
+
+    summary = memory_summary(observation)
+    kinds = {kind["block"]: kind for kind in summary}
+    assert set(kinds) == {"stone", "iron_ore", "lava", "crafting_table"}  # air is never summarized
+    assert sum(len(k["now"]) + len(k["past"]) for k in summary) == SUMMARY_CELLS == 256
+    assert kinds["iron_ore"]["now"] == [[30, 60, 1], [30, 60, 2], [30, 60, 3]] and kinds["iron_ore"]["past"] == [[30, 60, 0]]
+    assert kinds["crafting_table"]["past"] == [[25, 64, 5]] and kinds["lava"]["hazard"] is True
+    assert (kinds["stone"]["total"], len(kinds["stone"]["now"]) + len(kinds["stone"]["past"])) == (1600, 250)
+    nearest = kinds["stone"]["now"][0]
+    assert abs(nearest[0]) <= 1 and abs(nearest[2]) <= 1  # the floor share is still nearest first
+
+    # One meaning for every model: the planner and NanoJev/Jev carry the same state and summary.
+    state = public_state(observation)
+    assert state["memory"] == summary and "observed_map" not in state
+    planner = json.loads(messages(observation, goal, None)[1]["content"])["observation"]
+    assert planner == state
+    from mc_diamond.model_input import choice_input
+    candidate = Candidate(candidate_id="c", action_kind="wait", params={}, max_ticks=20, stop_rule_id="elapsed",
+                          source_obs_id=observation.obs_id, description="Wait")
+    encoded = choice_input(observation, goal, CandidateSet(candidates=[candidate], mask=[True], generated=1))
+    assert {k: v for k, v in json.loads(encoded.payload["states"][0]["state"]).items() if k != "goal"} == state
+
+
+def test_memory_summary_with_more_kinds_than_cells_keeps_the_rarest_kinds() -> None:
+    from mc_diamond.model_input import SUMMARY_CELLS, memory_summary
+    observation, _, _ = inputs()
+    many = [{"block": f"kind_{k:03d}", "position": [float(k), 70.0, float(n)]} for k in range(300) for n in range(1 + (k >= 150))]
+    observation = Observation.model_validate({**observation.model_dump(), "observed_map": many})
+    shown = {k["block"]: len(k["now"]) for k in memory_summary(observation)}
+    assert sum(shown.values()) == SUMMARY_CELLS
+    assert all(shown[f"kind_{k:03d}"] == 1 for k in range(150))  # single-cell kinds first, never squeezed to zero

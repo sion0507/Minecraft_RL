@@ -141,11 +141,11 @@ def completed(goal: Goal, start: Observation, step: StepResult, direct: int) -> 
             return held and hazard_distance(now.observed_map, now.position) >= ESCAPE_DISTANCE
         return (held and SAFE_BAND[0] <= math.floor(now.position[1]) <= SAFE_BAND[1]
                 and now.inventory.get("iron_pickaxe", 0) >= 1)
-    # explore: 16 newly observed open cells, or a newly observed cell of the target resource.
+    # explore: 16 newly observed open cells, or a newly observed cell of the target resource (never windowed: non-air).
     before = {tuple(cell.position) for cell in start.observed_map}
-    new = [cell for cell in now.observed_map if tuple(cell.position) not in before]
-    return (sum(cell.passable for cell in new) >= EXPLORE_CELLS
-            or (goal.target != "space" and any(cell.block == goal.target for cell in new)))
+    return (now.discovered_open - start.discovered_open >= EXPLORE_CELLS
+            or (goal.target != "space" and any(cell.block == goal.target and tuple(cell.position) not in before
+                                               for cell in now.observed_map)))
 
 
 Ask = Callable[[Observation, Goal, str | None], str]  # (observation, task, error feedback) -> raw planner reply

@@ -1,3 +1,10 @@
+# #44 관측 반경32·공통 256칸 요약 — 구현·실제 검증 완료, 게시 대기
+
+브랜치 `feat/issue-44-observation`(로컬 커밋, push 안 함). 결정·사전 등록은 DECISIONS 최신 #44 절, 결과는 PROGRESS 같은 제목 절, 원시 `artifacts/issue-44/real-1/`.
+- 결정 관측 반경32·매크로 틱 정지 검사 반경8, 정책 지도는 비공기 전부+공기 Chebyshev 18, explore는 `discovered_open`, 계획기/NanoJev 공통 `public_state` 256칸 종류별 균등 요약.
+- 실제: 63/63 새 인증(`bc7a012d…`), 정보 감사, T04–T07 회귀, 자연 G4 다이아 성공, G4 시작 다이아 비노출, 실제 Qwen/NanoJev 토큰·지연·GPU 측정.
+- 다음: push·PR·병합·#44 종료는 사용자 결정. lock 고정은 #20.
+
 # #10 게시·병합·종료 승인 / 관측 확대는 #44 후속
 
 2026-11-09 사용자가 현재 #10의 push·PR 병합·이슈 종료를 요청했다. 구현 e887f4a를 보존해 feat/issue-10-planner에서 사용자 결정 기록과 함께 게시한다. 최종 실제 Git/원격/이슈 상태는 artifacts/issue-10/publication.json과 최신 PDF를 따른다. 이전 아래 미푸시/Open 표기는 당시 이력이다.

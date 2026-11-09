@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
+from .model_input import INPUT_HASH, memory_counts, public_state, text
 from .rpc import EpisodeError
 from .schema import AstraPlannerConfig, ErrorInfo, Goal, LocalPlannerConfig, Observation, PlannerSettings
 
@@ -21,16 +22,10 @@ Emit = Callable[[str, dict[str, Any]], None]
 
 def messages(observation: Observation, task: Goal, feedback: str | None) -> list[dict[str, str]]:
     # Revalidate at the provider boundary: mutated model_copy objects cannot smuggle administrator fields.
-    observation = Observation.model_validate(observation.model_dump())
     task = Goal.model_validate(task.model_dump())
-    state = observation.model_dump(exclude={"episode_id", "attempt_id", "obs_id", "observed_map", "visited", "history"})
-    surfaces = sorted((s for s in observation.observed_map if s.visible and s.block not in {"air", "cave_air", "void_air"}),
-                      key=lambda s: (sum((a - b) ** 2 for a, b in zip(s.position, observation.position)), s.position, s.block))
-    state.update(observed_surfaces=[s.model_dump() for s in surfaces[:64]], observed_surface_count=len(surfaces),
-                 visited_count=len(observation.visited), recent_visited=observation.visited[-32:], recent_results=observation.history[-8:])
-    payload = {"observation": state, "task": task.model_dump(exclude={"goal_id"}), "feedback": feedback,
+    payload = {"observation": public_state(observation), "task": task.model_dump(exclude={"goal_id"}), "feedback": feedback,
                "knowledge": None}  # PLAN §5.5: retrieval is conditional, not silently added at connection time
-    return [{"role": "system", "content": PROMPT}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False, allow_nan=False)}]
+    return [{"role": "system", "content": PROMPT}, {"role": "user", "content": text(payload)}]
 
 
 def failure(code: Literal["planner_error", "planner_unavailable", "permission_denied", "invalid_request"] = "planner_error") -> EpisodeError:
@@ -68,7 +63,7 @@ class LocalPlanner:
             raise ValueError("Planner must be frozen and actually loaded in 4-bit")
         self.config, self.emit = config, emit
         emit("planner_loaded", {"backend": "local_7b", "model": config.model, "version": config.version,
-            "files_sha256": manifest["files_sha256"], "prompt_sha256": PROMPT_HASH,
+            "files_sha256": manifest["files_sha256"], "prompt_sha256": PROMPT_HASH, "input_rules_sha256": INPUT_HASH,
             "quantization": "nf4_double_quant_bf16", "temperature": 0, "decoding": "greedy", "do_sample": False,
             "max_new_tokens": config.max_new_tokens, "context_limit": 8192,
             "device": torch.cuda.get_device_name(), "torch": torch.__version__, "cuda": torch.version.cuda,
@@ -83,7 +78,11 @@ class LocalPlanner:
         inputs = self.tokenizer.apply_chat_template(prompt, add_generation_prompt=True, tokenize=True,
             return_dict=True, return_tensors="pt").to(self.model.device)
         length = inputs["input_ids"].shape[-1]
+        record = {"backend": "local_7b", "model": self.config.model, "version": self.config.version, "prompt_sha256": PROMPT_HASH,
+                  "input_tokens": length, "memory": memory_counts(json.loads(prompt[1]["content"])["observation"]),
+                  "regeneration": feedback is not None, "cost_usd": 0.0}
         if length + self.config.max_new_tokens > 8192:
+            self.emit("planner_call", {**record, "error": "context_exceeded", "latency_seconds": 0.0})
             raise failure("invalid_request")
         started = time.monotonic()
         try:
@@ -92,15 +91,11 @@ class LocalPlanner:
                     max_new_tokens=self.config.max_new_tokens, pad_token_id=self.tokenizer.eos_token_id)
             reply: str = self.tokenizer.decode(output[0, length:], skip_special_tokens=True)
         except (RuntimeError, ValueError, OSError):
-            self.emit("planner_call", {"backend": "local_7b", "model": self.config.model, "version": self.config.version,
-                "prompt_sha256": PROMPT_HASH, "error": "inference_failed", "regeneration": feedback is not None,
-                "latency_seconds": time.monotonic() - started, "cost_usd": 0.0})
+            self.emit("planner_call", {**record, "error": "inference_failed", "latency_seconds": time.monotonic() - started})
             raise failure() from None
-        self.emit("planner_call", {"backend": "local_7b", "model": self.config.model, "version": self.config.version,
-            "prompt_sha256": PROMPT_HASH, "input_sha256": hashlib.sha256(json.dumps(prompt).encode()).hexdigest(),
-            "input_tokens": length, "output_tokens": output.shape[-1] - length,
-            "latency_seconds": time.monotonic() - started, "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
-            "cost_usd": 0.0, "regeneration": feedback is not None, "reply": reply})
+        self.emit("planner_call", {**record, "input_sha256": hashlib.sha256(json.dumps(prompt).encode()).hexdigest(),
+            "output_tokens": output.shape[-1] - length, "latency_seconds": time.monotonic() - started,
+            "peak_allocated_bytes": torch.cuda.max_memory_allocated(), "reply": reply})
         return reply
 
 
@@ -115,7 +110,7 @@ class AstraPlanner:
         self.config, self.budget_file, self.emit = config, budget_file, emit
         emit("planner_loaded", {"backend": "astra", "provider": config.provider, "model": config.model, "version": config.version,
             "endpoint": config.endpoint, "protocol": "chat_completions", "supported_settings": config.supported_settings,
-            "prompt_sha256": PROMPT_HASH, "rates_checked_on": config.rates_checked_on,
+            "prompt_sha256": PROMPT_HASH, "input_rules_sha256": INPUT_HASH, "rates_checked_on": config.rates_checked_on,
             "input_usd_per_million": config.input_usd_per_million, "output_usd_per_million": config.output_usd_per_million,
             "max_calls": config.max_calls, "max_usd": config.max_usd, "request_usd_ceiling": config.request_usd_ceiling,
             "approved": config.approved, "access_verified": False})
@@ -128,7 +123,8 @@ class AstraPlanner:
         key = os.environ.get("ASTRA_API_KEY")
         if not key:
             raise failure("permission_denied")
-        payload = {"model": self.config.model, "messages": messages(observation, task, feedback),
+        prompt = messages(observation, task, feedback)
+        payload = {"model": self.config.model, "messages": prompt,
                    "max_tokens": self.config.max_new_tokens, **self.config.supported_settings}
         request = urllib.request.Request(self.config.endpoint, data=json.dumps(payload, allow_nan=False).encode(),
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, method="POST")
@@ -136,6 +132,7 @@ class AstraPlanner:
         started = time.monotonic()
         report: dict[str, Any] = {"backend": "astra", "provider": self.config.provider, "model": self.config.model,
             "version": self.config.version, "prompt_sha256": PROMPT_HASH, "regeneration": feedback is not None,
+            "memory": memory_counts(json.loads(prompt[1]["content"])["observation"]),
             "reserved_usd": self.config.request_usd_ceiling, "usage": None, "cost_usd": None}
         try:
             opener = urllib.request.build_opener(NoRedirect())

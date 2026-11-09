@@ -115,8 +115,7 @@ def test_invalid_reply_is_regenerated_once_with_its_own_denominator(tmp_path: Pa
 
 
 def test_second_error_adopts_the_rule_recovery_goal_and_keeps_its_progress_apart(tmp_path: Path) -> None:
-    opened = [{"block": "air", "position": [float(x), 70.0, 0.0], "passable": True} for x in range(16)]
-    result, output = run(tmp_path, steps((20, WAIT, {}), (20, WAIT, {}), obs1={"observed_map": LOGS + opened}),
+    result, output = run(tmp_path, steps((20, WAIT, {}), (20, WAIT, {}), obs1={"discovered_open": 16}),
                          [json.dumps({"kind": "craft", "target": "iron_pickaxe"}), collect(99)], max_decisions=2)
     decisions = kind(output, "goal_decision")
     assert [(r["kind"], r["error"]) for r in decisions[0]["requests"]] == [("initial", "precondition"),
@@ -252,9 +251,9 @@ HOLD = [{"kind": "wait", "source": "mock"}, {"kind": "safe_hold", "quantity": 20
     ({"kind": "mine_diamond", "target": "diamond", "quantity": 1}, {"inventory": {"diamond": 1}}, [], 1, {}, True),
     # explore: 16 newly observed open cells, or the target resource newly observed
     ({"kind": "explore", "target": "space", "quantity": 1},
-     {"observed_map": [{"block": "air", "position": [float(x), 70.0, 0.0], "passable": True} for x in range(16)]}, [], 0, {}, True),
+     {"discovered_open": 16}, [], 0, {}, True),
     ({"kind": "explore", "target": "space", "quantity": 1},
-     {"observed_map": [{"block": "air", "position": [float(x), 70.0, 0.0], "passable": True} for x in range(15)]}, [], 0, {}, False),
+     {"discovered_open": 15}, [], 0, {}, False),
     ({"kind": "explore", "target": "iron_ore", "quantity": 1},
      {"observed_map": [{"block": "iron_ore", "position": [4.0, 60.0, 0.0]}]}, [], 0, {}, True),
     # escape: 3+ blocks from every observed hazard and an uninterrupted 20-tick safe hold
