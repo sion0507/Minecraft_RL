@@ -92,6 +92,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
                     seen_paths.add(signature)
                     add("move_observed", {"path": [[v for v in p] for p in path], "map_version": observation.map_version},
                         f"Approach exposed {goal.target} at {list(target)}")
-    if not candidates and block in ORE_TOP:
-        return search()  # Seen but unreachable on this level: cutting is the only way to close in.
+    if not candidates:
+        # Seen but unreachable: ores need cutting; a log seen beyond every 16-step route (radius 32, #44) needs walking.
+        return search()
     return allocate(candidates)

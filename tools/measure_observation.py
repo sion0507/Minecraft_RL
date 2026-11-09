@@ -80,7 +80,7 @@ def models(output: Path) -> None:
     import torch
     from transformers import AutoTokenizer
 
-    from mc_diamond.nanojev import NanoJev, tokenize
+    from mc_diamond.nanojev import NanoJevAdapter, tokenize
     from mc_diamond.planner import PROMPT, LocalPlanner, messages
     from mc_diamond.schema import LocalPlannerConfig
 
@@ -89,7 +89,7 @@ def models(output: Path) -> None:
     qwen = AutoTokenizer.from_pretrained(qwen_root, local_files_only=True)
     calls: list[dict[str, Any]] = []
     planner = LocalPlanner(LocalPlannerConfig.model_validate(planner_config), qwen_root.resolve(), lambda kind, data: calls.append({"kind": kind, **data}))
-    nanojev = NanoJev.load(Path("checkpoints/nanojev"))
+    nanojev = NanoJevAdapter.load(Path("checkpoints/nanojev"))
     nanojev.eval()
     results: dict[str, Any] = {}
     for path in sorted(output.glob("*-observation.json")):
@@ -100,7 +100,8 @@ def models(output: Path) -> None:
             {"observation": legacy_planner_state(observation), "task": goal.model_dump(exclude={"goal_id"}), "feedback": None,
              "knowledge": None}, ensure_ascii=False)}]
         saved = policy_candidates(observation, goal, macros=True)
-        count = [len(qwen.apply_chat_template(m, add_generation_prompt=True, tokenize=True)) for m in (messages(observation, goal, None), legacy)]
+        count = [len(qwen.apply_chat_template(m, add_generation_prompt=True, tokenize=True, return_dict=True)["input_ids"])
+                 for m in (messages(observation, goal, None), legacy)]
         row: dict[str, Any] = {"planner_tokens": count[0], "planner_tokens_old_64_state": count[1],
                                "state_chars": len(text(public_state(observation))), "candidates": len(saved.candidates)}
         if saved.candidates and any(saved.mask):

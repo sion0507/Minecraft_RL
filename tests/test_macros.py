@@ -245,3 +245,17 @@ def test_human_selector_only_accepts_a_listed_candidate(monkeypatch: pytest.Monk
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
     with pytest.raises(EOFError):
         human_select(observation, goal, saved, ())
+
+
+def test_log_seen_beyond_every_observed_route_falls_back_to_exploring_walks() -> None:
+    """#44: radius 32 shows logs that no 16-step route reaches; that must not leave the agent with zero candidates."""
+    from mc_diamond.macros import generate_wood_candidates
+    from mc_diamond.schema import Goal
+    base = json.loads(Path("fixtures/mock_episode.json").read_text())["initial"]
+    floor = [{"block": "stone", "position": [float(x), 63.0, float(z)], "support": True} for x in range(-3, 4) for z in range(-3, 4)]
+    air = [{"block": "air", "position": [float(x), float(y), float(z)], "passable": True}
+           for x in range(-3, 4) for y in (64, 65) for z in range(-3, 4)]
+    log = [{"block": "oak_log", "position": [28.0, 64.0, 0.0], "support": True}]
+    observation = Observation.model_validate({**base, "position": [0.5, 64.0, 0.5], "observed_map": floor + air + log, "visited": []})
+    saved = generate_wood_candidates(observation, Goal(goal_id="wood", kind="collect", target="oak_log", quantity=1))
+    assert saved.candidates and all(c.action_kind == "move_observed" for c in saved.candidates)
