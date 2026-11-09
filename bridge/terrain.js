@@ -141,10 +141,20 @@ class Terrain {
     return nearest
   }
 
+  // On the ground over an edge: the centre's cell is open (feet and head clear) and an observed safe cell under the
+  // body's footprint (half-width 0.3) holds it up. Natural G2 (#37 run 3): a stair overshot onto such a ledge.
+  supported (state) {
+    const [px, py, pz] = state.position
+    const y = Math.floor(py)
+    const [cx, cz] = [Math.floor(px), Math.floor(pz)]
+    if (!state.on_ground || !this.clear([cx, y, cz]) || !this.clear([cx, y + 1, cz])) return false
+    return [px - 0.3, px + 0.3].some(x => [pz - 0.3, pz + 0.3].some(z => this.safe([Math.floor(x), y, Math.floor(z)])))
+  }
+
   // `transit` is the one open cell a committed stair or step crosses before landing on its observed floor.
   // `floor` lowers the hazard radius for an escape walk: it may continue while no closer than where it began.
   danger (state, transit = null, floor = hazardRadius) {
-    const standing = this.safe(state.position) || key(state.position.map(Math.floor)) === transit
+    const standing = this.safe(state.position) || key(state.position.map(Math.floor)) === transit || this.supported(state)
     if (state.on_fire || state.in_liquid || state.health <= 0 || !standing) return true
     return this.hazardDistance(state.position) < Math.min(hazardRadius, floor)
   }

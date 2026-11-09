@@ -19,6 +19,8 @@ const STEPS = {
   // Hazard radius (#37 review of #36 stalls): a walk that starts within 1.5 of lava may only move away from it.
   step_escape: { rise: 0, edge: Infinity, cells: 2, blocks: { '-1,64,0': 'lava' } },
   step_closer: { rise: 0, edge: Infinity, cells: 1, blocks: { '-1,64,1': 'lava' }, path: [[0.5, 64, 1.5]] },
+  // Natural G2 (#37 run 3): a stair overshot, leaving the centre over a lower cell while the body rests on the ledge.
+  step_overhang: { rise: -1, edge: 1, cells: 1, start: 1.05, path: [[0.5, 64, 0.5]] },
   step_late_up: { rise: 1, edge: 14, cells: 16 }, step_late_down: { rise: -1, edge: 14, cells: 16 },
   step_edge_down: { rise: -1, edge: 13, cells: 16, start: 0.8 }, // 12 blocks are reached with the body over the edge.
   step_slime: { rise: -1, edge: 13, cells: 16, floor: 'slime_block' },
