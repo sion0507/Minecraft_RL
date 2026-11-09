@@ -9,12 +9,12 @@ import yaml
 from pydantic import ValidationError
 
 from . import evaluation
-from .episode import emit, run_episode
+from .episode import emit, error_summary, run_episode
 from .doctor import doctor
 from .clock import verify_clock
 from .information import audit_information
 from .rpc import EpisodeError, RpcSession
-from .schema import CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Goal, Observation, SelectionResult
+from .schema import CandidateSet, EpisodeConfig, ErrorInfo, Goal, Observation, SelectionResult
 from .rule_selector import rule_select
 from .selectors import first_candidate, result
 
@@ -105,7 +105,7 @@ def main() -> int:
                                   episode_id, attempt_id, movement=args.command == "smoke-movement",
                                   macros=args.command == "smoke-macros",
                                   select={"human": human_select, "rule": rule_select}.get(args.select, first_candidate),
-                                  verification=(lambda: session._call("verification_log", {}, admin=True))
+                                  verification=session.verification_log
                                   if args.command == "smoke-macros" else None)
         if summary.error or summary.invalid:
             print(f"Episode stopped: {summary.reason}", file=sys.stderr)
@@ -134,11 +134,6 @@ def main() -> int:
             emit("information_summary", {"information_verified": False,
                                         "error": failure.error.model_dump(mode="json")})
             return 1
-        emit("summary", EpisodeSummary(
-            episode_id=episode_id, attempt_id=attempt_id, backend=config.backend,
-            clock_mode="mock" if config.backend == "mock" else "unverified", goal_completed=False, terminated=False, truncated=False,
-            invalid=False, reason=failure.error.code, error=failure.error,
-            active_ticks=0, wall_seconds=0.0, decisions=0, reward_total=0.0,
-        ))
+        emit("summary", error_summary(config, episode_id, attempt_id, failure.error, 0.0))
         print(failure.error.message, file=sys.stderr)
         return 1

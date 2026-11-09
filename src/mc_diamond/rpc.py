@@ -106,6 +106,10 @@ class RpcSession:
             "episode_id": episode_id, "attempt_id": attempt_id,
         }, admin=True))
 
+    def verification_log(self) -> dict[str, JsonValue]:
+        """Administrator verification log; read only after the last decision."""
+        return self._call("verification_log", {}, admin=True)
+
     def policy(self) -> "RpcPolicy":
         return RpcPolicy(self)
 

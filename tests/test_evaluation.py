@@ -63,8 +63,12 @@ def test_schedule_fixes_core_g4_and_the_separate_s_denominators(scale: str, core
     assert seeds[("A", "sampling")] == seeds[("B", "sampling")] == [11, 12, 13, 14, 15][:runs]  # A/B share the list
     assert len(seeds[("A", "argmax")]) == len(seeds[("B", "argmax")]) == 1
     assert len(seeds[("J", "native_choice")]) == len(seeds[("F", "native_choice")]) == runs
-    assert [(s.group, s.seed) for s in by_table["g4"]] == [("A", 21), ("A", 22), ("A", 23), ("B", 21), ("B", 22), ("B", 23)]
+    assert sorted((s.group, s.seed) for s in by_table["g4"]) == [("A", 21), ("A", 22), ("A", 23), ("B", 21), ("B", 22), ("B", 23)]
     assert [(s.group, s.task, s.mode) for s in by_table["s"]] == [("S", "C4", "rule_deterministic")]
+    # evaluation blocks interleave the groups (§9.3): block i runs A, B, J, F with the i-th seed
+    mode = {"A": "sampling", "B": "sampling", "J": "native_choice", "F": "native_choice"}
+    assert [s.group for s in by_table["core_c4"] if s.mode == mode[s.group]][:8] == list("ABJFABJF")
+    assert [s.group for s in by_table["g4"]][:2] == ["A", "B"]
 
 
 def test_server_error_then_successful_retry_is_one_successful_slot(tmp_path: Path) -> None:
@@ -139,7 +143,29 @@ def test_s_slot_uses_the_rule_selector_and_reports_its_own_table(tmp_path: Path)
     assert set(summary["tables"]) == {"s"} and summary["tables"]["s"]["planned"] == 1
     assert summary["s_diagnostic"] == {"success": "1/1", "highest_stage": 1, "active_ticks": 20,
         "wall_seconds": summary["s_diagnostic"]["wall_seconds"], "selections": 1, "planner_calls": 0,
-        "failure_reason": None, "cost_usd": 0.0, "outcome": "success"}
+        "failure_reason": None, "api_cost_usd": 0.0, "cost_usd": None, "outcome": "success"}  # 7B/GPU cost unmeasured
+
+
+def test_s_server_errors_keep_its_single_planned_slot_and_every_attempt(tmp_path: Path) -> None:
+    _, output = evaluate(config(tmp_path, fixture=failing("s-S-rule_deterministic-1:1", "s-S-rule_deterministic-1:2")), "S", "C4")
+    slot = slots(output)["s-S-rule_deterministic-1"]
+    assert (slot["outcome"], slot["retry"], [a["error_code"] for a in slot["attempts"]]) == (
+        "error", "used", ["backend_error", "backend_error"])
+    summary = kind(output, "evaluation_summary")[0]
+    assert summary["tables"]["s"]["planned"] == 1 and summary["s_diagnostic"]["success"] == "0/1"
+    assert summary["s_diagnostic"]["wall_seconds"] == sum(a["wall_seconds"] for a in slot["attempts"]) > 0
+
+
+def test_budget_counts_spend_recorded_before_this_run(tmp_path: Path) -> None:
+    _, output = evaluate(config(tmp_path, budget_usd=5.0, jev_spent_usd=4.5, mock_cost_per_decision_usd=1.0), "J", "C4")
+    assert [r["outcome"] for r in slots(output).values()] == ["success"] + ["not_run"] * 4
+    assert kind(output, "evaluation_summary")[0]["spent_usd"] == 5.5
+
+
+@pytest.mark.parametrize("groups, task", [("X", "C4"), ("A", "C5")])
+def test_unknown_groups_or_tasks_are_rejected(tmp_path: Path, groups: str, task: str) -> None:
+    result, _ = evaluate(config(tmp_path), groups, task)
+    assert result.returncode == 2
 
 
 def test_unconnected_selectors_refuse_the_actual_backend(tmp_path: Path) -> None:

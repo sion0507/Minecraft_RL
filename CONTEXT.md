@@ -1,7 +1,7 @@
 # #13 T12 — 공통 평가 슬롯과 서버 오류 재시도 구현 (mock)
 
 브랜치 `issue-13-t12`(로컬). 결정은 DECISIONS 2026-11-09 #13 절, 결과는 PROGRESS 같은 날 절.
-- mock·공개 CLI 검사만 통과(pytest 199, mypy src tests). 실제 슬롯 실행은 T22.
+- mock·공개 CLI 검사만 통과(pytest 203, mypy src tests), 두 축 리뷰 반영. 실제 슬롯 실행은 T22.
 - S를 평가 슬롯에 연결했다. #9의 남은 항목이 이것이므로 #13 병합 뒤 #9 종료를 사용자에게 묻는다.
 - 다른 Codex 세션이 pathfinder 이동 후보를 비교 중이다(`/tmp/minecraft-pathfinder-spike-20261109`). 결정 뒤 후보 직렬화(#11·#12)를 진행한다.
 

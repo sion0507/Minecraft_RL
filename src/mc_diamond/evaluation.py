@@ -9,14 +9,15 @@ restored, only the local seed.
 import hashlib
 import math
 import sys
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, get_args
 
 import yaml
 from pydantic import Field, model_validator
 
-from .episode import run_episode
+from .episode import error_summary, run_episode
 from .navigation import SAFE_BAND
 from .rpc import EpisodeError, RpcSession
 from .rule_selector import rule_select
@@ -25,6 +26,11 @@ from .selectors import Selector, first_candidate
 
 Group = Literal["A", "B", "J", "F", "S"]
 Task = Literal["C4", "G4"]
+Table = Literal["core_c4", "g4", "s"]
+Mode = Literal["sampling", "argmax", "native_choice", "rule_deterministic"]
+Outcome = Literal["success", "failure", "error", "not_run"]
+GROUPS, TASKS, TABLES = set(get_args(Group)), set(get_args(Task)), get_args(Table)
+SNAPSHOTS = Path(__file__).resolve().parents[2] / "worlds" / "snapshots"
 SERVER_ERRORS = {"backend_error", "timeout", "protocol_error"}
 PRICED = {"J", "F"}  # Jev API calls; Astra planner costs join in T09/T11
 EXTERNAL_RNG_NOTE = "Local seeds are restored on retry; external API internal randomness is not."
@@ -39,7 +45,8 @@ class EvaluationConfig(Contract):
     jev_available: bool = True
     astra_available: bool = True
     jev_mode: Literal["native_choice", "sampling"] = "native_choice"  # fixed in T11 from the actual API
-    budget_usd: Annotated[float, Field(ge=0)] = 5.0
+    budget_usd: Annotated[float, Field(ge=0)] = 5.0  # the whole Jev cap: connection, diagnostics, J/F and failures
+    jev_spent_usd: Annotated[float, Field(ge=0)] = 0.0  # already spent before this run (T11 keeps the ledger)
     mock_cost_per_decision_usd: Annotated[float, Field(ge=0)] = 0.0  # mock J/F only
 
     @model_validator(mode="after")
@@ -51,10 +58,10 @@ class EvaluationConfig(Contract):
 
 class Slot(Contract):
     slot_id: str
-    table: Literal["core_c4", "g4", "s"]
+    table: Table
     group: Group
     task: Task
-    mode: Literal["sampling", "argmax", "native_choice", "rule_deterministic"]
+    mode: Mode
     seed: int
 
 
@@ -77,7 +84,7 @@ class Attempt(Contract):
 class SlotResult(Contract):
     slot: Slot
     attempts: list[Attempt]
-    outcome: Literal["success", "failure", "error", "not_run"]
+    outcome: Outcome
     success: bool
     retry: Literal["none", "used", "not_run_budget"]
     first_error: str | None
@@ -85,26 +92,22 @@ class SlotResult(Contract):
 
 
 def schedule(config: EvaluationConfig) -> list[Slot]:
-    """Every planned slot: core C4 22/14, G4 6, then the separate S slot (29/21 in total)."""
+    """Every planned slot: core C4 22/14, G4 6, then the separate S slot (29/21 in total).
+
+    Groups interleave by evaluation block (§9.3): block i runs A, B, J, F with the i-th shared seed.
+    """
     runs = 5 if config.scale == "core" else 3
-    slots: list[Slot] = []
 
-    def add(table: Literal["core_c4", "g4", "s"], group: Group, task: Task,
-            mode: Literal["sampling", "argmax", "native_choice", "rule_deterministic"], seeds: Sequence[int]) -> None:
-        for index, seed in enumerate(seeds, 1):
-            slots.append(Slot(slot_id=f"{table}-{group}-{mode}-{index}", table=table, group=group, task=task, mode=mode,
-                              seed=seed))
+    def slot(table: Table, group: Group, task: Task, mode: Mode, index: int, seed: int) -> Slot:
+        return Slot(slot_id=f"{table}-{group}-{mode}-{index}", table=table, group=group, task=task, mode=mode, seed=seed)
 
-    pair: tuple[Group, Group] = ("A", "B")
-    for group in pair:
-        add("core_c4", group, "C4", "sampling", config.evaluation_seeds[:runs])  # A and B share one seed list
-        add("core_c4", group, "C4", "argmax", [config.fixed_seed])
-    for group in ("J", "F"):
-        add("core_c4", group, "C4", config.jev_mode, config.evaluation_seeds[:runs])
-    for group in pair:
-        add("g4", group, "G4", "sampling", config.g4_seeds)
-    add("s", "S", "C4", "rule_deterministic", [config.fixed_seed])
-    return slots
+    main: list[tuple[Group, Mode]] = [("A", "sampling"), ("B", "sampling"), ("J", config.jev_mode), ("F", config.jev_mode)]
+    pair: list[Group] = ["A", "B"]
+    return ([slot("core_c4", group, "C4", mode, i, seed)
+             for i, seed in enumerate(config.evaluation_seeds[:runs], 1) for group, mode in main]
+            + [slot("core_c4", group, "C4", "argmax", 1, config.fixed_seed) for group in pair]
+            + [slot("g4", group, "G4", "sampling", i, seed) for i, seed in enumerate(config.g4_seeds, 1) for group in pair]
+            + [slot("s", "S", "C4", "rule_deterministic", 1, config.fixed_seed)])
 
 
 def highest_stage(summary: EpisodeSummary) -> int:
@@ -123,7 +126,7 @@ def highest_stage(summary: EpisodeSummary) -> int:
     return max((stage for stage, ok in enumerate(reached, 1) if ok), default=0)
 
 
-class Tally:
+class CountingSelector:
     """Wraps one attempt's selector: counts its selections and adds the (mock) per-decision API cost."""
 
     def __init__(self, select: Selector, cost: float) -> None:
@@ -138,16 +141,16 @@ class Tally:
         return chosen
 
 
-def selector(slot: Slot, config: EvaluationConfig, backend: str) -> Tally:
+def attempt_selector(slot: Slot, config: EvaluationConfig, backend: str) -> CountingSelector:
     if slot.group == "S":
-        return Tally(rule_select, 0.0)
+        return CountingSelector(rule_select, 0.0)
     if backend != "mock":
         raise ValueError("A/B (T10) and J/F (T11) selectors are not connected; only S runs on the actual backend")
     # ponytail: mock stand-ins for NanoJev and Jev; T10/T11 replace them with seeded sampling and API selectors.
-    return Tally(first_candidate, config.mock_cost_per_decision_usd if slot.group in PRICED else 0.0)
+    return CountingSelector(first_candidate, config.mock_cost_per_decision_usd if slot.group in PRICED else 0.0)
 
 
-def command(episode: EpisodeConfig, path: Path) -> list[str]:
+def bridge_command(episode: EpisodeConfig, path: Path) -> list[str]:
     if episode.backend == "mock":
         assert episode.fixture is not None
         return [sys.executable, "-m", "mc_diamond.mock_bridge", "--fixture", str((path.parent / episode.fixture).resolve())]
@@ -155,30 +158,29 @@ def command(episode: EpisodeConfig, path: Path) -> list[str]:
     return episode.command
 
 
-def snapshot(episode: EpisodeConfig, path: Path, task: Task) -> str:
-    """The reset state each attempt starts from: the task snapshot file, or the mock fixture."""
-    source = (path.parent / episode.fixture) if episode.fixture else Path(f"worlds/snapshots/{task}/snapshot.json")
-    return f"{source}:{hashlib.sha256(source.read_bytes()).hexdigest()}" if source.exists() else f"{source}:missing"
+def reset_state(episode: EpisodeConfig, path: Path, task: Task) -> str:
+    """The reset state each attempt starts from: the task snapshot file (or the mock fixture) and its hash.
+
+    A missing file raises: no slot runs without a known reset state."""
+    source = (path.parent / episode.fixture) if episode.fixture else SNAPSHOTS / task / "snapshot.json"
+    return f"{source.name}:{hashlib.sha256(source.read_bytes()).hexdigest()}"
 
 
 def run_attempt(slot: Slot, number: int, config: EvaluationConfig, episode: EpisodeConfig, path: Path,
                 emit: Callable[[str, dict[str, object]], None]) -> tuple[Attempt, float]:
     attempt_id = f"{slot.slot_id}:{number}"
-    tally = selector(slot, config, episode.backend)
+    tally = attempt_selector(slot, config, episode.backend)
+    started = time.monotonic()
     try:
-        with RpcSession(command(episode, path), episode.rpc_timeout_seconds) as session:
+        with RpcSession(bridge_command(episode, path), episode.rpc_timeout_seconds) as session:
             summary = run_episode(episode, session.policy(), lambda: session.reset(slot.slot_id, attempt_id),
-                                  slot.slot_id, attempt_id, macros=True, select=tally,
-                                  verification=lambda: session._call("verification_log", {}, admin=True))
-    except EpisodeError as failure:  # the backend never started: still an attempt with its error
+                                  slot.slot_id, attempt_id, macros=True, select=tally, verification=session.verification_log)
+    except EpisodeError as failure:  # the backend never started: still an attempt with its error and time
         emit("error", failure.error.model_dump(mode="json"))
-        summary = EpisodeSummary(episode_id=slot.slot_id, attempt_id=attempt_id, backend=episode.backend,
-                                 clock_mode="mock" if episode.backend == "mock" else "unverified", goal_completed=False,
-                                 terminated=False, truncated=False, invalid=False, reason=failure.error.code,
-                                 error=failure.error, active_ticks=0, wall_seconds=0.0, decisions=0, reward_total=0.0)
+        summary = error_summary(episode, slot.slot_id, attempt_id, failure.error, time.monotonic() - started)
     success = summary.error is None and (summary.diamond_success if episode.goal.kind == "mine_diamond"
                                          else summary.goal_completed)  # non-diamond tasks are mock/smoke only
-    return Attempt(attempt_id=attempt_id, number=number, seed=slot.seed, snapshot=snapshot(episode, path, slot.task),
+    return Attempt(attempt_id=attempt_id, number=number, seed=slot.seed, snapshot=reset_state(episode, path, slot.task),
                    reason=summary.reason, error_code=summary.error.code if summary.error else None, success=success,
                    highest_stage=highest_stage(summary), active_ticks=summary.active_ticks,
                    wall_seconds=summary.wall_seconds, selections=tally.selections,
@@ -190,10 +192,13 @@ def evaluate(config: EvaluationConfig, path: Path, groups: set[str], tasks: set[
              emit: Callable[[str, dict[str, object]], None]) -> dict[str, object]:
     files = {task: path.parent / name for task, name in config.episodes.items()}
     episodes = {task: EpisodeConfig.model_validate(yaml.safe_load(file.read_text(encoding="utf-8"))) for task, file in files.items()}
+    if not groups <= GROUPS or not tasks <= TASKS:
+        raise ValueError(f"groups must be within {sorted(GROUPS)} and tasks within {sorted(TASKS)}")
     chosen = [slot for slot in schedule(config) if slot.group in groups and slot.task in tasks]
-    for slot in chosen:
-        selector(slot, config, episodes[slot.task].backend)  # refuse unconnected selectors before any attempt
-    spent = 0.0
+    for slot in chosen:  # refuse unconnected selectors and unknown reset states before any attempt
+        attempt_selector(slot, config, episodes[slot.task].backend)
+        reset_state(episodes[slot.task], files[slot.task], slot.task)
+    spent = config.jev_spent_usd
     results: list[SlotResult] = []
     for slot in chosen:
         episode = episodes[slot.task]
@@ -214,7 +219,7 @@ def evaluate(config: EvaluationConfig, path: Path, groups: set[str], tasks: set[
                 break
             retry = "used" if number == 1 else retry
         last = attempts[-1] if attempts else None
-        outcome: Literal["success", "failure", "error", "not_run"] = (
+        outcome: Outcome = (
             "not_run" if last is None else "success" if last.success else "error" if last.error_code else "failure")
         result = SlotResult(slot=slot, attempts=attempts, outcome=outcome, success=outcome == "success", retry=retry,
                             first_error=attempts[0].error_code if attempts else None,
@@ -226,7 +231,7 @@ def evaluate(config: EvaluationConfig, path: Path, groups: set[str], tasks: set[
 
 def summarize(results: list[SlotResult], spent: float, config: EvaluationConfig, backends: set[str]) -> dict[str, object]:
     tables: dict[str, dict[str, object]] = {}
-    for table in ("core_c4", "g4", "s"):
+    for table in TABLES:
         rows = [r for r in results if r.slot.table == table]
         if not rows:
             continue
@@ -249,7 +254,8 @@ def summarize(results: list[SlotResult], spent: float, config: EvaluationConfig,
             "active_ticks": sum(a.active_ticks for a in attempts), "wall_seconds": sum(a.wall_seconds for a in attempts),
             "selections": sum(a.selections for a in attempts), "planner_calls": sum(a.planner_calls for a in attempts),
             "failure_reason": None if s.success else (attempts[-1].reason if attempts else s.not_run_reason),
-            "cost_usd": sum(a.cost_usd for a in attempts)}
+            "api_cost_usd": sum(a.cost_usd for a in attempts),
+            "cost_usd": None}  # 7B planning and GPU/PC cost are not measured yet (T19); never shown as 0 (§11.1.2)
     return summary
 
 
