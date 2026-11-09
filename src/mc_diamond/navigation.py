@@ -4,7 +4,7 @@ import math
 from collections import deque
 from collections.abc import Iterable
 
-from .schema import Candidate, CandidateSet, Observation, Surface
+from .schema import Candidate, CandidateSet, Observation, Surface, allocate
 
 PICKS = ["netherite_pickaxe", "diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe", "golden_pickaxe"]
 DIRECTIONS = ((1, 0), (0, 1), (-1, 0), (0, -1))
@@ -89,7 +89,7 @@ def generate_movement_candidates(observation: Observation) -> CandidateSet:
         max_ticks=min(400, observation.remaining_ticks), stop_rule_id="observed_path_or_hazard",
         source_obs_id=observation.obs_id, description=f"Walk over observed cells to {route[-1]}",
     ) for index, route in enumerate(directions.values()) if observation.remaining_ticks]
-    return CandidateSet(candidates=candidates, mask=[True] * len(candidates))
+    return allocate(candidates)
 
 
 def fresh_movement_candidates(observation: Observation) -> list[Candidate]:
@@ -120,10 +120,10 @@ ORE_TOP = {"iron_ore": 63, "diamond_ore": 15}  # Highest generation layer in 1.1
 def _ready(observation: Observation, walking: list[Candidate]) -> list[Candidate] | None:
     """Walking, or equipping a carried pickaxe as its own choice, until a cut is possible; None once it is."""
     if observation.in_liquid or observation.on_fire or not observation.remaining_ticks:
-        return walking[:8]
+        return walking
     if not (observation.tool or "").endswith("_pickaxe"):
         pick = next((name for name in PICKS if observation.inventory.get(name)), None)
-        return walking[:8] if pick is None else [Candidate(
+        return walking if pick is None else [Candidate(
             candidate_id=f"{observation.obs_id}:stair:equip", action_kind="place_or_equip", params={"item": pick},
             max_ticks=min(400, observation.remaining_ticks), stop_rule_id="stair_ore_or_hazard",
             source_obs_id=observation.obs_id, description=f"Equip {pick} for the stairs")]
@@ -194,14 +194,14 @@ def _tunnels(observation: Observation, stop_blocks: list[str], durability: int) 
 
 
 def descent_choices(observation: Observation) -> list[Candidate]:
-    """Every open direction, then observed walking, then the smaller workload, within the 8-choice cap."""
+    """Every open direction, then observed walking, then the smaller workload; `allocate` applies the cap."""
     y = math.floor(observation.position[1])
     walking = fresh_movement_candidates(observation)
-    early = walking[:8] if y - SAFE_BAND[0] < 1 else _ready(observation, walking)
+    early = walking if y - SAFE_BAND[0] < 1 else _ready(observation, walking)
     if early is not None:
         return early
     broad, narrow = _stairs(observation, ["diamond_ore"], min(4, y - SAFE_BAND[0]))
-    return [*broad, *walking, *narrow][:8]
+    return [*broad, *walking, *narrow]
 
 
 def ore_search_choices(observation: Observation, target: str, reserve: int) -> list[Candidate]:
@@ -219,8 +219,8 @@ def ore_search_choices(observation: Observation, target: str, reserve: int) -> l
     broad, narrow = _stairs(observation, stop_blocks, min(4, y - SAFE_BAND[0], durability // 3))
     tunnels = _tunnels(observation, stop_blocks, durability)
     if y > ORE_TOP[target]:
-        return [*broad, *tunnels, *walking, *narrow][:8]
-    return [*walking[:4], *tunnels, *broad, *walking[4:], *narrow][:8]  # Cutting stays a choice in open ground.
+        return [*broad, *tunnels, *walking, *narrow]
+    return [*walking[:4], *tunnels, *broad, *walking[4:], *narrow]  # Cutting stays a choice in open ground.
 
 
 def generate_descent_candidates(observation: Observation) -> CandidateSet:
@@ -230,5 +230,5 @@ def generate_descent_candidates(observation: Observation) -> CandidateSet:
         hold = Candidate(candidate_id=f"{observation.obs_id}:hold", action_kind="wait", params={},
                          max_ticks=min(20, observation.remaining_ticks), stop_rule_id="hold_or_hazard",
                          source_obs_id=observation.obs_id, description="Hold observed safe ground for 20 ticks")
-        choices = [hold, *choices][:8]
-    return CandidateSet(candidates=choices, mask=[True] * len(choices))
+        choices = [hold, *choices]
+    return allocate(choices)

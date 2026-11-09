@@ -89,16 +89,48 @@ class Candidate(Contract):
     description: str
 
 
+MAX_CANDIDATES = 16  # PLAN §2 (#38, was 8)
+# Slots per kind before the cap; every other kind shares the last one (#38).
+SLOTS = {"move_observed": 6, "tunnel": 5, "stair_down": 4, "other": 1}
+assert sum(SLOTS.values()) == MAX_CANDIDATES
+
+
 class CandidateSet(Contract):
-    candidates: list[Candidate] = Field(max_length=8)
+    candidates: list[Candidate] = Field(max_length=MAX_CANDIDATES)
     mask: list[bool]
+    generated: Count  # candidates before the cap
+    truncated: dict[Identifier, Count] = Field(default_factory=dict)  # cut per action kind
 
     @model_validator(mode="after")
     def validate_set(self) -> Self:
         ids = [candidate.candidate_id for candidate in self.candidates]
         if len(ids) != len(set(ids)) or len(ids) != len(self.mask):
             raise ValueError("duplicate candidates or mismatched mask")
+        if self.generated != len(ids) + sum(self.truncated.values()):
+            raise ValueError("generated count must equal kept plus truncated")
         return self
+
+
+def allocate(found: list[Candidate]) -> CandidateSet:
+    """The one cap every generator uses: each kind keeps its first `SLOTS`, free slots go to the cut candidates in
+    generation order, and the kept candidates stay in generation order."""
+    used: dict[str, int] = {}
+    keep: list[bool] = []
+    for candidate in found:
+        kind = candidate.action_kind if candidate.action_kind in SLOTS else "other"
+        keep.append(used.get(kind, 0) < SLOTS[kind])
+        used[kind] = used.get(kind, 0) + 1
+    free = MAX_CANDIDATES - sum(keep)
+    for index, kept in enumerate(keep):
+        if not kept and free > 0:
+            keep[index], free = True, free - 1
+    truncated: dict[str, int] = {}
+    for candidate, kept in zip(found, keep):
+        if not kept:
+            truncated[candidate.action_kind] = truncated.get(candidate.action_kind, 0) + 1
+    kept_candidates = [candidate for candidate, kept in zip(found, keep) if kept]
+    return CandidateSet(candidates=kept_candidates, mask=[True] * len(kept_candidates), generated=len(found),
+                        truncated=truncated)
 
 
 class ErrorInfo(Contract):

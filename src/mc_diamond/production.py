@@ -9,7 +9,7 @@ from pydantic import JsonValue
 
 from .macros import generate_resource_candidates
 from .navigation import PICKS, observed_routes
-from .schema import Candidate, CandidateSet, Goal, Observation
+from .schema import Candidate, CandidateSet, Goal, Observation, allocate
 
 RECIPES: list[dict[str, Any]] = json.loads(files("mc_diamond").joinpath("recipes.json").read_text())
 FUELS = {"coal": 1600, "charcoal": 1600, **{r["item"]: 300 for r in RECIPES if r["item"].endswith("_planks")}}
@@ -18,7 +18,7 @@ FUELS = {"coal": 1600, "charcoal": 1600, **{r["item"]: 300 for r in RECIPES if r
 def generate_production_candidates(observation: Observation, goal: Goal) -> CandidateSet:
     stock = observation.inventory
     if not observation.remaining_ticks or stock.get(goal.target, 0) >= goal.quantity:
-        return CandidateSet(candidates=[], mask=[])
+        return allocate([])
     eye = [observation.position[0], observation.position[1] + 1.62, observation.position[2]]
     cells = {tuple(c.position): c for c in observation.observed_map}
 
@@ -27,7 +27,7 @@ def generate_production_candidates(observation: Observation, goal: Goal) -> Cand
         candidate = Candidate(candidate_id=f"{observation.obs_id}:production:0", action_kind=kind,
             params=params, max_ticks=min(200 if kind == "wait" else 400, observation.remaining_ticks),
             stop_rule_id="production_or_hazard", source_obs_id=observation.obs_id, description=description)
-        return CandidateSet(candidates=[candidate], mask=[True])
+        return allocate([candidate])
 
     def facilities(item: str) -> list[list[float]]:
         return sorted([c.position for c in cells.values() if c.block == item],
@@ -50,7 +50,7 @@ def generate_production_candidates(observation: Observation, goal: Goal) -> Cand
                 point = min(sites, key=lambda p: (math.dist(p, observation.position), p))
                 return choice("place_or_equip", {"item": item, "position": [v for v in point],
                     "map_version": observation.map_version}, f"Place {item} on observed support")
-            return CandidateSet(candidates=[], mask=[])
+            return allocate([])
         if facilities(item):
             routes = [path for point, path in observed_routes(observation).items() if path and
                       any(math.dist([v + 0.5 for v in p], [point[0] + 0.5, point[1] + 1.62, point[2] + 0.5]) <= 2
@@ -59,13 +59,13 @@ def generate_production_candidates(observation: Observation, goal: Goal) -> Cand
                 route = min(routes, key=lambda p: (len(p), p))
                 return choice("move_observed", {"path": [[v for v in p] for p in route],
                     "map_version": observation.map_version}, f"Approach observed {item}")
-            return CandidateSet(candidates=[], mask=[])
+            return allocate([])
         return resolve(item, 1)
 
     def resolve(item: str, quantity: int) -> CandidateSet:
         missing = quantity - stock.get(item, 0)
         if missing <= 0:
-            return CandidateSet(candidates=[], mask=[])
+            return allocate([])
         recipes = [r for r in RECIPES if r["item"] == item]
         if recipes:
             recipe = min(recipes, key=lambda r: sum(max(0, n - stock.get(name, 0) -

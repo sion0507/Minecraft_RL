@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import JsonValue
 
 from .navigation import ORE_TOP, PICKS, fresh_movement_candidates, observed_routes, ore_search_choices
-from .schema import Candidate, CandidateSet, Goal, Observation
+from .schema import Candidate, CandidateSet, Goal, Observation, allocate
 
 
 def generate_wood_candidates(observation: Observation, goal: Goal) -> CandidateSet:
@@ -18,11 +18,11 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
     remaining = goal.quantity - observation.inventory.get(goal.target, 0)
     block = {"cobblestone": "stone", "diamond": "diamond_ore"}.get(goal.target, goal.target)
     if not observation.remaining_ticks or remaining <= 0 or not (block.endswith("_log") or block in {"stone", *ORE_TOP}):
-        return CandidateSet(candidates=[], mask=[])
+        return allocate([])
 
     def search() -> CandidateSet:
-        found = ore_search_choices(observation, block, remaining) if block in ORE_TOP else fresh_movement_candidates(observation)
-        return CandidateSet(candidates=found, mask=[True] * len(found))
+        return allocate(ore_search_choices(observation, block, remaining) if block in ORE_TOP
+                        else fresh_movement_candidates(observation))
 
     def add(kind: Literal["place_or_equip", "mine_visible_cluster", "move_observed", "wait"],
             params: dict[str, JsonValue], description: str) -> None:
@@ -45,7 +45,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
                     f"Collect observed {drop.item} drop")
             else:
                 add("wait", {}, f"Wait for observed {drop.item} pickup")
-            return CandidateSet(candidates=candidates, mask=[True] * len(candidates))
+            return allocate(candidates)
     logs = sorted({tuple(cell.position) for cell in observation.observed_map if cell.block == block and cell.visible},
                   key=lambda p: (math.dist(p, observation.position), p))
     if not logs:
@@ -54,7 +54,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
     used: set[tuple[float, ...]] = set()
     eye = [observation.position[0], observation.position[1] + 1.62, observation.position[2]]
     for target in logs:
-        if target in used or len(candidates) >= 8:
+        if target in used:
             continue
         def close(p: tuple[float, ...]) -> bool:
             return (math.hypot(p[0] + 0.5 - observation.position[0],
@@ -79,8 +79,6 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
                         cluster.append(other)
             used.update(cluster)
             for count in sorted({1, len(cluster)}):
-                if len(candidates) >= 8:
-                    break
                 add("mine_visible_cluster", {"block": block, "blocks": [list(p) for p in cluster[:count]],
                                              "map_version": observation.map_version},
                     f"Mine {count} exposed {goal.target} at {list(target)} and collect its drops")
@@ -96,4 +94,4 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
                         f"Approach exposed {goal.target} at {list(target)}")
     if not candidates and block in ORE_TOP:
         return search()  # Seen but unreachable on this level: cutting is the only way to close in.
-    return CandidateSet(candidates=candidates, mask=[True] * len(candidates))
+    return allocate(candidates)

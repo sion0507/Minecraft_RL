@@ -11,7 +11,7 @@ from .navigation import generate_descent_candidates, generate_movement_candidate
 from .macros import generate_wood_candidates
 from .production import generate_production_candidates
 from .rpc import EpisodeError, RpcSession
-from .schema import Candidate, CandidateSet, ErrorInfo, Goal, Observation
+from .schema import Candidate, CandidateSet, ErrorInfo, Goal, Observation, allocate
 
 
 def policy_signature(value: dict[str, Any]) -> dict[str, Any]:
@@ -64,15 +64,14 @@ def audit_stairs(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
         rows: list[dict[str, Any]] = []
         for stairs in plan:
             # G2/G4 search for iron/diamond with the shared ore search: stairs, then tunnels, the ore on the stop list.
-            found = (generate_descent_candidates(observation).candidates if target is None
-                     else ore_search_choices(observation, target, 3 if target == "iron_ore" else 1))
-            candidates = CandidateSet(candidates=found, mask=[True] * len(found))
+            candidates = (generate_descent_candidates(observation) if target is None
+                          else allocate(ore_search_choices(observation, target, 3 if target == "iron_ore" else 1)))
             emit("information_stair_observation", observation)
             emit("information_stair_candidates", candidates)
             east = next((c for c in candidates.candidates if c.action_kind == kind and c.params["direction"] == [1, 0]), None)
             if east is None:
                 raise ValueError("Stair/tunnel candidate absent")
-            # Workload and section are overridden alike: the 8-choice cap may leave the 1x3 option out above the ore layers.
+            # Workload and section are overridden alike: the 1x3 section is offered only facing first, which need not be east.
             workload = {"stairs": stairs} if kind == "stair_down" else {"cells": stairs, "height": height}
             selected = east.model_copy(update={"params": {**east.params, **workload}})
             step = session.policy().step(selected)
