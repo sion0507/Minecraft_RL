@@ -1,5 +1,17 @@
 # 실행 기록
 
+## 2026-11-09 — Pathfinder 보류·보존, #36 사람 선택 진단 기록 보충
+
+- **Pathfinder:** 사용자 결정으로 보류했다(DECISIONS 같은 날).
+  - Codex 비교 22건과 Claude 추가 실제 진단 13건(복사 서버 25590, 63조건 미인증, `pause_verified=false`)의 결과는 `artifacts/claude-pathfinder-review-2026-11-09/report.md`에 있다.
+  - 보존 위치: 로컬 브랜치 두 개, 태그 `pathfinder-deferred-2026-11-09`, `archive/pathfinder-2026-11-09/`.
+  - main 코드는 바꾸지 않았다.
+- **#36 사람 선택 진단 보충(아래 #36 절, 원시 `artifacts/issue-36/human/g2-2.jsonl`·`g4-2.jsonl`):**
+  - 두 실행은 사용자 대신 Hermes가 했다. 아래 절의 "사용자가 별도 Claude 터미널에서"를 이것으로 바로잡는다.
+  - 로그에서 다시 확인한 값: G2 `goal_completed`·관리자 판정 자연 철광석 3(돌 곡괭이 직접 채굴·드롭 획득)·10결정·활성 1,038틱. G4 `diamond_success`·자연 다이아 `(-133,8,81)` 철 곡괭이 직접 채굴·획득·9결정·활성 526틱.
+  - 복사 서버 `worlds/human-copy`(25566)에는 시계 인증서가 없다. 그래서 두 실행 모두 `clock_mode=unverified`이고 CLI가 exit 1을 반환했다(`cli.py` unverified 분기).
+  - 선택에는 운영자 월드 정보(광석·동굴 위치)를 썼다. 따라서 이 결과는 "후보 집합에 성공 경로가 있다"는 증거일 뿐이고, 정책 성능 근거가 아니다.
+
 ## 2026-11-09 — T12 공통 평가 슬롯과 서버 오류 재시도 구현 (#13, mock 검증)
 
 **기준:** 브랜치 `issue-13-t12`, 시작 main `1c83428`. 결정은 DECISIONS 같은 날 #13 절.
