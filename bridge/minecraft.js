@@ -10,7 +10,7 @@ const { promisify, isDeepStrictEqual } = require('node:util')
 const { Server } = require('./server')
 const mineflayer = require('mineflayer')
 const { Vec3 } = require('vec3')
-const { Terrain } = require('./terrain')
+const { Terrain, FAR_RADIUS, NEAR_RADIUS } = require('./terrain')
 const recipes = require('../src/mc_diamond/recipes.json')
 const fuels = { coal: 1600, charcoal: 1600, ...Object.fromEntries(recipes.filter(r => r.item.endsWith('_planks')).map(r => [r.item, 300])) }
 const furnaces = new Map()
@@ -187,10 +187,12 @@ function clientState () {
     inventory: inventory(), events: eventCount }
 }
 
-async function observation () {
+// A decision observation scans FAR_RADIUS and carries the policy map. A macro's per-tick stop checks (`near`) rescan only
+// NEAR_RADIUS, so far cells then stay in memory without being visible; such states never reach the policy (#44).
+async function observation (near = false) {
   if (!episode || !bot || !connected || !frozen) fail('backend_error')
   const self = clientState()
-  terrain.scan(bot)
+  terrain.scan(bot, near ? NEAR_RADIUS : FAR_RADIUS)
   const observedDrops = []
   for (const [id, drop] of drops) {
     const entity = bot.entities[id]
@@ -210,8 +212,8 @@ async function observation () {
     tool: bot.heldItem ? bot.heldItem.name : null,
     tool_durability: bot.heldItem && bot.heldItem.maxDurability ? bot.heldItem.maxDurability - (bot.heldItem.durabilityUsed || 0) : null,
     yaw: bot.entity.yaw, pitch: bot.entity.pitch, map_version: terrain.version,
-    hidden_hazard_peek: false, visited: terrain.visited,
-    observed_map: terrain.cells(), drops: observedDrops, history,
+    hidden_hazard_peek: false, visited: terrain.visited, discovered_open: terrain.discoveredOpen,
+    ...(!near && { observed_map: terrain.cells(self.position) }), drops: observedDrops, history,
     furnaces: [...furnaces.values()].filter(f => terrain.visible.has(f.position.join(',')) &&
       terrain.memory.get(f.position.join(','))?.block === 'furnace') }
 }
@@ -272,9 +274,10 @@ async function reset (payload) {
   return await observation()
 }
 
-async function moveObserved (candidate) {
+// Nested in another macro (`near`), the walk keeps that macro's near scans so its map_version stays comparable.
+async function moveObserved (candidate, near = false) {
   const started = performance.now()
-  const initial = await observation()
+  const initial = await observation(near)
   const route = candidate.params.path
   const allowed = exactKeys(candidate.params, ['path', 'map_version']) &&
     candidate.params.map_version === initial.map_version && terrain.validPath(initial.position, route)
@@ -315,7 +318,7 @@ async function moveObserved (candidate) {
     const previous = state.position
     ticks += await advance(1, true)
     observationIndex++
-    state = await observation()
+    state = await observation(true)
     const travelled = Math.hypot(...state.position.map((v, i) => v - previous[i]))
     distance += travelled
     idle = travelled < 0.001 && !settling ? idle + 1 : 0
@@ -324,13 +327,13 @@ async function moveObserved (candidate) {
   if (!ticks) {
     ticks += await advance(1, true)
     observationIndex++
-    state = await observation()
+    state = await observation(true)
     distance = Math.hypot(...state.position.map((value, axis) => value - initial.position[axis]))
   }
   if (allowed && ticks >= limit) reason = 'active_tick_limit'
   await pause(true)
   history = [...history.slice(-15), 'move_observed:' + reason]
-  state = await observation()
+  state = await observation(near)
   return stepResult(candidate, started, ticks, state,
     [event(distance > 0 ? 'moved' : 'stopped'), ...drainEvents()], reason,
     { invalid: !allowed, stableBoundary: !interrupted && terrain.stable(state), path: allowed ? route : [], distanceMoved: distance })
@@ -426,7 +429,7 @@ async function executeMacro (candidate, recoveryWait = false) {
   const tick = async () => {
     ticks += await advance(1, true)
     observationIndex++
-    state = await observation()
+    state = await observation(true)
     reason = interruptReason(state, ['place_or_equip', 'craft_batch', 'furnace_load', 'furnace_collect'].includes(candidate.action_kind)
       ? { ...initial, tool: null } : initial, transit) || watch()
   }
@@ -486,7 +489,7 @@ async function executeMacro (candidate, recoveryWait = false) {
       // A pending inventory transaction must never escape into the next selection.
       if (!settled) { await pause(); fail('backend_error') }
     }
-    state = await observation()
+    state = await observation(true)
     reason = interruptReason(state, { ...initial, tool: null }) || reason
     if (failed && !reason) reason = 'operation_failed'
     if (!failed && !confirmed() && !reason) reason = 'operation_unconfirmed'
@@ -640,7 +643,7 @@ async function executeMacro (candidate, recoveryWait = false) {
           const before = inventory()[item.name] || 0
           const success = await operation(() => bot.placeBlock(bot.blockAt(new Vec3(...floor), false), new Vec3(0, 1, 0)),
             () => before - (inventory()[item.name] || 0) === 1)
-          state = await observation()
+          state = await observation(true)
           if (success && terrain.memory.get(point.join(','))?.block === item.name && before - (inventory()[item.name] || 0) === 1) {
             events.push(event('placed', { item: item.name, quantity: 1, position: point }))
             if (!reason) reason = 'place_completed'
@@ -677,7 +680,7 @@ async function executeMacro (candidate, recoveryWait = false) {
       if (point && ticks < limit) {
         const route = [[point[0] + 0.5, point[1], point[2] + 0.5]]
         const moved = await moveObserved({ ...candidate, action_kind: 'move_observed',
-          source_obs_id: state.obs_id, max_ticks: limit - ticks, params: { path: route, map_version: state.map_version } })
+          source_obs_id: state.obs_id, max_ticks: limit - ticks, params: { path: route, map_version: state.map_version } }, true)
         ticks += moved.actual_ticks
         state = moved.observation
         events.push(...moved.events)

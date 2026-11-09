@@ -8,6 +8,12 @@ const falling = new Set(['sand', 'red_sand', 'gravel'])
 const bouncy = new Set(['slime_block'])
 const hazardRadius = 1.5 // No macro starts or continues this close to a remembered hazard (Python HAZARD_RADIUS).
 const key = p => p.join(',')
+const FAR_RADIUS = 32 // Decision observations (#44); macro ticks rescan only NEAR_RADIUS for their stop checks.
+const NEAR_RADIUS = 8
+// Python routes are at most 16 steps (plus head/jump cells), so the policy map carries remembered air only this close.
+const AIR_WINDOW = 18
+const open = new Set(['air', 'cave_air', 'void_air'])
+const fullCube = s => s.length === 6 && s[0] === 0 && s[1] === 0 && s[2] === 0 && s[3] === 1 && s[4] === 1 && s[5] === 1
 
 class Terrain {
   constructor () { this.reset() }
@@ -18,58 +24,83 @@ class Terrain {
     this.visited = []
     this.visitKeys = new Set()
     this.visible = new Set()
+    this.discoveredOpen = 0 // Positions first observed passable: explore progress that the air window cannot show.
   }
 
-  cells () { return [...this.memory.values()].map(cell => ({ ...cell, visible: this.visible.has(key(cell.position)) })).sort((a, b) => key(a.position).localeCompare(key(b.position), 'en')) }
+  // Policy map: every remembered non-air cell, remembered air within AIR_WINDOW (Chebyshev) of `position` (all air
+  // without one). The executor keeps using the whole memory.
+  cells (position = null) {
+    const [x, y, z] = position ? position.map(Math.floor) : []
+    const near = p => !position || Math.max(Math.abs(p[0] - x), Math.abs(p[1] - y), Math.abs(p[2] - z)) <= AIR_WINDOW
+    return [...this.memory.values()].filter(cell => !open.has(cell.block) || near(cell.position))
+      .map(cell => ({ ...cell, visible: this.visible.has(key(cell.position)) }))
+      .sort((a, b) => a.position[0] - b.position[0] || a.position[1] - b.position[1] || a.position[2] - b.position[2])
+  }
 
-  scan (bot) {
+  // One ray from the eye to every cell centre within `radius`; a cell is visible when some ray reaches it. Decision
+  // observations use FAR_RADIUS, the per-tick checks inside a macro NEAR_RADIUS; `visible` is always the last scan's set.
+  scan (bot, radius = FAR_RADIUS) {
     const origin = bot.entity.position.offset(0, bot.entity.eyeHeight, 0).toArray()
-    const base = origin.map(Math.floor)
-    const cache = new Map()
+    const [bx, by, bz] = origin.map(Math.floor)
+    const side = 2 * radius + 5 // Every ray/side cell lies within radius + 2 of the eye's cell.
+    const cache = new Uint8Array(side ** 3) // 0 unseen, 1 passable, 2 stops the ray
     let changed = false
     const visible = new Set()
-    const inspect = point => {
-      const id = key(point)
-      if (cache.has(id)) return cache.get(id)
-      if (Math.hypot(...point.map((v, i) => v + 0.5 - origin[i])) > 8) return false
-      const block = bot.blockAt(new Vec3(...point), false)
-      if (!block) { cache.set(id, false); return false }
+    const inspect = (x, y, z) => {
+      const index = ((x - bx + radius + 2) * side + (y - by + radius + 2)) * side + (z - bz + radius + 2)
+      if (cache[index]) return cache[index] === 1
+      cache[index] = 2
+      if (Math.hypot(x + 0.5 - origin[0], y + 0.5 - origin[1], z + 0.5 - origin[2]) > radius) return false
+      const block = bot.blockAt(new Vec3(x, y, z), false)
+      if (!block) return false
+      const id = `${x},${y},${z}`
       visible.add(id)
-      const passable = block.shapes.length === 0 && !hazards.has(block.name)
-      const cell = { block: block.name, position: point, passable,
-        support: JSON.stringify(block.shapes) === '[[0,0,0,1,1,1]]' && !hazards.has(block.name) && !slippery.has(block.name),
-        hazard: hazards.has(block.name) }
-      if (JSON.stringify(this.memory.get(id)) !== JSON.stringify(cell)) {
-        this.memory.set(id, cell)
+      const hazard = hazards.has(block.name)
+      const passable = block.shapes.length === 0 && !hazard
+      const support = !hazard && !slippery.has(block.name) && block.shapes.length === 1 && fullCube(block.shapes[0])
+      const old = this.memory.get(id)
+      if (!old || old.block !== block.name || old.passable !== passable || old.support !== support || old.hazard !== hazard) {
+        if (!old && passable) this.discoveredOpen++
+        this.memory.set(id, { block: block.name, position: [x, y, z], passable, support, hazard })
         changed = true
       }
-      cache.set(id, passable)
+      if (passable) cache[index] = 1
       return passable
     }
-    for (let dx = -8; dx <= 8; dx++) for (let dy = -8; dy <= 8; dy++) for (let dz = -8; dz <= 8; dz++) {
-      const target = [base[0] + dx, base[1] + dy, base[2] + dz]
-      const delta = target.map((v, i) => v + 0.5 - origin[i])
-      if (Math.hypot(...delta) > 8) continue
-      const point = [...base]
-      const step = delta.map(Math.sign)
-      const stride = delta.map(v => v ? 1 / Math.abs(v) : Infinity)
-      const boundary = point.map((v, i) => delta[i] ? (v + (step[i] > 0 ? 1 : 0) - origin[i]) / delta[i] : Infinity)
-      for (let n = 0; n < 32; n++) {
-        if (!inspect([...point]) || key(point) === key(target)) break
-        const next = Math.min(...boundary)
-        const axes = [0, 1, 2].filter(i => Math.abs(boundary[i] - next) < 1e-10)
-        // Supercover: never see through the edge/corner where opaque cells touch.
-        let blocked = false
-        for (let mask = 1; mask < (1 << axes.length) - 1; mask++) {
-          const side = [...point]
-          axes.forEach((axis, i) => { if (mask & (1 << i)) side[axis] += step[axis] })
-          if (!inspect(side)) { blocked = true; break }
+    const [ox, oy, oz] = origin
+    for (let dx = -radius; dx <= radius; dx++) for (let dy = -radius; dy <= radius; dy++) for (let dz = -radius; dz <= radius; dz++) {
+      const [tx, ty, tz] = [bx + dx, by + dy, bz + dz]
+      const [ex, ey, ez] = [tx + 0.5 - ox, ty + 0.5 - oy, tz + 0.5 - oz]
+      if (Math.hypot(ex, ey, ez) > radius) continue
+      const [sx, sy, sz] = [Math.sign(ex), Math.sign(ey), Math.sign(ez)]
+      const [rx, ry, rz] = [ex ? 1 / Math.abs(ex) : Infinity, ey ? 1 / Math.abs(ey) : Infinity, ez ? 1 / Math.abs(ez) : Infinity]
+      let [px, py, pz] = [bx, by, bz]
+      // Ray parameter of the next boundary on each axis, as in a voxel traversal.
+      let mx = ex ? (px + (sx > 0 ? 1 : 0) - ox) / ex : Infinity
+      let my = ey ? (py + (sy > 0 ? 1 : 0) - oy) / ey : Infinity
+      let mz = ez ? (pz + (sz > 0 ? 1 : 0) - oz) / ez : Infinity
+      // Each move crosses at least one boundary, so the ray reaches the target within its Manhattan distance.
+      for (let n = 0; ; n++) {
+        if (n > Math.abs(dx) + Math.abs(dy) + Math.abs(dz)) throw new Error('Ray missed its target cell')
+        if (!inspect(px, py, pz) || (px === tx && py === ty && pz === tz)) break
+        const next = Math.min(mx, my, mz)
+        const [hx, hy, hz] = [Math.abs(mx - next) < 1e-10, Math.abs(my - next) < 1e-10, Math.abs(mz - next) < 1e-10]
+        if (hx + hy + hz > 1) {
+          // Supercover: never see through the edge/corner where opaque cells touch.
+          const axes = [hx && 0, hy && 1, hz && 2].filter(axis => axis !== false)
+          let blocked = false
+          for (let mask = 1; mask < (1 << axes.length) - 1 && !blocked; mask++) {
+            const moved = axis => axes.some((a, i) => a === axis && mask & (1 << i))
+            blocked = !inspect(px + (moved(0) ? sx : 0), py + (moved(1) ? sy : 0), pz + (moved(2) ? sz : 0))
+          }
+          if (blocked) break
         }
-        if (blocked) break
-        for (const axis of axes) { point[axis] += step[axis]; boundary[axis] += stride[axis] }
+        if (hx) { px += sx; mx += rx }
+        if (hy) { py += sy; my += ry }
+        if (hz) { pz += sz; mz += rz }
       }
     }
-    if (changed || [...visible].sort().join(';') !== [...this.visible].sort().join(';')) this.version++
+    if (changed || visible.size !== this.visible.size || [...visible].some(id => !this.visible.has(id))) this.version++
     this.visible = visible
     const visit = bot.entity.position.floored().toArray()
     if (!this.visitKeys.has(key(visit))) { this.visitKeys.add(key(visit)); this.visited.push(visit) }
@@ -171,4 +202,4 @@ class Terrain {
   }
 }
 
-module.exports = { Terrain }
+module.exports = { Terrain, FAR_RADIUS, NEAR_RADIUS, AIR_WINDOW }

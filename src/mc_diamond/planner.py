@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
+from .model_input import INPUT_HASH, public_state, text
 from .rpc import EpisodeError
 from .schema import AstraPlannerConfig, ErrorInfo, Goal, LocalPlannerConfig, Observation, PlannerSettings
 
@@ -21,16 +22,10 @@ Emit = Callable[[str, dict[str, Any]], None]
 
 def messages(observation: Observation, task: Goal, feedback: str | None) -> list[dict[str, str]]:
     # Revalidate at the provider boundary: mutated model_copy objects cannot smuggle administrator fields.
-    observation = Observation.model_validate(observation.model_dump())
     task = Goal.model_validate(task.model_dump())
-    state = observation.model_dump(exclude={"episode_id", "attempt_id", "obs_id", "observed_map", "visited", "history"})
-    surfaces = sorted((s for s in observation.observed_map if s.visible and s.block not in {"air", "cave_air", "void_air"}),
-                      key=lambda s: (sum((a - b) ** 2 for a, b in zip(s.position, observation.position)), s.position, s.block))
-    state.update(observed_surfaces=[s.model_dump() for s in surfaces[:64]], observed_surface_count=len(surfaces),
-                 visited_count=len(observation.visited), recent_visited=observation.visited[-32:], recent_results=observation.history[-8:])
-    payload = {"observation": state, "task": task.model_dump(exclude={"goal_id"}), "feedback": feedback,
+    payload = {"observation": public_state(observation), "task": task.model_dump(exclude={"goal_id"}), "feedback": feedback,
                "knowledge": None}  # PLAN §5.5: retrieval is conditional, not silently added at connection time
-    return [{"role": "system", "content": PROMPT}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False, allow_nan=False)}]
+    return [{"role": "system", "content": PROMPT}, {"role": "user", "content": text(payload)}]
 
 
 def failure(code: Literal["planner_error", "planner_unavailable", "permission_denied", "invalid_request"] = "planner_error") -> EpisodeError:
@@ -68,7 +63,7 @@ class LocalPlanner:
             raise ValueError("Planner must be frozen and actually loaded in 4-bit")
         self.config, self.emit = config, emit
         emit("planner_loaded", {"backend": "local_7b", "model": config.model, "version": config.version,
-            "files_sha256": manifest["files_sha256"], "prompt_sha256": PROMPT_HASH,
+            "files_sha256": manifest["files_sha256"], "prompt_sha256": PROMPT_HASH, "input_rules_sha256": INPUT_HASH,
             "quantization": "nf4_double_quant_bf16", "temperature": 0, "decoding": "greedy", "do_sample": False,
             "max_new_tokens": config.max_new_tokens, "context_limit": 8192,
             "device": torch.cuda.get_device_name(), "torch": torch.__version__, "cuda": torch.version.cuda,
@@ -115,7 +110,7 @@ class AstraPlanner:
         self.config, self.budget_file, self.emit = config, budget_file, emit
         emit("planner_loaded", {"backend": "astra", "provider": config.provider, "model": config.model, "version": config.version,
             "endpoint": config.endpoint, "protocol": "chat_completions", "supported_settings": config.supported_settings,
-            "prompt_sha256": PROMPT_HASH, "rates_checked_on": config.rates_checked_on,
+            "prompt_sha256": PROMPT_HASH, "input_rules_sha256": INPUT_HASH, "rates_checked_on": config.rates_checked_on,
             "input_usd_per_million": config.input_usd_per_million, "output_usd_per_million": config.output_usd_per_million,
             "max_calls": config.max_calls, "max_usd": config.max_usd, "request_usd_ceiling": config.request_usd_ceiling,
             "approved": config.approved, "access_verified": False})

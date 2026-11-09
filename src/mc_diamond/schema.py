@@ -63,6 +63,8 @@ class Observation(Contract):
     pitch: float = 0.0
     map_version: Count = 0
     visited: list[list[float]] = Field(default_factory=list)
+    # Positions first observed passable this episode; observed_map carries air only near the bot (#44).
+    discovered_open: Count = 0
     hidden_hazard_peek: Literal[False] = False
     drops: list[ObservedDrop] = Field(default_factory=list)
     furnaces: list[FurnaceState] = Field(default_factory=list)
