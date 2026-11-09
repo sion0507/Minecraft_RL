@@ -1,21 +1,23 @@
 import argparse
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from uuid import uuid4
 
 import yaml
 from pydantic import ValidationError
 
-from .episode import emit, first_candidate, run_episode
+from .episode import emit, run_episode
 from .doctor import doctor
 from .clock import verify_clock
 from .information import audit_information
 from .rpc import EpisodeError, RpcSession
-from .schema import Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Observation
+from .schema import CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Goal, Observation, SelectionResult
+from .selectors import first_candidate, result, rule_select
 
 
-def human_select(saved: CandidateSet, observation: Observation) -> Candidate:
+def human_select(observation: Observation, _goal: Goal, saved: CandidateSet, _failures: Sequence[str]) -> SelectionResult:
     """#36 feasibility diagnostic: the operator only picks among the generated candidates; code executes and judges."""
     ores = sorted((sum((a - b) ** 2 for a, b in zip(s.position, observation.position)), s.block, [int(v) for v in s.position])
                   for s in observation.observed_map if s.block.endswith("_ore"))
@@ -31,7 +33,7 @@ def human_select(saved: CandidateSet, observation: Observation) -> Candidate:
         if not answer:
             raise EOFError("human selector input closed")
         if answer.strip().isdigit() and 1 <= int(answer) <= len(saved.candidates):
-            return saved.candidates[int(answer) - 1]
+            return result(saved.candidates[int(answer) - 1], "human")
 
 
 def main() -> int:
@@ -43,8 +45,8 @@ def main() -> int:
     place = parser.add_mutually_exclusive_group()
     place.add_argument("--start", type=int, nargs=3, metavar=("X", "Y", "Z"), help="prepare-world: C4-G3 surface start block")
     place.add_argument("--g4", type=int, nargs=3, metavar=("X", "Y", "Z"), help="prepare-world: user-confirmed G4 start block")
-    parser.add_argument("--select", choices=["fixed", "human"], default="fixed",
-                        help="smoke-macros: human = operator picks candidates (#36 feasibility diagnostic, no wall limit)")
+    parser.add_argument("--select", choices=["fixed", "human", "rule"], default="fixed",
+                        help="human = operator picks candidates (#36 feasibility diagnostic, no wall limit); rule = selector S")
     args = parser.parse_args()
     if args.command == "prepare-world" and args.start is None and args.g4 is None:
         parser.error("prepare-world requires --start X Y Z or --g4 X Y Z")
@@ -95,8 +97,7 @@ def main() -> int:
             summary = run_episode(config, session.policy(), reset,
                                   episode_id, attempt_id, movement=args.command == "smoke-movement",
                                   macros=args.command == "smoke-macros",
-                                  select=human_select if args.select == "human" else first_candidate,
-                                  selector_mode="human" if args.select == "human" else "mock_fixed",
+                                  select={"human": human_select, "rule": rule_select}.get(args.select, first_candidate),
                                   verification=(lambda: session._call("verification_log", {}, admin=True))
                                   if args.command == "smoke-macros" else None)
         if summary.error or summary.invalid:

@@ -1,5 +1,21 @@
 # 실행 기록
 
+## 2026-11-09 — T08 목표 처리·재계획·규칙 복구·S 선택기 구현 (#9, 실제 게임 검증 전)
+
+**기준:** 브랜치 `issue-9-t08`, 시작 `32e097e`. 결정은 DECISIONS 같은 날 #9 절이다. push·PR은 하지 않았다.
+
+- **구현:**
+  - `goals.py`: GoalRegistry(`validate` 형식·즉시 전제조건·제공 상태 거부, `completed` 7종 완료 규칙, `recovery_goal` escape/explore), `Planning`(최초 요청 → 재생성 1회 → 복구, 분자·분모 집계), `ActiveGoal`(완료·연속 실패 3·3,600틱·매크로 20 재계획 사건, GoalStats 행), 모의 `scripted_planner`.
+  - `selectors.py`: 공통 selector 계약 `(observation, goal, saved, failures) → SelectionResult`, 고정 첫 후보, 규칙 기반 S(`s-rules-v1`, 사전식 키·hash·후보별 키 기록).
+  - `episode.py`: 결정 전 목표 채택(`goal_decision` 기록), 목표별 후보, 제시·마스크 후보 검사, 목표 ID·출처를 매크로 증거·보상·`progress_by_source`·`goal_outcomes`에 연결, 계획기 집계를 summary에. 과제 완료(`config.goal`)와 목표 완료를 나눴다. escape/explore 후보는 기존 보행·hold·광석 탐색 생성기를 쓴다.
+  - CLI `--select rule`(S). `tools/verify_t06.py`의 방향 고정 selector를 새 계약으로 바꿨다.
+- **개발 검사(mock·공개 CLI, 실제 서버 아님):** pytest 188 passed(53.7초, 기존 135 + 새 53), strict mypy 34파일 통과.
+  - 공개 흐름: 정상 완료 → 재계획 → 두 번째 목표 완료, 잘못된 JSON → 재생성, 전제조건·형식 오류 2회 → 복구 explore(완료 뒤 다시 복구), 연속 실패 3·매크로 20·3,600틱 각각의 재계획, 고정 목표 재채택, reset 후 같은 결정.
+  - GoalRegistry 거부 18경우·채택 6경우, 완료 규칙 사건 fixture 12경우(explore·escape는 실제 매크로 연결 검증 전이라 사건 fixture로만 확인).
+  - S: 관련성 순서, 위험 회피, 최근 실패 회피(모두 실패면 무시), 동률 저장 순서, 작업량, descend·escape hold, 21개 → 16개 저장 집합에서 유효 ID·마스크, CLI에서 실패한 원목을 피해 다른 원목 선택, 관리자 로그만 다른 두 실행의 선택 동일, 0/1 후보 공통 계약.
+  - 변형 검사: 재생성 제거·S 실패 규칙 제거·제공 보유로 완료·연속 실패 사건 제거·S 위험 규칙 제거를 각각 넣으면 새 검사가 실패함을 확인하고 원래대로 돌렸다.
+- **실행하지 않음:** 실제 7B·Astra 계획기(T09), #13 S 슬롯 연결(#13 미구현), 실제 정보 감사·T04–T07 회귀(DECISIONS에 범위를 사전 등록, 실행 승인 대기). escape·explore 목표와 S의 실제 게임 동작은 미검증이다.
+
 ## 2026-11-09 — #38 병합·종료, 실제 검증은 T08 뒤로 (사용자 지시)
 
 - 사용자가 #38의 실제 정보 감사·T04–T07 자연 회귀를 T08(#9) 구현 뒤로 미루고, push·병합·#38 종료와 다른 이슈 문구 수정을 지시했다(DECISIONS 같은 날).

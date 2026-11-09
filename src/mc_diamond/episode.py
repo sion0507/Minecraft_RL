@@ -1,20 +1,25 @@
 """Shared smoke execution flow. Research rewards and actors are subsequent work."""
 
 import json
-import math
 import time
+from collections import deque
 from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
 from .rpc import EpisodeError, PolicyEnvironment
-from .navigation import PICKS, SAFE_BAND, escape_candidates, generate_descent_candidates, generate_movement_candidates
+from .goals import ESCAPE_DISTANCE, ActiveGoal, Planning, completed, scripted_planner
+from .navigation import (
+    ORE_TOP, PICKS, escape_candidates, fresh_movement_candidates, generate_descent_candidates, generate_movement_candidates,
+    hazard_distance, hold_candidate, ore_search_choices, safe_ground,
+)
 from .macros import generate_wood_candidates
 from .production import generate_production_candidates
+from .selectors import Selector, first_candidate, signature
 from .schema import (
-    Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Event, Goal, MacroEvidence, Observation, SelectionResult,
-    StepResult, allocate,
+    Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Event, Goal, GoalOutcome, MacroEvidence, Observation,
+    SelectionResult, allocate,
 )
 
 
@@ -44,6 +49,14 @@ def policy_candidates(observation: Observation, goal: Goal, *, movement: bool = 
         return generate_candidates(observation, goal)
     if goal.kind == "descend":
         return generate_descent_candidates(observation)
+    if goal.kind == "escape":
+        walks = generate_movement_candidates(observation).candidates
+        hold = (hazard_distance(observation.observed_map, observation.position) >= ESCAPE_DISTANCE and safe_ground(observation)
+                and observation.remaining_ticks)
+        return allocate([hold_candidate(observation), *walks] if hold else walks)
+    if goal.kind == "explore":
+        return allocate(ore_search_choices(observation, goal.target, 0) if goal.target in ORE_TOP
+                        else fresh_movement_candidates(observation))
     if goal.target.endswith("_log"):
         return generate_wood_candidates(observation, goal)
     return generate_production_candidates(observation, goal)
@@ -77,25 +90,14 @@ def admin_verified(log: dict[str, Any], acquired: dict[str, Event]) -> dict[str,
 STALL_LIMIT = 20  # consecutive <=1-tick steps with no position/map/inventory/durability change
 
 
-def descent_completed(step: StepResult) -> bool:
-    """Iron pickaxe carried (inventory, not hand) through one uninterrupted 20-tick hold on observed ground at y=5-12."""
-    return (SAFE_BAND[0] <= math.floor(step.observation.position[1]) <= SAFE_BAND[1]
-            and step.stable_boundary and not step.invalid and not step.cancelled
-            and step.observation.inventory.get("iron_pickaxe", 0) >= 1
-            and any(event.kind == "safe_hold" and event.quantity >= 20 for event in step.events))
-
-
-def first_candidate(saved: CandidateSet, _observation: Observation) -> Candidate:
-    return saved.candidates[0]
-
-
 def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 reset: Callable[[], Observation], episode_id: str, attempt_id: str,
-                *, movement: bool = False, macros: bool = False,
-                select: Callable[[CandidateSet, Observation], Candidate] = first_candidate,
-                selector_mode: Literal["mock_fixed", "human"] = "mock_fixed",
+                *, movement: bool = False, macros: bool = False, select: Selector = first_candidate,
                 verification: Callable[[], dict[str, Any]] | None = None) -> EpisodeSummary:
-    """`verification` reads the administrator log only after the last decision, so no policy input can see it."""
+    """`verification` reads the administrator log only after the last decision, so no policy input can see it.
+
+    `config.goal` is the task. Without a planner it is also the one fixed goal, re-adopted at every replan trigger.
+    """
     started = time.monotonic()
     active_ticks = decisions = 0
     selection_requests = cancelled_selections = 0
@@ -114,13 +116,22 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     acquired_events: dict[str, Event] = {}
     verified: dict[str, int] = {}
     stalled = 0
-    terminated = truncated = invalid = completed = False
+    terminated = truncated = invalid = done = False
+    planner = config.planner
+    planning = Planning(config.goal, scripted_planner(planner) if planner else None,
+                        planner.model if planner else None, planner.version if planner else None)
+    active: ActiveGoal | None = None
+    trigger = "episode_start"
+    outcomes: list[GoalOutcome] = []
+    progress_by_source: dict[str, dict[str, int]] = {}
+    failures: deque[str] = deque(maxlen=3)  # signatures of the latest failed actions, for selector S
     reason = "decision_limit"
     error: ErrorInfo | None = None
     clock_mode: Literal["mock", "paused", "realtime", "unverified"] = "mock" if config.backend == "mock" else "unverified"
     try:
         initial = reset()
         provided_inventory = dict(initial.inventory)
+        start = initial
         emit("reset", initial)
         observation = environment.observe()
         if observation != initial:
@@ -130,25 +141,38 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 raise EpisodeError(ErrorInfo(code="protocol_error", message="Episode/attempt ID mismatch"))
             active_ticks = observation.active_ticks
             emit("observation", observation)
-            emit("goal", config.goal)
             if observation.remaining_ticks == 0:
                 truncated, reason = True, "active_tick_limit"
                 break
             if config.wall_limit_seconds is not None and time.monotonic() - started >= config.wall_limit_seconds:
                 truncated, reason = True, "wall_time_limit"
                 break
-            saved = policy_candidates(observation, config.goal, movement=movement, macros=macros)
+            if active is None:
+                adopted, decision = planning.decide(observation, trigger)
+                emit("goal_decision", decision)
+                active = ActiveGoal(adopted, observation)
+            goal = active.goal
+            emit("goal", goal)
+            saved = policy_candidates(observation, goal, movement=movement, macros=macros)
             emit("candidates", saved)
-            candidate = select(saved, observation) if saved.candidates else Candidate(
-                candidate_id=f"{observation.obs_id}:wait", action_kind="wait", params={},
-                max_ticks=min(20, observation.remaining_ticks), stop_rule_id="no_candidates",
-                source_obs_id=observation.obs_id, description="Wait when no candidate is available",
-            )
-            selection = SelectionResult(
-                candidate_id=candidate.candidate_id, selector_mode=selector_mode if saved.candidates else "forced_wait",
-                probabilities={candidate.candidate_id: 1.0} if macros and len(saved.candidates) <= 1 else None,
-                latency_seconds=0.0, provider=None, model=None, usage=None,
-            )
+            if saved.candidates:
+                asked = time.monotonic()
+                selection = select(observation, goal, saved, tuple(failures))
+                offered = {c.candidate_id: c for c, allowed in zip(saved.candidates, saved.mask) if allowed}
+                if selection.candidate_id not in offered:
+                    raise EpisodeError(ErrorInfo(code="invalid_selection", message="Selector returned no offered candidate"))
+                candidate = offered[selection.candidate_id]
+                selection = selection.model_copy(update={"latency_seconds": time.monotonic() - asked})
+            else:
+                candidate = Candidate(
+                    candidate_id=f"{observation.obs_id}:wait", action_kind="wait", params={},
+                    max_ticks=min(20, observation.remaining_ticks), stop_rule_id="no_candidates",
+                    source_obs_id=observation.obs_id, description="Wait when no candidate is available",
+                )
+                selection = SelectionResult(candidate_id=candidate.candidate_id, selector_mode="forced_wait", probabilities=None,
+                                            latency_seconds=0.0, provider=None, model=None, usage=None)
+            if macros and len(saved.candidates) <= 1:
+                selection = selection.model_copy(update={"probabilities": {candidate.candidate_id: 1.0}})
             emit("selection", selection)
             selection_requests += 1
             step = environment.step(candidate)
@@ -196,6 +220,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             if macros or moving:
                 evidence = MacroEvidence(
                     candidate_id=candidate.candidate_id, source_obs_id=observation.obs_id,
+                    goal_id=goal.goal_id, goal_source=goal.source,
                     **step.model_dump(include={"map_version", "events", "reason", "actual_ticks", "wall_seconds",
                                                "path", "stop_evidence", "stable_boundary", "distance_moved", "cancelled"}),
                 )
@@ -217,21 +242,25 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 ledger = {"crafted": direct_crafted, "smelted": direct_smelted, "acquired": direct_acquired}.get(event.kind)
                 if ledger is not None and event.item:
                     ledger[event.item] = ledger.get(event.item, 0) + event.quantity
+                    progress = progress_by_source.setdefault(goal.source, {})
+                    progress[f"{event.kind}:{event.item}"] = progress.get(f"{event.kind}:{event.item}", 0) + event.quantity
             reward = float(sum(event.quantity for event in step.events if event.kind == "acquired"))
             reward_total += reward
             emit("reward", {"value": reward, "kind": "smoke_acquisition_count", "actor_valid": False,
-                            "trace_mask": 0 if step.cancelled else 1,
+                            "trace_mask": 0 if step.cancelled else 1, "goal_id": goal.goal_id, "goal_source": goal.source,
                             "actor_exclusion_reason": "cancelled" if step.cancelled else "no_candidates" if not saved.candidates
-                            else "single_candidate" if len(saved.candidates) == 1 else "smoke_selector"})
-            if config.goal.kind == "descend":
-                completed = descent_completed(step)
-            else:
-                completion_kind = {"collect": "acquired", "mine_diamond": "acquired", "craft": "crafted",
-                                   "smelt": "smelted"}[config.goal.kind]
-                acquired_target += sum(event.quantity for event in step.events
-                                       if event.kind == completion_kind and event.item == config.goal.target)
-                completed = (not step.invalid and acquired_target > 0
-                             and step.observation.inventory.get(config.goal.target, 0) >= config.goal.quantity)
+                            else "single_candidate" if len(saved.candidates) == 1
+                            else "rule_selector" if selection.selector_mode == "rule_deterministic" else "smoke_selector"})
+            if saved.candidates and not step.cancelled and any(event.kind == "failed" for event in step.events):
+                failures.append(signature(candidate))
+            task_event = {"collect": "acquired", "mine_diamond": "acquired", "craft": "crafted", "smelt": "smelted"}.get(config.goal.kind)
+            acquired_target += sum(event.quantity for event in step.events
+                                   if event.kind == task_event and event.item == config.goal.target)
+            done = completed(config.goal, start, step, acquired_target)
+            trigger = active.record(step) or ""
+            if trigger:
+                outcomes.append(active.outcome(step.observation.active_ticks, trigger))
+                active = None
             terminated, truncated, invalid, reason = step.terminated, step.truncated, step.invalid, step.reason
             unchanged = [step.observation.position, step.observation.map_version, step.observation.inventory, step.observation.tool_durability]
             stalled = stalled + 1 if step.actual_ticks <= 1 and not step.cancelled and unchanged == [
@@ -239,7 +268,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             observation = step.observation
             if terminated or truncated or invalid:
                 break
-            if macros and completed:
+            if macros and done:
                 terminated, reason = True, "goal_completed"
                 break
             if stalled >= STALL_LIMIT:
@@ -261,11 +290,13 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         emit("error", error)
     if error and clock_mode != "mock":
         clock_mode, pause_verified = "unverified", False
+    if active is not None:
+        outcomes.append(active.outcome(active_ticks, reason))
     summary = EpisodeSummary(
         episode_id=episode_id, attempt_id=attempt_id, backend=config.backend,
         task="movement_smoke" if movement else "macros_smoke" if macros else "smoke",
         clock_mode=clock_mode, pause_verified=pause_verified, movement_steps=movement_steps,
-        goal_completed=completed, terminated=terminated,
+        goal_completed=done, terminated=terminated,
         truncated=truncated, invalid=invalid, reason=reason, error=error,
         active_ticks=active_ticks, wall_seconds=time.monotonic() - started,
         decisions=decisions, reward_total=reward_total,
@@ -273,7 +304,9 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         macro_steps=macro_steps, selection_requests=selection_requests, cancelled_selections=cancelled_selections,
         provided_inventory=provided_inventory, direct_crafted=direct_crafted,
         direct_smelted=direct_smelted, direct_acquired=direct_acquired, admin_verified=verified,
-        diamond_success=config.goal.kind == "mine_diamond" and completed and verified.get("diamond", 0) >= 1,
-    )
+        diamond_success=config.goal.kind == "mine_diamond" and done and verified.get("diamond", 0) >= 1,
+        planner_model=planning.model, planner_version=planning.version,
+        progress_by_source=progress_by_source, goal_outcomes=outcomes,
+    ).model_copy(update=planning.counts)
     emit("summary", summary)
     return summary

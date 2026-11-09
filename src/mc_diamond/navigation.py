@@ -223,12 +223,16 @@ def ore_search_choices(observation: Observation, target: str, reserve: int) -> l
     return [*walking[:4], *tunnels, *broad, *walking[4:], *narrow]  # Cutting stays a choice in open ground.
 
 
+def hold_candidate(observation: Observation) -> Candidate:
+    """A 20-tick wait the bridge reports as `safe_hold` when the observed ground stays stable (descend, escape)."""
+    return Candidate(candidate_id=f"{observation.obs_id}:hold", action_kind="wait", params={},
+                     max_ticks=min(20, observation.remaining_ticks), stop_rule_id="hold_or_hazard",
+                     source_obs_id=observation.obs_id, description="Hold observed safe ground for 20 ticks")
+
+
 def generate_descent_candidates(observation: Observation) -> CandidateSet:
     choices = descent_choices(observation)
     if (observation.remaining_ticks and SAFE_BAND[0] <= math.floor(observation.position[1]) <= SAFE_BAND[1]
             and observation.inventory.get("iron_pickaxe") and safe_ground(observation)):
-        hold = Candidate(candidate_id=f"{observation.obs_id}:hold", action_kind="wait", params={},
-                         max_ticks=min(20, observation.remaining_ticks), stop_rule_id="hold_or_hazard",
-                         source_obs_id=observation.obs_id, description="Hold observed safe ground for 20 ticks")
-        choices = [hold, *choices]
+        choices = [hold_candidate(observation), *choices]
     return allocate(choices)

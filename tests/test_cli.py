@@ -43,16 +43,17 @@ def test_mock_episode_runs_through_public_cli() -> None:
     assert result.returncode == 0, result.stderr
     records = [json.loads(line) for line in result.stdout.splitlines()]
     assert [record["type"] for record in records] == [
-        "reset", "observation", "goal", "candidates", "selection", "step", "reward", "summary"
+        "reset", "observation", "goal_decision", "goal", "candidates", "selection", "step", "reward", "summary"
     ]
-    assert records[4]["data"]["candidate_id"] == records[3]["data"]["candidates"][0]["candidate_id"]
+    assert records[5]["data"]["candidate_id"] == records[4]["data"]["candidates"][0]["candidate_id"]
+    assert records[2]["data"]["source"] == "fixed" and records[3]["data"]["goal_id"] == "smoke-log:1"
     assert records[-1]["data"]["backend"] == "mock"
     assert records[-1]["data"]["goal_completed"] is True
     assert records[-1]["data"]["diamond_success"] is False
     assert records[-1]["data"]["active_ticks"] == 20
     assert records[-1]["data"]["reward_total"] == 1.0
     assert records[-1]["data"]["pause_verified"] is False
-    assert records[4]["data"]["probabilities"] is None
+    assert records[5]["data"]["probabilities"] is None
 
 
 def movement_fixture() -> dict[str, Any]:
@@ -680,8 +681,8 @@ def test_zero_candidates_force_wait_without_actor_experience(tmp_path: Path) -> 
                                 terminated=False, truncated=True, reason="mock_time_limit")
     fixture["steps"][0]["observation"]["inventory"] = {}
     output = records(run_cli(fixture_config(tmp_path, fixture)))
-    assert output[3]["data"] == {"candidates": [], "mask": [], "generated": 0, "truncated": {}}
-    assert output[4]["data"]["selector_mode"] == "forced_wait"
+    assert output[4]["data"] == {"candidates": [], "mask": [], "generated": 0, "truncated": {}}
+    assert output[5]["data"]["selector_mode"] == "forced_wait"
     assert output[-1]["data"]["actor_transitions"] == 0
     assert output[-1]["data"]["reward_total"] == 0.0
 
@@ -879,6 +880,6 @@ def test_rpc_wire_can_carry_actual_backend_provenance(tmp_path: Path, mode: str,
     if expected:
         assert summary["clock_mode"] == "unverified"
         return
-    assert output[5]["data"]["events"][0]["source"] == "minecraft"
+    assert output[6]["data"]["events"][0]["source"] == "minecraft"
     assert summary["clock_mode"] == mode
     assert output[-1]["data"]["diamond_success"] is False
