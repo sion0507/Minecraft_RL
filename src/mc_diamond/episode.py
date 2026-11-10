@@ -153,6 +153,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     failures: deque[str] = deque(maxlen=3)  # signatures of the latest failed actions, for selector S
     reason = "decision_limit"
     error: ErrorInfo | None = None
+    evaluation_rewards = None
     clock_mode: Literal["mock", "paused", "realtime", "unverified"] = "mock" if config.backend == "mock" else "unverified"
     try:
         initial = reset()
@@ -160,6 +161,9 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         if learning is not None:
             learning.reset(initial)
             actor_before = learning.actor_transitions
+        elif config.discovery_reward:
+            from .rewards import RewardLedger
+            evaluation_rewards = RewardLedger(initial, discovery_reward=config.discovery_reward)
         start = initial
         emit("reset", initial)
         observation = environment.observe()
@@ -286,6 +290,11 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             trigger = active.record(step) or ""
             if learning is not None:
                 reward_record = learning.record(selection, step, goal_completed=active.done)
+            elif evaluation_rewards is not None:
+                reward = evaluation_rewards.compute(observation, goal, step, goal_completed=active.done)
+                reward_record.update(value=reward.total, kind=observation.objective_kind,
+                    components=reward.components, discounted=reward.discounted, discount=reward.discount,
+                    task_terminal=reward.terminal)
             reward_total += float(reward_record["value"])
             emit("reward", reward_record)
             if trigger:
@@ -342,7 +351,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         truncated=truncated, invalid=invalid, reason=reason, error=error,
         active_ticks=active_ticks, wall_seconds=time.monotonic() - started,
         decisions=decisions, reward_total=reward_total,
-        reward_kind=learning.reward_kind if learning is not None else "smoke_acquisition_count",
+        reward_kind=learning.reward_kind if learning is not None else (
+            initial.objective_kind if evaluation_rewards is not None else "smoke_acquisition_count"),
         actor_transitions=learning.actor_transitions - actor_before if learning is not None else 0,
         movement_completed=movement_completed, distance_moved=distance_moved,
         macro_steps=macro_steps, selection_requests=selection_requests, cancelled_selections=cancelled_selections,

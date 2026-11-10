@@ -1,8 +1,9 @@
 # T14 actual public NanoJev + natural fixed G1 (empty inventory -> wooden pickaxe -> 3 cobblestone); no 7B/Jev/Astra calls.
 backend: rpc
-command: [node, bridge/minecraft.js, --task, G1]
+command: [node, bridge/minecraft.js, --task, G1, --budget-ticks, "1800"]
 rpc_timeout_seconds: 180.0
 max_decisions: 3600
+discovery_reward: 0.05
 wall_limit_seconds: 900.0
 goal:
   goal_id: pilot-wood

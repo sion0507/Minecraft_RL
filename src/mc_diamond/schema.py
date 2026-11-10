@@ -391,6 +391,7 @@ class EpisodeConfig(Contract):
     planner: PlannerSettings | None = None
     model: ModelConfig | None = None
     ppo: PPOConfig = Field(default_factory=PPOConfig)
+    discovery_reward: float = Field(default=0., ge=0)  # pilot opt-in; PLAN §8.1 defaults are unchanged
 
     jev: JevConfig | None = None
 

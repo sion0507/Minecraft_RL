@@ -12,7 +12,7 @@ module.exports = function loadBridge (state = {}) {
   const context = vm.createContext({
     ...state, console, performance, Buffer, setTimeout, clearTimeout,
     __filename: filename, __dirname: path.dirname(filename),
-    process: { argv: ['node', filename, '--admin-fd', '3'], version: process.version,
+    process: { argv: ['node', filename, '--admin-fd', '3', ...(state.bridgeArgs || [])], version: process.version,
       stdin: new Input(), stdout: process.stdout, stderr: process.stderr, on () {} },
     require (name) {
       if (name === 'node:net') return { Socket: Input }

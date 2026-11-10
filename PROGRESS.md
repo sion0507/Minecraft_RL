@@ -1,5 +1,19 @@
 # 실행 기록
 
+## 2026-11-10 — #49 구현·개발 검사·리뷰 완료, 실제 파일럿 보류
+
+사용자 `$implement` 요청과 도착점 중심 16블록/현재 가시성 수정 승인으로 현재 main `a5ef033`에서 구현한다. #49 본문의 이동 설명을 합의한 문구로 수정했다. 세 기능(파일럿 발견 보상 0.05·1,800틱·공통 이동 설명), 초기 표본 SD 기반 동률 폭 사전 기록과 확률/엔트로피·학습 절반·MC EV·도달 틱/발견 횟수 진단을 구현했다. 세부 선택은 DECISIONS 같은 날 #49 절을 따른다.
+
+**실제 실행:** 사용자 지시로 Minecraft/공개 모델 파일럿·학습·평가·API 호출 0회. 실제 63조건 시계 인증·정보 감사·물리 회귀도 미실행이다. bridge 파일 변경으로 기존 인증을 새 코드에 승계하지 않는다. #49의 실제 수락 검증·설정 선택과 이슈 종료는 미완료다. 기존 #15 산출물과 실패 이력을 보존한다.
+
+**개발 검사:** 최종 전체 **pytest 286개/120.46초**, 엄격 **mypy src/tests 40파일**, Node 문법·diff 공백 검사 통과. `mypy .`는 기존 `artifacts/issue-15/loaded-source/src/mc_diamond/cli.py`의 상대 import 오류로 exit2이며 통과가 아니다. 수치/공개 CLI/Node VM 계약을 RED→GREEN으로 확인했고, 평가·학습 개발 검사는 tiny 모델과 scripted mock만 사용했다. 원시 근거 `artifacts/issue-49/{targeted-tests,full-pytest-final,mypy,mypy-dot,review-red,review-green}.txt`.
+
+**두 축 리뷰:** Standards P2 1건(terminal 전이 후 최종 검증 실패 attempt가 학습 MC EV에 포함)을 공개 CLI 회귀로 재현했다. RED 32전이/EV값 → valid attempt 필터 수정 후 GREEN 0전이/null EV. 수정 후 전체 검사를 다시 통과했다. Spec 0건, 미해결 0건. 상세 `docs/reviews/issue-49.md`. 초기 전체285개/118.69초는 수정 전 근거로 별도 보존한다.
+
+**상태:** 현재 main 로컬 커밋으로 전달하며 push·merge·이슈 종료는 미실행이다. #49는 OPEN이고 합의된 16블록/현재가시성 본문 게시를 다시 확인했다. 한국어 로컬 산출물은 `reports/issue-049-T14A-{report,code-guide}.pdf` 두 개이며 코드 기준은 PDF에 최종 commit SHA로 고정한다. 보고서 때문에 게임을 재실행하지 않는다. 실제 파일럿·새 시계 인증·정보 감사는 사용자의 별도 실행 지시까지 시작하지 않는다.
+
+**PDF 검수:** 구현·검증 보고서 2쪽, 코드 가이드 2쪽의 한글 추출·한글 글꼴 embedding·전체 페이지 렌더 가독성을 확인했다. 생성기는 `/tmp/issue49-pdfs.py`, 중간 text/PNG도 `/tmp`에만 두며 reports에는 최신 PDF2개만 추가한다. 최종 코드 commit 후 같은 생성기로 SHA를 고정해 갱신한다. reports Git 추적0을 확인한다.
+
 ## 2026-11-10 — #15 돌 3개 파일럿: LR 1e-4 완료, LR 3e-4 학습 중 segfault로 미완료
 
 `pilot-wood --config configs/wood_pilot.yaml --output artifacts/issue-15/stone` 실제 실행(13:52~17:57, exit 139). 근거: `artifacts/issue-15/stone.stdout`, `stone.stderr`, `stone.exit`, `stone/baseline/`.
