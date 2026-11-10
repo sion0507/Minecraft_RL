@@ -1,0 +1,15 @@
+# T14 actual public NanoJev + natural fixed G1 (empty inventory -> wooden pickaxe -> 3 cobblestone); no 7B/Jev/Astra calls.
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G1]
+rpc_timeout_seconds: 180.0
+max_decisions: 3600
+wall_limit_seconds: 900.0
+goal:
+  goal_id: pilot-wood
+  kind: collect
+  target: cobblestone
+  quantity: 3
+model:
+  checkpoint: ../checkpoints/nanojev
+  mode: sampling
+  seed: 11015

@@ -41,8 +41,11 @@ def human_select(observation: Observation, _goal: Goal, saved: CandidateSet, _fa
 def main() -> int:
     parser = argparse.ArgumentParser(prog="mc-diamond")
     parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "smoke-macros", "verify-clock", "prepare-world",
-                                            "audit-information", "evaluate", "smoke-model", "smoke-planner", "smoke-ppo", "smoke-jev"])
+                                            "audit-information", "evaluate", "smoke-model", "smoke-planner", "smoke-ppo", "smoke-jev", "pilot-wood"])
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--output", type=Path, default=Path("runs/wood-pilot"))
+    parser.add_argument("--correction-reason")
+    parser.add_argument("--correction-lr", type=float)
     parser.add_argument("--diagnostic-fixture", choices=["wood", "wood_tool", "wood_break", "wood_hazard", "wood_drop", "empty",
         "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron", "diamond", "diamond_given"])
     place = parser.add_mutually_exclusive_group()
@@ -60,6 +63,15 @@ def main() -> int:
             return evaluation.main(args.config, args.groups, args.task, emit)
         with args.config.open(encoding="utf-8") as handle:
             config = EpisodeConfig.model_validate(yaml.safe_load(handle))
+        if args.command == "pilot-wood":
+            if args.select != "fixed" or args.diagnostic_fixture:
+                raise ValueError("pilot-wood uses NanoJev sampling and the natural G1 reset")
+            try:
+                from .wood_pilot import pilot_wood
+            except ImportError:
+                emit("pilot_summary", {"error": "Install mc-diamond[model] for pilot-wood", "restored_initial": False})
+                return 2
+            return pilot_wood(config, args.config, args.output, args.correction_reason, args.correction_lr)
         if args.command == "smoke-planner" and config.planner is None:
             config = config.model_copy(update={"planner": LocalPlannerConfig(backend="local_7b")})
         episode_id, attempt_id = str(uuid4()), str(uuid4())

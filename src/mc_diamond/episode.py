@@ -126,6 +126,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     `config.goal` is the task. Without a planner it is also the one fixed goal, re-adopted at every replan trigger.
     """
     started = time.monotonic()
+    actor_before = learning.actor_transitions if learning is not None else 0
     active_ticks = decisions = 0
     selection_requests = cancelled_selections = 0
     seen_events: set[str] = set()
@@ -158,6 +159,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         provided_inventory = dict(initial.inventory)
         if learning is not None:
             learning.reset(initial)
+            actor_before = learning.actor_transitions
         start = initial
         emit("reset", initial)
         observation = environment.observe()
@@ -341,7 +343,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         active_ticks=active_ticks, wall_seconds=time.monotonic() - started,
         decisions=decisions, reward_total=reward_total,
         reward_kind=learning.reward_kind if learning is not None else "smoke_acquisition_count",
-        actor_transitions=learning.actor_transitions if learning is not None else 0,
+        actor_transitions=learning.actor_transitions - actor_before if learning is not None else 0,
         movement_completed=movement_completed, distance_moved=distance_moved,
         macro_steps=macro_steps, selection_requests=selection_requests, cancelled_selections=cancelled_selections,
         provided_inventory=provided_inventory, direct_crafted=direct_crafted,

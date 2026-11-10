@@ -1,3 +1,25 @@
+# #15 — 사용자 지시로 중단, 실제 실행 중단 상태 유지
+
+사용자 최신 지시: "일단 멈춰봐 여기까지 하고 그리고 실제로 의미가 있었나 말해봐". 실제 학습·Minecraft 서버는 exit130으로 종료됐고 GPU 모델 메모리 반환 확인. 사용자가 명시적으로 재개를 요청하기 전에는 실제 게임/모델/학습을 시작하지 않는다. 아래 진행 중 기록은 과거 이력이다.
+
+코드는 main 로컬 f8f3894와 e3b0b9d에 커밋했다. pytest271/124.26초·mypy src/tests38파일·두 축 리뷰0/0. mypy .는 기존 artifacts의 중복 모듈 오류. push/merge/이슈 종료 미실행, #15 실제 수락 검증 미완료.
+
+실제 중단 근거: 초기 평가9/10성공, LR1e-4 619/1024결정·4/8update, PPO512전이 중 actor447. 완료 학습43에피소드42성공은 학습 후 고정 평가가 아니다. LR3e-4·후평가20슬롯·설정 선택 미실행. 학습 연결은 확인했지만 성능 향상/LR우열은 미검증. 초기 heads 복원도 KeyboardInterrupt로 hash미확인; 공개 원본 best.safetensors 고정hash는 일치. 중간 actor/optimizer/RNG checkpoint 없음. 정확 재개 기능 없음.
+
+원시 evidence: artifacts/issue-15/real.stdout/stderr, real/baseline/*.jsonl.gz 및 initial.safetensors, real-loaded-code.json/loaded-source. 원시 episode.actor_transitions는 누적값이므로 합산금지. 별도 artifacts/issue-15/stop-summary.json은 원시자료에서 재구성한 중단 요약. 정상 summary.json은 없음. 보고서 생성기는 /tmp/issue15-stop-pdfs.py, 게임재실행없이PDF2개를작성한다. 최종 기록은 PROGRESS 최신 #15 중단 절을 따른다.
+
+# #15 T14 — 구현·개발 검사/리뷰 완료, 실제 파일럿 진행 중
+
+현재 사용자 요청은 `이슈 15 $implement`. main 시작 SHA f48ccf117c6d4a3b12d67862d022f9bfd113f123. 최신 구현/결정/개발 검사와 미실행은 PROGRESS·DECISIONS 최신 #15 절을 따른다. push/merge/이슈 종료는 요청되지 않았다. 코드 리뷰 Standards/Spec 수정 재확인0/0.
+
+실제 프로세스는 승인된 `UV_CACHE_DIR=.cache/uv .tools/uv run --locked --no-sync mc-diamond pilot-wood --config configs/wood_pilot.yaml --output artifacts/issue-15/real` (exec session43049)이며 real.stdout/stderr·real/baseline/*.jsonl.gz를 보존한다. 최초 초기10회 뒤 LR1e-4/3e-4 각각1024결정/8update와 후평가10회로 총30슬롯이 끝나야 실제 파일럿 완료다. 실행 중인 게임을 다른 검사로 reset하지 않는다. 추가 파일럿/다른 모델 호출은 자동 실행하지 않는다.
+
+개발 검사 최종 pytest271개/126.46초·mypy src/tests38파일 통과. 실제 중간 근거: 초기10평가9/10성공·1회활성시간소진. 첫 LR1e-4 PPO update는128유효전이/108actor, Choice·critic변경true, Choice gradient norm0.116515–0.370979·전체유한. 본체의최종hash/초기복원·각설정1024/8update·후평가는아직진행중. 구현커밋f8f3894(main로컬), 개발검사pytest271개/126.46초·mypy38파일통과. PDF생성기 /tmp/issue15-pdfs.py와 최종offline감사 /tmp/issue15-audit.py는 게임을재실행하지않는다.
+
+추가 회계 수정: episode.py의 EpisodeSummary.actor_transitions를 에피소드별 차이로 바꿨다. RED16,896vs1,024 → 관련27검사/39.02초·mypy38통과, 두리뷰어재확인0/0. 실제원시episode요약은이전누적값을유지하므로합산금지; transition.actor_valid·setting합계로offline감사. 최종전체pytest271개/124.26초통과. /tmp/issue15-pdfs.py에이한계반영필요.
+
+남은 작업: 실제 실행 끝/실패 기록·초기복원 확인 → PROGRESS/CONTEXT/계획 체크리스트 최신화 → 현재 branch commit → 한국어 report/code-guide PDF2개 생성/한글 추출·embedded font·모든페이지렌더 확인. 보고서 중간파일은 /tmp, reports는 이 티켓 최신PDF2개만 추가하고 Git추적0. 실제 런타임은 리뷰 전 코드가 로드되었고 정상경로에 영향 없는 회계/import/LR0검증 수정은 이후 반영했다. real-loaded-code.json의 런타임hash와 최종 commit기준을 구분한다.
+
 # #14 T13 — 사용자 승인으로 push·PR 병합·이슈 종료
 
 사용자가 #14의 push·merge·이슈 종료를 요청했다. 원격 main의 #12(PR #47, a48253a)를 feat/issue-14-ppo에서 보존 통합했다(cb29ca5). CLI smoke-ppo/smoke-jev와 PPO/Jev 설정을 모두 유지한다. 통합본의 게시 전 pytest/mypy 결과는 PROGRESS 최신 절, 실제 원격 상태는 GitHub PR/#14·artifacts/issue-14/publication.json·최신 PDF2개를 따른다. 아래 로컬/Open 상태는 승인 전 이력이다. 게시 때문에 실제 게임/모델/API를 재실행하지 않는다.

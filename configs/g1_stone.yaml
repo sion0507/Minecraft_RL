@@ -1,0 +1,11 @@
+# #15 pre-check: rule selector S on the pilot task (natural G1, empty inventory -> 3 cobblestone). Executor diagnostic only.
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G1]
+rpc_timeout_seconds: 180.0
+max_decisions: 3600
+wall_limit_seconds: 900.0
+goal:
+  goal_id: pilot-stone-precheck
+  kind: collect
+  target: cobblestone
+  quantity: 3

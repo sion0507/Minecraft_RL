@@ -1,5 +1,42 @@
 # 실행 기록
 
+## 2026-11-10 — #15 돌 3개 파일럿: LR 1e-4 완료, LR 3e-4 학습 중 segfault로 미완료
+
+`pilot-wood --config configs/wood_pilot.yaml --output artifacts/issue-15/stone` 실제 실행(13:52~17:57, exit 139). 근거: `artifacts/issue-15/stone.stdout`, `stone.stderr`, `stone.exit`, `stone/baseline/`.
+
+**실제 결과:** 초기 평가 8/10 성공(실패=3,600틱 포함 평균 2,383틱), 난이도 gate 통과. LR 1e-4는 1,024결정·update 8회(첫 update critic-only, actor 전이 668) 후 평가 8/10 성공·평균 2,147틱. 차이 236틱은 등록한 동률 폭 750틱 미만이라 개선으로 판정하지 않는다. 학습 에피소드는 온전한 24회 중 19회 성공(앞 12회 9, 뒤 12회 10). 본체 hash 불변, Choice·critic hash 변경.
+
+**오프라인 진단(저장 trace만 사용, 게임 미실행):** 시작 상태 8후보 확률은 초기→LR 1e-4 후 최대 0.005 변화(예: 0.151→0.146), 정규화 엔트로피 0.988→0.988로 정책이 사실상 움직이지 않았다. 평가는 슬롯별 표집 난수가 같아 초기·학습 후 첫 선택 10개가 모두 일치하고 3개 슬롯은 궤적 전체가 같다. MC return 기준 local critic EV는 초기 0.08(V 평균 −0.74, return 평균 0.57) → 학습 후 평가 0.35(V 평균 0.35, RMSE 1.35→0.39). 곡괭이 도달 중앙값은 초기 542틱·학습 후 517틱. 실패는 대부분 move 후보만 반복하다 시간 소진(곡괭이 제작 뒤 돌 미발견 또는 나무 발견 지연)이다.
+
+**실패:** LR 3e-4 학습 7번째 에피소드 중 17:57:08 Python 프로세스가 native segfault(kernel: `mc-diamond[79345]: segfault at 0 ip 0`)로 종료했다. Python traceback·core 없음, 원인 미확인. 완료된 6 에피소드(4성공·2시간소진)의 update 통계는 stdout에 남지 않았다. LR 3e-4 후평가 10슬롯·설정 선택은 미실행이다. 재실행은 사용자 승인 전 하지 않는다.
+
+**다음 작업:** #15는 이 결과로 종료했다(사용자 결정). 발견 보상·1,800틱 예산·이동 후보 설명 보강을 넣은 두 설정 재실행과 설정 선택은 #49에서 새 세션으로 진행한다. 이 세션의 코드 변경(돌 3개 과제, critic 워밍업, 분리 클리핑)은 미커밋 상태다.
+
+## 2026-11-10 — #15 사용자 요청으로 실제 파일럿 중단 / 학습 연결 확인·성능 효과 미검증
+
+사용자가 "일단 멈춰봐 여기까지 하고 그리고 실제로 의미가 있었나 말해봐"라고 지시했다. 실제 CLI에 중단 신호를 보내 exit130으로 종료했다. host process 조회에서 학습/Minecraft Java 프로세스가 없고, nvidia-smi compute 목록에서 해당 Python 모델이 사라져 GPU 메모리 반환을 확인했다. 추가 게임/모델/학습/API를 실행하지 않는다. 아래 진행 중 기록은 중단 전 이력이다.
+
+**실제 근거(약98.4분):** 초기 고정 평가10회 중9성공·1활성시간소진. 첫 LR1e-4에서619선택/619실행 결정을 수집했다. 완전128전이 update4회로512유효전이(유효 actor108+111+113+115=447개)를 PPO에 사용했다. Choice/critic은 네 번 모두 변했고 최초 ratio는 모두1, Choice/전체 gradient는 유한했다. 학습 중 완료43에피소드 중42회 원목 목표 달성·직접 원목174개를 기록했다. 이 수치는 정책이 변하는 학습 기록이며 초기/학습 후 고정 평가와 직접 비교하지 않는다. 원목4 고정 목표·7B미호출·실제 정지 인증을 유지했다.
+
+**미완료:** 첫 설정619/1024·4/8update, 두 번째 LR3e-4 미착수, 두 설정 후평가20슬롯 미실행, 설정 선택 보류(사용자 중단). 수집107결정은 PPO 미반영이며 마지막 pending/중간 episode를 포함한다. 본 학습0결정·API US$0이다. 코드 구현과 실제 학습 연결 검증에는 의미가 있었지만 성능 향상·LR우열·본 학습 준비 완료의 증거는 없다. #15 전체 실제 검증/이슈 완료로 표시하지 않는다.
+
+**복원/재개 한계:** 중단 unwind 중 initial heads load도 KeyboardInterrupt로 끝났다. 실행 중 객체의 초기 복원 hash·본체 최종 hash 비교는 미확인이다. 디스크 best.safetensors의 공개 고정 SHA-256 f68c47d66998231b86b7e91b4ed5e82ae23acf104c8b7cd6d165c3ac7b7ffe1b는 일치한다. 원본은 변경되지 않았고 중간 학습 actor/optimizer/RNG checkpoint는 없다. 현재 구현은 이 지점의 정확한 checkpoint 재개를 제공하지 않는다. 원시 로그·초기 heads·네 update는 보존한다. 원시 episode actor 요약은 누적값이므로 합산하지 않고 transition/PPO 필드로 집계했다.
+
+**소프트웨어 상태:** 구현f8f3894·요약 집계 수정e3b0b9d를 현재 main에 로컬 커밋했다. 최종 pytest271개/124.26초·strict mypy src/tests38파일 통과, 두 축 리뷰 미해결0/0. mypy .는 기존 Git 제외 pathfinder artifacts의 중복 analyze.py로 exit2다. push/PR/merge/이슈 종료는 수행하지 않았다.
+
+**증거:** artifacts/issue-15/stop-summary.json은 사용자 중단 뒤 보존된 원시 로그에서 재구성한 별도 중단 요약이다. 정상 종료 baseline/summary.json은 생성되지 않았다. real.stdout/stderr·real/baseline/*.jsonl.gz·real-loaded-code.json·loaded-source와 검사/리뷰 자료를 보존한다. reports의 이 티켓 최신 구현/검증 보고서와 코드 가이드 PDF2개는 중단 상태·한계를 구분하며 보고서 때문에 게임을 재실행하지 않는다. 파일은 reports/issue-015-T14-report.pdf(2쪽)와 issue-015-T14-code-guide.pdf(2쪽)다. 코드 가이드는 e3b0b9da89b91d9d6fea5379513d0ae59622f6a1의 AST 시작 줄을 사용한다. 한글 추출·대체문자 없음, 사용한 한글 TrueType 글꼴의 embedded/subset/Unicode mapping, 1500px 렌더4페이지 전체 가독성을 확인했다. 중간 파일은 /tmp에만 있고 reports는 Git 추적0이다.
+
+## 2026-11-10 — #15 T14 구현·리뷰 수정 완료 / 실제 파일럿 진행 중
+
+사용자 `$implement`에 따라 main `f48ccf1`에서 구현했다. `pilot-wood`는 고정 원목4 목표를 NanoJev에 전달하고, 동일 공개 초기 heads·난수에서 Choice LR 두 값만 바꾼다. 에피소드 경계를 넘어128결정 rollout을 모으며 각 설정1,024결정/8update, 공통 초기10+후10×2평가를 연결했다. baseline/correction 독점 생성과 추가 파일럿 최대1회, 평가 예정 분모·서버 오류1회 재시도·실패 경험/시간·초기heads복원을 구현했다. 결정은 DECISIONS 최신 #15 절, 계획은 docs/superpowers/plans/2026-11-10-issue-15-wood-pilot.md다.
+
+- **개발 검사:** 최초 전체269개 통과(123.19초). 독립 리뷰2축에서 부분 에피소드 오류 회계와 선택적 의존성 import 안내를 수정하고 각각 RED→GREEN을 확인했다. 0의 corrective LR이 default로 바뀌던 입력 처리도 RED→GREEN으로 수정했다. 최종 pilot11개/40.11초, mypy src/tests38파일 통과. 리뷰 수정 후 최종 전체 **pytest271개/126.46초** 통과(artifacts/issue-15/full-pytest-final.txt).
+- **에피소드 집계 후속 수정:** learner를 episode 간 공유하면서 기존 EpisodeSummary.actor_transitions가 누적값을 반복 보고했다. 공개 CLI 합계 비교에서 RED16,896vs1,024를 확인하고 reset 전/후 기준값과 종료값의 차이로 수정했다. 관련27개/39.02초·strict mypy38파일·최종 전체 **pytest271개/124.26초** 통과. 같은 리뷰어 재검토0/0. 실제 진행 중인 원시 episode 요약은 이전 누적값이므로 합산하지 않고 transition.actor_valid와 setting 합계를 대조한다. 정책·보상·PPO 연산에는 영향이 없다.
+- **리뷰:** Standards 최초P2 2건, Spec 최초P2 1건(회계 누락 중복); 같은 리뷰어들의 수정 재검토에서 미해결0/0. docs/reviews/issue-15.md.
+- **실제 실행:** 승인된 GPU/로컬 서버 명령이 artifacts/issue-15/real에서 실행 중이다. 자연 G1의 고정 snapshot manifest hash `72734522fb22eb506c72dd1fbd2df560cc2f4192ebf16d3047dd2bae77f64d89`, 제공재고0, 학습seed11015·평가15000–15009. 현재 초기 평가의 실제 원목4·정지 인증 통과를 확인했으나 전체30슬롯·2,048학습결정은 아직 진행 중이다. 최종 요약 전 성공률/학습 완료를 확정하지 않는다. 원시 *.jsonl.gz, real.stdout/stderr, baseline/summary.json을 따른다. 실제 실행은 리뷰 전 로드된 소스를 유지하며 회계 오류/의존성 guard 수정은 정상 경로에 영향을 주지 않는다. 런타임 소스 hash는 real-loaded-code.json에 기록했다.
+- **타입 검사 범위:** mypy .는 기존 Git 제외 artifacts의 pathfinder 두 analyze.py 중복 모듈로 exit2다(mypy-dot.txt). strict mypy src tests 통과와 구분한다.
+- **미실행:** 교정 추가 파일럿, 본 학습30,000결정, #16 G4/AJ 진단, 커리큘럼/복구/lock/최종 평가, 7B 학습·Jev/Astra/API 호출0. 보고서 때문에 게임을 재실행하지 않는다. push/PR/merge/이슈 종료는 하지 않는다. 코드 커밋·PDF2개와 최종 실제 결과는 완료 절에서 기록한다.
+
 ## 2026-11-10 — #14 게시·병합·종료 승인 / 원격 #12 통합
 
 사용자가 #14의 push·PR 병합·이슈 종료를 승인했다. 원격 main은 #12 PR #47(`a48253a`)이 앞서 있어 feat/issue-14-ppo에서 보존 merge했다(`cb29ca5`). 충돌한 CLI/schema는 smoke-ppo/smoke-jev·PPO/Jev 두 설정을 모두 유지하고, DECISIONS/PROGRESS의 양쪽 이력도 보존했다. 보고서와 이번 검증에서 #12의 유료 API를 호출하지 않는다.

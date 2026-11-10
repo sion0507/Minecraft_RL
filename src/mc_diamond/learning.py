@@ -122,7 +122,7 @@ class PPO:
             ratios = [float((self.evaluate(rows[i])[0] - cast(float, rows[i].old_logprob)).exp()) for i in actors]
         if not all(math.isfinite(ratio) for ratio in ratios):
             raise ValueError("Nonfinite PPO ratio")
-        losses, norms, policy_losses = [], [], []
+        losses, norms, policy_losses, choice_norms = [], [], [], []
         self.model.train()
         for _ in range(self.config.epochs):
             # A permutation only changes minibatch order; candidate order inside a saved decision never changes.
@@ -150,7 +150,10 @@ class PPO:
                     raise ValueError("Nonfinite PPO loss")
                 self.optimizer.zero_grad(set_to_none=True)
                 cast(Any, loss).backward()
-                norm = torch.nn.utils.clip_grad_norm_([p for p in self.model.parameters() if p.requires_grad],
+                # The heads share no parameters: clipped apart, a large value loss cannot shrink the Choice step.
+                choice_norms.append(float(torch.nn.utils.clip_grad_norm_(
+                    self.model.choice.parameters(), self.config.grad_norm, error_if_nonfinite=True)))
+                norm = torch.nn.utils.clip_grad_norm_(self.model.critics.parameters(),
                                                      self.config.grad_norm, error_if_nonfinite=True)
                 self.optimizer.step()
                 losses.append(float(loss.detach()))
@@ -158,16 +161,19 @@ class PPO:
         return {"valid_transitions": len(indices), "actor_transitions": len(actors), "actor_skipped": not actors,
                 "initial_ratios": ratios, "advantages": adv, "returns": targets, "trace_masks": trace_masks(rows),
                 "policy_losses": policy_losses,
-                "losses": losses, "gradient_norms": norms,
+                "losses": losses, "gradient_norms": norms, "choice_gradient_norms": choice_norms,
                 "choice_changed": initial_choice != parameter_hash(self.model.choice),
                 "critic_changed": initial_critic != parameter_hash(self.model.critics),
                 "config": self.config.model_dump()}
 
 
 class EpisodeLearner:
-    def __init__(self, model: NanoJevAdapter, config: PPOConfig, seed: int) -> None:
-        self.model, self.config = model, config
-        self.ppo = PPO(model, config)
+    def __init__(self, model: NanoJevAdapter, config: PPOConfig, seed: int, *, flush_on_finish: bool = True,
+                 critic_warmup: int = 0) -> None:
+        # The first `critic_warmup` rollouts train the value head only: the new critic's first targets are far off.
+        self.model, self.actor_config, self.critic_warmup = model, config, critic_warmup
+        self.config = config.model_copy(update={"critic_only": True}) if critic_warmup else config
+        self.ppo = PPO(model, self.config)
         self.generator = torch.Generator(device=next(model.parameters()).device).manual_seed(seed)
         self.rows: list[Transition] = []
         self.pending: Transition | None = None
@@ -175,6 +181,8 @@ class EpisodeLearner:
         self.ledger: RewardLedger | None = None
         self.reward_kind: Literal["local", "full"] = "local"
         self.actor_transitions = self.valid_transitions = self.excluded_transitions = self.updates = 0
+        self.flush_on_finish = flush_on_finish
+        self.update_reports: list[dict[str, Any]] = []
 
     @property
     def needs_bootstrap(self) -> bool:
@@ -262,7 +270,10 @@ class EpisodeLearner:
     def update(self) -> None:
         if self.rows:
             report = self.ppo.update(self.rows)
+            self.update_reports.append(report)
             self.updates += bool(report["valid_transitions"])
+            if self.updates >= self.critic_warmup:
+                self.config = self.ppo.config = self.actor_config
             emit("ppo_update", {"update": self.updates, **report})
             self.rows.clear()
 
@@ -271,7 +282,8 @@ class EpisodeLearner:
             # No reliable next goal/candidates: retain diagnostics, exclude the incomplete transition.
             self.append(replace(self.pending, valid=False, actor_valid=False, bootstrap=False, trace=False))
             self.pending = None
-        self.update()
+        if self.flush_on_finish or len(self.rows) >= self.config.rollout:
+            self.update()
 
 
 def smoke_ppo(config: EpisodeConfig, config_path: Path) -> int:

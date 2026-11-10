@@ -161,7 +161,7 @@ def bridge_command(episode: EpisodeConfig, path: Path) -> list[str]:
     return episode.command
 
 
-def reset_state(episode: EpisodeConfig, path: Path, task: Task) -> str:
+def reset_state(episode: EpisodeConfig, path: Path, task: Literal["C4", "G1", "G4"]) -> str:
     """The reset state each attempt starts from: the task snapshot file (or the mock fixture) and its hash.
 
     A missing file raises: no slot runs without a known reset state."""
