@@ -5,6 +5,24 @@
 
 현행 결정은 2026-10-10 기록이다. 같은 날의 S 필수 진단 보완이 과거 선택 S=규칙 계획/규칙 행동 정의를 대체하며 핵심 F/조건부 7B 학습 결정은 유지한다. 아래 과거 F 제외·계획기 학습 미허용·최종 23회/축소 17회 문구는 당시 결정의 이력이며 해당 부분은 현행 결정으로 대체한다. 과거 기록은 삭제하지 않는다.
 
+## 2026-11-10 — #14 게시·PR 병합·이슈 종료 승인과 #12 통합
+
+- 사용자가 #14의 push·merge·이슈 종료 후 마무리를 명시적으로 요청했다. 아래 최초 구현 시점의 로컬 전용/Open 상태는 당시 이력이다. 최종 상태는 GitHub PR/#14 조회, `artifacts/issue-14/publication.json`과 최신 로컬 PDF를 따른다.
+- 원격 main에 먼저 병합된 #12(PR #47, `a48253a`)를 보존한다. feat/issue-14-ppo에서 원격을 merge하고 CLI의 smoke-ppo/smoke-jev 및 EpisodeConfig의 PPO/Jev 설정을 모두 유지한다. DECISIONS/PROGRESS 양쪽의 기록도 모두 보존한다. #12의 최신 사용자 결정(US$10·모드·ledger)을 되돌리지 않는다. 유료 호출은 이번 게시 범위에 없다.
+- 통합 코드로 전체 pytest·mypy를 확인한 뒤 PR로 게시한다. bridge/runtime/모델/실제 게임은 변경하거나 재실행하지 않는다. reports는 PDF2개만 최신 상태로 교체하고 Git에서 제외한다.
+
+## 2026-11-10 — #14 T13 사건 보상·저장 전이·GAE·PPO 연결
+
+- 사용자 `$implement 이슈 14 먼저` 요청으로 현재 main(`b0d239a`)에서 구현·로컬 커밋한다. 선행 #9/#11 Closed와 #14/#1 본문·댓글, PLAN §§6.2/8.1/12를 확인했다. 기존 공개 CLI 흐름 및 짧은 공개 보상/GAE/actor-critic 수치 예제가 합의된 검사 경계다. 새 브랜치·push·PR·병합·이슈 종료는 요청 범위에 없다.
+- 기존 run_episode에 선택적인 LearningObserver를 연결한다. 기본 smoke/evaluate는 진단 보상을 유지한다. 연구 보상 ledger는 목적별로 분리하고 reset에서 초기화한다. full 진행 원목은 여섯 log 종류를 한 보상으로 묶고, 제공 재고는 최초 진행 집합에 포함한다. 의미 목표는 정규화 kind/target이며 수량·방향·ID를 제외한다. 보상 ledger가 GoalRegistry의 완료/전환을 막지 않는다.
+- **보상 시각:** 현재 RPC는 사건별 발생 틱을 보내지 않는다. 시간 비용은 실제 n틱 각각, 직접 사건/완료 보상은 반환되어 확인된 경계의 마지막 틱에 배정한다. 이 규칙으로 틱별 할인합과 gamma^n을 계산하고 sparse_reward_timing을 기록한다. 원시 물리 사건 발생 시각을 복원했다는 주장이 아니다. bridge/runtime/관측 규칙은 바꾸지 않으며 새 시계 인증을 주장하지 않는다. 향후 발생 시각을 직접 할인하려면 bridge의 사건별 시각 계약과 실제 재검증을 별도로 추가해야 한다.
+- 다이아 보상은 적절한 관측 도구로 파괴한 광석 사건과 bridge가 귀속한 직접 드롭 획득을 연결한다. acquired.position은 블록 좌표가 아닌 드롭 생성 위치이므로 bridge와 같은 블록 중심 반경2를 사용한다. 실제 acquired에는 entity_id가 필요하다. 자연 광석의 최종 성공은 기존 관리자 검증을 유지한다. 관리자 데이터는 정책/가치 입력에 넣지 않는다.
+- 저장 State는 관측·목표·후보 ID/내용/순서/mask와 frozen 특징/context를 복사한다. PPO는 후보를 재생성하지 않고 trainable Choice logits를 다시 계산한다. full 목표 변경은 다음 채택 목표/후보로 bootstrap하고 trace를 유지한다. 운영 절단도 유효 다음 상태로 bootstrap하며 rollout 마지막 유효 trace는0이다. 취소/fallback은 actor 제외·trace 단절, 단일/0후보·critic-only는 actor 제외, 유효 critic 전이는 유지한다. 0후보의 실제 강제 wait는 값 계산에만 쓰고 제공 후보 기록은 빈 집합을 유지한다.
+- PLAN 기본 PPO 설정을 사용한다. actor advantage 정규화는 유효 복수 선택만 대상으로 하며 단일 유효 actor의 정규화 값은0이다. actor 전이가 없으면 Choice gradient/Adam 갱신을 생략한다. 독립 local/full critic 중 해당 목적만 gradient를 받는다.
+- `smoke-ppo --config configs/ppo_smoke.yaml`은 공개 NanoJev+mock 게임의 2결정 연결 진단이다. 실제 model을 쓰며 결과 actor를 저장하거나 본 학습에 이어 쓰지 않는다. Astra/Jev 유료 호출을 쓰지 않는다. 본 학습/커리큘럼/원자 복구/lock/최종 평가는 #18–#24의 범위다.
+- 최초 전체 회귀248개 통과 뒤 연결 코드 점검에서 드롭 좌표 오해를 발견했다. 실제 생성 좌표 사례로 RED를 재현해 위 반경2 규칙으로 수정했고, 기존 실제 로그5개를 새 ledger로 재생했다. 최종 수정본의 검사·독립 리뷰·후속 수정은 PROGRESS에 별도 기록한다. 실제 게임의 사건→보상→학습 전체 연결은 #15/#16에서 확인한다.
+- 독립 리뷰의 사망 전이 P1을 재현했다. 실제 bridge는 death에서 danger=true라 stable_boundary=false다. 안전 지면은 비종료 bootstrap의 조건이며 신뢰 가능한 task terminal까지 제외하는 조건이 아니다. invalid·검증된 clock을 유지하고 `(stable_boundary or task_terminal)`로 유효 전이를 구분한다. local/full 공개 CLI 사망2검사 RED→GREEN, 같은 Spec 에이전트의 수정 재검토에서 해결을 확인했다.
+
 ## 2026-11-10 — Jev 총 상한 US$10과 #12(T11) 실행 승인 (사용자 결정)
 
 - 사용자가 OpenRouter 키를 `~/.config/mc-diamond/jev.env`(`JEV_API_KEY`, 권한 600)에 저장하고, Jev 모델 API 총 상한을 US$5에서 **US$10**으로 올렸다. 연결·진단·A/J·J/F 최종 평가·실패/재시도를 모두 합친 총액이며, 이 안에서 테스트와 실제 구현을 마치라고 #12 구현과 실제 호출을 승인했다("10달러 이내에 테스트 및 실제 구현까지 완료"). 계정 키 한도도 US$10으로 확인했다(`/api/v1/key` limit 10).

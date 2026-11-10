@@ -1,5 +1,41 @@
 # 실행 기록
 
+## 2026-11-10 — #14 게시·병합·종료 승인 / 원격 #12 통합
+
+사용자가 #14의 push·PR 병합·이슈 종료를 승인했다. 원격 main은 #12 PR #47(`a48253a`)이 앞서 있어 feat/issue-14-ppo에서 보존 merge했다(`cb29ca5`). 충돌한 CLI/schema는 smoke-ppo/smoke-jev·PPO/Jev 두 설정을 모두 유지하고, DECISIONS/PROGRESS의 양쪽 이력도 보존했다. 보고서와 이번 검증에서 #12의 유료 API를 호출하지 않는다.
+
+통합본 개발 검사 원시: `artifacts/issue-14/publication-{pytest,mypy,targeted-uv}.txt`. 처음 `.venv/bin/python -m pytest`로 직접 실행한 일부 CLI 검사는 PATH에 mc-diamond가 없어16개 실패/25개 통과였다(`publication-targeted.txt`). 원인은 설치 부재가 아닌 uv 실행 환경을 거치지 않은 명령이며, 저장소의 uv run 명령으로 다시 확인한다. 전체 suite도 uv run으로 실행한다. 최종 결과는 아래 게시 전 검사 기록에 추가한다.
+
+게시 전 최종 확인: 통합본 전체 **pytest260개/90.39초**, 관련41개/12.79초, strict mypy src/tests36파일 및 diff 검사 통과. .github workflow는 없어 이 결과를 원격 CI 통과로 표시하지 않는다.
+
+실제 게임/모델/유료 API는 게시 때문에 재실행하지 않는다. 최종 push·PR·원격 main merge·#14 종료 상태와 SHA는 `artifacts/issue-14/publication.json`, GitHub PR/#14 및 최신 PDF2개에 남긴다. 아래 미푸시/Open 표시는 승인 전 이력이다.
+
+## 2026-11-10 — #14 T13 최종 검증·리뷰 수정·로컬 커밋 완료
+
+**코드 기준:** 구현 `7630857`, 리뷰 수정 `34dd151`(main 로컬). 최초 구현/검증 과정은 아래 같은 날 절에 보존한다. push·PR·원격 merge·이슈 종료는 하지 않았다.
+
+**최종 개발 검사:** learning16개/2.59초, 전체 **pytest250개/82.83초**, strict **mypy src/tests34파일** 통과, diff 공백 검사 통과. 원시 `artifacts/issue-14/{targeted-tests,full-pytest-final,mypy}.txt`. `mypy .`의 기존 pathfinder artifacts 중복 모듈 exit2는 앞선 기록대로 유지한다.
+
+**독립 리뷰:** code-review의 Standards0, Spec P1 1건을 수정했다. 실제 bridge는 사망에서 stable_boundary=false이므로 이를 무조건 요구하면 사망 -1/-20이 actor/critic에서 사라졌다. 공개 CLI local/full 사망2검사를 RED로 재현한 뒤, 신뢰할 수 있는 task terminal은 안전 지면 없이도 학습하고 bootstrap0을 유지하도록 수정했다. 같은 Spec 에이전트의 재검토에서 기존 P1 해결·새 material 지적0을 확인했다. `docs/reviews/issue-14-T13-2026-11-10.md`에 두 축을 분리해 남겼다.
+
+**검증 범위:** 실제 공개 NanoJev+mock 게임2전이/1update와 기존 실제 로그5개 offline 재생은 아래 기록을 따른다. 공개 모델 진단은 정상 local 경로에서 수행했고, 다이아/사망 분기 수정 뒤 새 GPU·게임 진단은 하지 않았다. 해당 수정은 공개 수치/CLI 검사·기존 실제 로그와 최종 전체 회귀로 확인했다. 새 실제 게임 PPO·물리·파일럿·본 학습·처리량/예산/lock·외부 API를 검증했다고 표시하지 않는다. 사건별 발생 틱은 RPC에 없어 sparse 보상은 반환 경계 마지막 틱이다.
+
+**보고서:** `reports/issue-014-T13-report.pdf`(2쪽), `reports/issue-014-T13-code-guide.pdf`(3쪽). 코드 가이드는 `34dd151a4add14e48028d5df8951482b1afbc153`과 AST 시작 줄을 기준으로 한다. 한글 추출·대체문자 없음, 사용한 한글 TrueType 글꼴의 embedded/subset/Unicode mapping과 1500px 렌더5페이지 전체 가독성을 확인했다. reports는 Git 제외/추적0이며 이 티켓 PDF2개만 두었다. 중간 생성기·텍스트·PNG는 /tmp에만 있다. 보고서 때문에 모델/게임을 재실행하지 않았다. `artifacts/issue-14/evidence.json`에 코드 SHA-256·검사/모델 근거를 보존했다.
+
+**다음:** #15 목재 파일럿과 #18 커리큘럼이 사용할 학습 기반을 구현했다. #12 Jev는 별도 착수 가능하다. 실제 게임의 사건/목표/보상 전체 연결은 #15/#16, 복구는 #19, 실제 처리량·예산/lock은 #20에서 검증한다.
+
+## 2026-11-10 — #14 T13 보상·시간 할인 PPO 연결 (리뷰 전)
+
+**구현:** 사용자 implement 요청으로 main `b0d239a`에서 시작했다. RewardLedger(local/full·제공 제외·진행18·의미 목표8회/4), 실제 틱 할인·저장 State/Transition·GAE/PPO와 공통 run_episode의 학습 연결, 공개 `smoke-ppo`를 추가했다. Choice/독립 critic만 학습하고 본체/관측/bridge/runtime/snapshot은 바꾸지 않았다. sparse 사건은 현재 RPC의 반환 경계 마지막 틱에 배정하며 원시 사건 시각으로 표시하지 않는다(DECISIONS 같은 날 절).
+
+**개발 검사:** 새 learning 검사14개 통과(2.35초), strict mypy src/tests34파일 통과. 최초 전체 pytest248개/82.90초 통과 후 드롭 좌표 계약을 수정했다. 수정본 최종 전체 회귀와 code-review 두 축은 다음 완료 기록에 남긴다. `mypy .`는 기존 Git 제외 artifacts의 pathfinder 두 analyze.py 중복으로 exit2이며 통과로 표시하지 않는다. 결과 파일은 `artifacts/issue-14/{targeted-tests,mypy,mypy-dot,full-pytest}.txt`다.
+
+**실제 공개 모델 + mock 게임:** `public-model-mock-final.jsonl` exit0. 공개 NanoJev revision/초기 weight hash는 #11과 동일하다. 저장된 두 복수 후보 결정·40mock틱·보상합0.96·PPO1회/4epoch, 최초 ratio [1,1], trace [true,false]. 정책 손실 [0,0.00071451,0.00077176,0.00069207], 유한 gradient norm, Choice/critic 변경·본체 hash불변, 전체 약11.74초. 결과 actor는 저장하지 않았다. 원목 획득은 scripted mock 사건이며 실제 Minecraft 성능이 아니다. 실행은 full 다이아 드롭 좌표 수정 전이며 해당 local 원목 경로는 수정하지 않았다. 첫 단일 전이 진단도 보존했다(정규화 advantage0, actor는 entropy 경로); 최종 두 전이 결과와 혼동하지 않는다. 첫 uv 시도는 sandbox 밖 캐시 쓰기 때문에 exit2, 승인 후 실행했다. 유료 API0·본 학습0이다.
+
+**기존 실제 로그 재생(새 게임 실행 아님):** #44 원시 G1(3step), 제작(54), G3(15), 자연 G4(63), 지급 다이아(2)를 새 ledger로 재생했다. local G1/G3/G4 성공+1, 제작 직접 진행18·목표0.5, 지급 다이아 성공 보상0을 확인했다. 드롭의 비정수 생성 좌표를 블록 좌표와 같다고 보던 결함을 RED→GREEN으로 수정했다. `previous-real-log-replay.json`에 출처와 구성별 합계를 남겼다. 새 게임/모델과의 전체 연결 검증으로 주장하지 않는다.
+
+**미실행/후속:** 실제 Minecraft PPO·새 63조건/정보 감사(bridge 변경 없음)·실제 모델 full 학습·파일럿·30,000결정 본 학습·커리큘럼/복구/lock·최종 C4/G4·Jev/Astra·7B 학습은 미실행이다. 실제 사건/보상 전체 연결은 #15/#16, 예산은 #20에서 확인한다. push/PR/원격 merge/이슈 종료는 요청되지 않았다. 로컬 PDF2개와 최종 커밋/리뷰 결과는 완료 기록에서 제공한다.
+
 ## 2026-11-10 — #12(T11) Jev 실제 연결·선택 모드·비용 ledger
 
 브랜치 `issue-12-t11`(main `b0d239a`에서 worktree). 결정은 DECISIONS 2026-11-10 두 절. 원시 기록은 worktree의 `artifacts/issue-12/real-{1,2}/`(Git 제외). 사용자 승인 상한 US$10 안에서 실제 호출했다.

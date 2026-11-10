@@ -132,6 +132,31 @@ backbone은 frozen/no_grad, dropout 0이며 공개 Choice(norm/scalar/set attent
 실제 Minecraft 설정(`backend: rpc`)에서도 같은 명령을 쓸 수 있으나 별도 runtime/snapshot·시계 인증이 필요합니다. #11에서는 실제 모델+mock 게임만 검증했습니다.
 선택 확률은 성능·보정된 신뢰도 주장으로 사용하지 않습니다. 7B/Jev/Astra·유료 API·PPO 본 학습·최종 평가는 실행하지 않습니다.
 
+## 사건 보상과 PPO 연결 진단 (#14)
+
+```bash
+uv run --extra model mc-diamond smoke-ppo --config configs/ppo_smoke.yaml
+```
+
+공개 NanoJev를 실제로 로드하고 **mock 게임**의 서로 다른 보상을 가진 전이 2개로 짧은 PPO update를 수행합니다.
+`smoke-model`의 합성 target 진단과 달리 공통 reset→목표→후보→선택→실행→사건 보상→전이→GAE→PPO를 통과합니다.
+Choice와 목적별 critic만 학습하며 backbone은 고정합니다. 진단 actor는 저장하지 않고 본 학습에 이어 쓰지 않습니다.
+
+`reward`는 local/full 목적별 구성·할인보상·task terminal·actor 제외 사유를 기록합니다. 시간 비용은 모든 실제 활성 틱에 부과하고,
+사건별 발생 틱이 없는 현재 RPC의 획득/완료 보상은 **반환 경계의 마지막 틱**에 배정합니다. 원시 물리 사건의 발생 시각을 복원한 값은 아닙니다.
+full 진행은 직접 최초 사건만 최대 18, 목표 보상은 정규화한 종류·대상별 최초 완료만 최대 8회/총 4입니다.
+제공 아이템·이미 충족한 목표는 제외하며, 무보상 반복 목표도 정상 완료·전환합니다.
+
+`transition`에 수집 당시 관측·목표·후보 ID/내용/순서/mask·old logprob/value와 실제 다음 상태를 보존합니다.
+full 목표 변경은 trace를 이어 가고, task terminal은 bootstrap 0, 유효한 운영 절단은 bootstrap하며 rollout 끝의 유효 trace mask는 0입니다.
+단일/0후보·취소·fallback·critic-only는 actor 제외, 유효한 전이는 critic에 사용합니다. 취소 구간은 trace를 끊고 불완전/무효 전이는 학습하지 않습니다.
+후보 0개 상태의 critic은 실제 강제 wait를 값 계산에만 표현하며 제공 후보 집합은 빈 그대로 남깁니다.
+
+`ppo_update`는 유효/actor 전이 수, 수집 정책 대비 최초 ratio, advantage/return/trace mask, 정책 손실·유한 gradient norm과 head 변화를 기록합니다.
+`learning_summary.learning_verified=true`와 exit 0은 유효 update와 본체 불변·에피소드/시계 검사를 통과했다는 뜻입니다.
+모델 로드 전 실패는 exit 2, 로드 뒤 실패는 exit 1입니다. 실제 게임 학습 성능·파일럿·본 학습·최종 평가 성공을 뜻하지 않습니다.
+`ppo` 설정의 기본값은 PLAN §6.2를 따릅니다. 실제 사건 연결 진단은 #15/#16, 커리큘럼·복구는 #18/#19, 예산/lock은 #20입니다.
+
 ## 실제 Minecraft 실행
 
 이 작업공간에는 사용자의 EULA 동의 후 Minecraft 1.16.5, Fabric Loader 0.16.14, Carpet 1.4.44를 `worlds/server/`에 설치했습니다. Java 21.0.12.1·Node 24.20.0·Mineflayer 4.39.0에서 실제 연결을 확인했습니다. Linux의 `flock`으로 서버 디렉터리 사용을 잠급니다. 출처와 정확한 해시는 `third_party/README.md` 및 로컬 `worlds/server/installation.json`에 있습니다.

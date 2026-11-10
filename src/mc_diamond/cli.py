@@ -41,7 +41,7 @@ def human_select(observation: Observation, _goal: Goal, saved: CandidateSet, _fa
 def main() -> int:
     parser = argparse.ArgumentParser(prog="mc-diamond")
     parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "smoke-macros", "verify-clock", "prepare-world",
-                                            "audit-information", "evaluate", "smoke-model", "smoke-planner", "smoke-jev"])
+                                            "audit-information", "evaluate", "smoke-model", "smoke-planner", "smoke-ppo", "smoke-jev"])
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--diagnostic-fixture", choices=["wood", "wood_tool", "wood_break", "wood_hazard", "wood_drop", "empty",
         "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron", "diamond", "diamond_given"])
@@ -68,6 +68,16 @@ def main() -> int:
                 raise ValueError("smoke-model uses the configured NanoJev selector and natural reset")
             from .model_smoke import smoke_model
             return smoke_model(config, args.config)
+        if args.command == "smoke-ppo":
+            if args.select != "fixed" or args.diagnostic_fixture:
+                raise ValueError("smoke-ppo uses the configured local sampling policy and natural reset")
+            try:
+                from .learning import smoke_ppo
+            except ImportError:
+                emit("learning_summary", {"learning_verified": False, "error": "Install mc-diamond[model] for smoke-ppo"})
+                return 2
+            return smoke_ppo(config, args.config)
+
         if args.command == "smoke-jev":
             if args.select != "fixed" or args.diagnostic_fixture:
                 raise ValueError("smoke-jev uses the configured Jev selector and natural reset")

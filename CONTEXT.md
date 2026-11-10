@@ -1,4 +1,17 @@
-# #44 관측 반경32·공통 256칸 요약 — 구현·실제 검증 완료, 게시 대기
+# #14 T13 — 사용자 승인으로 push·PR 병합·이슈 종료
+
+사용자가 #14의 push·merge·이슈 종료를 요청했다. 원격 main의 #12(PR #47, a48253a)를 feat/issue-14-ppo에서 보존 통합했다(cb29ca5). CLI smoke-ppo/smoke-jev와 PPO/Jev 설정을 모두 유지한다. 통합본의 게시 전 pytest/mypy 결과는 PROGRESS 최신 절, 실제 원격 상태는 GitHub PR/#14·artifacts/issue-14/publication.json·최신 PDF2개를 따른다. 아래 로컬/Open 상태는 승인 전 이력이다. 게시 때문에 실제 게임/모델/API를 재실행하지 않는다.
+
+# #14 T13 — 구현·검증·리뷰 수정 완료, main 로컬 커밋 (이전 기록)
+
+사용자 implement 요청으로 main `b0d239a`에서 구현했다. 구현 `7630857`, 사망 전이 리뷰 수정 `34dd151`을 로컬 커밋했다. push/PR/원격 merge/이슈 종료는 하지 않았다. 결정은 DECISIONS 2026-11-10 #14, 검증은 PROGRESS 최상단 절이다.
+- local/full RewardLedger, 저장 후보/특징/old logprob·GAE·PPO, 공통 실행기의 학습 연결, 공개 smoke-ppo를 구현했다. 최종 learning16검사·전체pytest250·mypy34파일 통과. Standards0/Spec 최초P1 1건(사망 전이 누락)을 RED→GREEN으로 수정하고 같은 리뷰어가 해결을 확인했다.
+- 실제 공개 NanoJev+mock 게임2결정/PPO1회 통과: 보상0.96, ratio1, Choice/critic 변화·본체불변. #44 실제 로그5개 offline 재생을 별도로 했다. 실제 게임 PPO/본 학습/유료 API는 실행하지 않았다.
+- sparse 사건은 RPC에 개별 시각이 없어 반환 경계 마지막 틱 보상이다. 자연 다이아 최종 성공은 기존 관리자 검증을 유지한다. bridge/runtime/관측은 불변이다.
+- 다음 파일럿 #15와 커리큘럼 #18의 학습 기반이며 실제 연결/처리량/복구/lock을 완료했다고 표시하지 않는다.
+- 로컬PDF2개: reports/issue-014-T13-{report,code-guide}.pdf. 2+3쪽의 한글 추출·폰트·전체 페이지를 검수했고 Git에서 제외했다. 원시 artifacts/issue-14, 리뷰 docs/reviews/issue-14-T13-2026-11-10.md. 보고서 때문에 실제 모델/게임을 재실행하지 않는다.
+
+# #44 관측 반경32·공통 256칸 요약 — 구현·실제 검증 완료, 게시 대기 (이전 기록)
 
 브랜치 `feat/issue-44-observation`(로컬 커밋, push 안 함). 결정·사전 등록은 DECISIONS 최신 #44 절, 결과는 PROGRESS 같은 제목 절, 원시 `artifacts/issue-44/real-1/`.
 - 결정 관측 반경32·매크로 틱 정지 검사 반경8, 정책 지도는 비공기 전부+공기 Chebyshev 18, explore는 `discovered_open`, 계획기/NanoJev 공통 `public_state` 256칸 종류별 균등 요약.

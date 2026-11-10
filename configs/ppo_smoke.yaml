@@ -1,0 +1,14 @@
+# Actual public NanoJev PPO, explicitly mock Minecraft. One short local episode, no actor saved.
+backend: mock
+fixture: ../fixtures/ppo_episode.json
+max_decisions: 2
+rpc_timeout_seconds: 10.0
+goal:
+  goal_id: ppo-wood
+  kind: collect
+  target: oak_log
+  quantity: 2
+model:
+  checkpoint: ../checkpoints/nanojev
+  mode: sampling
+  seed: 11
