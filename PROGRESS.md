@@ -1,5 +1,15 @@
 # 실행 기록
 
+## 2026-11-10 — #15 T14 구현·리뷰 수정 완료 / 실제 파일럿 진행 중
+
+사용자 `$implement`에 따라 main `f48ccf1`에서 구현했다. `pilot-wood`는 고정 원목4 목표를 NanoJev에 전달하고, 동일 공개 초기 heads·난수에서 Choice LR 두 값만 바꾼다. 에피소드 경계를 넘어128결정 rollout을 모으며 각 설정1,024결정/8update, 공통 초기10+후10×2평가를 연결했다. baseline/correction 독점 생성과 추가 파일럿 최대1회, 평가 예정 분모·서버 오류1회 재시도·실패 경험/시간·초기heads복원을 구현했다. 결정은 DECISIONS 최신 #15 절, 계획은 docs/superpowers/plans/2026-11-10-issue-15-wood-pilot.md다.
+
+- **개발 검사:** 최초 전체269개 통과(123.19초). 독립 리뷰2축에서 부분 에피소드 오류 회계와 선택적 의존성 import 안내를 수정하고 각각 RED→GREEN을 확인했다. 0의 corrective LR이 default로 바뀌던 입력 처리도 RED→GREEN으로 수정했다. 최종 pilot11개/40.11초, mypy src/tests38파일 통과. 리뷰 수정 후 최종 전체 **pytest271개/126.46초** 통과(artifacts/issue-15/full-pytest-final.txt).
+- **리뷰:** Standards 최초P2 2건, Spec 최초P2 1건(회계 누락 중복); 같은 리뷰어들의 수정 재검토에서 미해결0/0. docs/reviews/issue-15.md.
+- **실제 실행:** 승인된 GPU/로컬 서버 명령이 artifacts/issue-15/real에서 실행 중이다. 자연 G1의 고정 snapshot manifest hash `72734522fb22eb506c72dd1fbd2df560cc2f4192ebf16d3047dd2bae77f64d89`, 제공재고0, 학습seed11015·평가15000–15009. 현재 초기 평가의 실제 원목4·정지 인증 통과를 확인했으나 전체30슬롯·2,048학습결정은 아직 진행 중이다. 최종 요약 전 성공률/학습 완료를 확정하지 않는다. 원시 *.jsonl.gz, real.stdout/stderr, baseline/summary.json을 따른다. 실제 실행은 리뷰 전 로드된 소스를 유지하며 회계 오류/의존성 guard 수정은 정상 경로에 영향을 주지 않는다. 런타임 소스 hash는 real-loaded-code.json에 기록했다.
+- **타입 검사 범위:** mypy .는 기존 Git 제외 artifacts의 pathfinder 두 analyze.py 중복 모듈로 exit2다(mypy-dot.txt). strict mypy src tests 통과와 구분한다.
+- **미실행:** 교정 추가 파일럿, 본 학습30,000결정, #16 G4/AJ 진단, 커리큘럼/복구/lock/최종 평가, 7B 학습·Jev/Astra/API 호출0. 보고서 때문에 게임을 재실행하지 않는다. push/PR/merge/이슈 종료는 하지 않는다. 코드 커밋·PDF2개와 최종 실제 결과는 완료 절에서 기록한다.
+
 ## 2026-11-10 — #14 게시·병합·종료 승인 / 원격 #12 통합
 
 사용자가 #14의 push·PR 병합·이슈 종료를 승인했다. 원격 main은 #12 PR #47(`a48253a`)이 앞서 있어 feat/issue-14-ppo에서 보존 merge했다(`cb29ca5`). 충돌한 CLI/schema는 smoke-ppo/smoke-jev·PPO/Jev 두 설정을 모두 유지하고, DECISIONS/PROGRESS의 양쪽 이력도 보존했다. 보고서와 이번 검증에서 #12의 유료 API를 호출하지 않는다.

@@ -122,7 +122,7 @@ class PPO:
             ratios = [float((self.evaluate(rows[i])[0] - cast(float, rows[i].old_logprob)).exp()) for i in actors]
         if not all(math.isfinite(ratio) for ratio in ratios):
             raise ValueError("Nonfinite PPO ratio")
-        losses, norms, policy_losses = [], [], []
+        losses, norms, policy_losses, choice_norms = [], [], [], []
         self.model.train()
         for _ in range(self.config.epochs):
             # A permutation only changes minibatch order; candidate order inside a saved decision never changes.
@@ -150,6 +150,8 @@ class PPO:
                     raise ValueError("Nonfinite PPO loss")
                 self.optimizer.zero_grad(set_to_none=True)
                 cast(Any, loss).backward()
+                choice_norms.append(math.sqrt(sum(float(p.grad.detach().float().square().sum())
+                    for p in self.model.choice.parameters() if p.grad is not None)))
                 norm = torch.nn.utils.clip_grad_norm_([p for p in self.model.parameters() if p.requires_grad],
                                                      self.config.grad_norm, error_if_nonfinite=True)
                 self.optimizer.step()
@@ -158,14 +160,14 @@ class PPO:
         return {"valid_transitions": len(indices), "actor_transitions": len(actors), "actor_skipped": not actors,
                 "initial_ratios": ratios, "advantages": adv, "returns": targets, "trace_masks": trace_masks(rows),
                 "policy_losses": policy_losses,
-                "losses": losses, "gradient_norms": norms,
+                "losses": losses, "gradient_norms": norms, "choice_gradient_norms": choice_norms,
                 "choice_changed": initial_choice != parameter_hash(self.model.choice),
                 "critic_changed": initial_critic != parameter_hash(self.model.critics),
                 "config": self.config.model_dump()}
 
 
 class EpisodeLearner:
-    def __init__(self, model: NanoJevAdapter, config: PPOConfig, seed: int) -> None:
+    def __init__(self, model: NanoJevAdapter, config: PPOConfig, seed: int, *, flush_on_finish: bool = True) -> None:
         self.model, self.config = model, config
         self.ppo = PPO(model, config)
         self.generator = torch.Generator(device=next(model.parameters()).device).manual_seed(seed)
@@ -175,6 +177,8 @@ class EpisodeLearner:
         self.ledger: RewardLedger | None = None
         self.reward_kind: Literal["local", "full"] = "local"
         self.actor_transitions = self.valid_transitions = self.excluded_transitions = self.updates = 0
+        self.flush_on_finish = flush_on_finish
+        self.update_reports: list[dict[str, Any]] = []
 
     @property
     def needs_bootstrap(self) -> bool:
@@ -262,6 +266,7 @@ class EpisodeLearner:
     def update(self) -> None:
         if self.rows:
             report = self.ppo.update(self.rows)
+            self.update_reports.append(report)
             self.updates += bool(report["valid_transitions"])
             emit("ppo_update", {"update": self.updates, **report})
             self.rows.clear()
@@ -271,7 +276,8 @@ class EpisodeLearner:
             # No reliable next goal/candidates: retain diagnostics, exclude the incomplete transition.
             self.append(replace(self.pending, valid=False, actor_valid=False, bootstrap=False, trace=False))
             self.pending = None
-        self.update()
+        if self.flush_on_finish or len(self.rows) >= self.config.rollout:
+            self.update()
 
 
 def smoke_ppo(config: EpisodeConfig, config_path: Path) -> int:

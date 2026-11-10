@@ -1,3 +1,11 @@
+# #15 T14 — 구현·개발 검사/리뷰 완료, 실제 파일럿 진행 중
+
+현재 사용자 요청은 `이슈 15 $implement`. main 시작 SHA f48ccf117c6d4a3b12d67862d022f9bfd113f123. 최신 구현/결정/개발 검사와 미실행은 PROGRESS·DECISIONS 최신 #15 절을 따른다. push/merge/이슈 종료는 요청되지 않았다. 코드 리뷰 Standards/Spec 수정 재확인0/0.
+
+실제 프로세스는 승인된 `UV_CACHE_DIR=.cache/uv .tools/uv run --locked --no-sync mc-diamond pilot-wood --config configs/wood_pilot.yaml --output artifacts/issue-15/real` (exec session43049)이며 real.stdout/stderr·real/baseline/*.jsonl.gz를 보존한다. 최초 초기10회 뒤 LR1e-4/3e-4 각각1024결정/8update와 후평가10회로 총30슬롯이 끝나야 실제 파일럿 완료다. 실행 중인 게임을 다른 검사로 reset하지 않는다. 추가 파일럿/다른 모델 호출은 자동 실행하지 않는다.
+
+개발 검사 최종 pytest271개/126.46초·mypy src/tests38파일 통과. 남은 작업: 실제 실행 끝/실패 기록·초기복원 확인 → PROGRESS/CONTEXT/계획 체크리스트 최신화 → 현재 branch commit → 한국어 report/code-guide PDF2개 생성/한글 추출·embedded font·모든페이지렌더 확인. 보고서 중간파일은 /tmp, reports는 이 티켓 최신PDF2개만 추가하고 Git추적0. 실제 런타임은 리뷰 전 코드가 로드되었고 정상경로에 영향 없는 회계/import/LR0검증 수정은 이후 반영했다. real-loaded-code.json의 런타임hash와 최종 commit기준을 구분한다.
+
 # #14 T13 — 사용자 승인으로 push·PR 병합·이슈 종료
 
 사용자가 #14의 push·merge·이슈 종료를 요청했다. 원격 main의 #12(PR #47, a48253a)를 feat/issue-14-ppo에서 보존 통합했다(cb29ca5). CLI smoke-ppo/smoke-jev와 PPO/Jev 설정을 모두 유지한다. 통합본의 게시 전 pytest/mypy 결과는 PROGRESS 최신 절, 실제 원격 상태는 GitHub PR/#14·artifacts/issue-14/publication.json·최신 PDF2개를 따른다. 아래 로컬/Open 상태는 승인 전 이력이다. 게시 때문에 실제 게임/모델/API를 재실행하지 않는다.

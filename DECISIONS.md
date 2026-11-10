@@ -5,6 +5,17 @@
 
 현행 결정은 2026-10-10 기록이다. 같은 날의 S 필수 진단 보완이 과거 선택 S=규칙 계획/규칙 행동 정의를 대체하며 핵심 F/조건부 7B 학습 결정은 유지한다. 아래 과거 F 제외·계획기 학습 미허용·최종 23회/축소 17회 문구는 당시 결정의 이력이며 해당 부분은 현행 결정으로 대체한다. 과거 기록은 삭제하지 않는다.
 
+## 2026-11-10 — #15 T14 목재 파일럿 구현·실제 실행 사전 고정
+
+- 사용자 `이슈 15 $implement` 요청으로 현재 main `f48ccf1`에서 구현하고 로컬 커밋한다. #13/#14 Closed를 확인했고 #15/#1 본문·댓글, PLAN §§6.1–6.2/7.1/10/11.3과 GLOSSARY를 읽었다. 문서에 이미 확정된 실험을 구현하며 새 연구 설계/설정 탐색을 추가하지 않는다. push/PR/merge/이슈 종료는 승인 범위에 없다.
+- 기존 run_episode·후보·NanoJevSelector·EpisodeLearner·자연 G1 reset을 재사용한다. 고정 목표는 collect/oak_log/4/source=fixed이며 계획기/API를 호출하지 않는다. 실제 config는 configs/wood_pilot.yaml(자연 G1, 빈 인벤토리, 3,600틱, 실제 경과 에피소드 상한900초)이다. 기존 configs/pilot.yaml의 1개 smoke 목표는 바꾸지 않는다.
+- 두 설정은 Choice LR 1e-4/3e-4뿐이고 나머지 PPO 기본값은 동일하다. 공개 초기 actor/critic을 저장·복원하고 각 설정에서 optimizer/RNG를 새로 시작한다. 제공 설정의 학습 난수11015, 평가 공통15000–15009는 실행 전에 manifest에 기록한다. 본 학습 난수11과 파일럿 평가를 구분한다.
+- 1,024 수집 결정은 실제 selection 요청 수로 제한한다. 취소 요청도 이미 선택·시간을 소비한 수집 결정으로 세고 executed_decisions와 별도 보고한다. 유효 actor/critic·무효 전이는 별도다. flush_on_finish=False에서 에피소드 경계의 보상 ledger/trace는 끊되 rollout은 유지해128결정 완전 update8회를 수행한다. smoke-ppo의 기본 finish 부분 update는 유지한다. PPO 보고에 Choice 자체의 gradient norm을 추가해 critic gradient와 구분한다.
+- 초기10+설정별후10=30슬롯, 서버 오류만 같은 snapshot/seed로 최대1회 재시도한다. 평가 중 학습하지 않는다. 성공 수→성공이 있는 동률 설정의 성공 평균 활성 틱→학습/수치 오류 수→1e-4로 선택한다. 불능 설정은 제외하고 모두 불능이면 선택을 보류한다. 성적 상승/성공률 기준을 추가하지 않는다.
+- baseline/correction 디렉터리를 배타적으로 만들어 기존 실행을 덮어쓰지 않는다. 원인 수정은 명시적인 correction-reason과 기존 baseline 근거가 있을 때 같은 campaign에서 최대1회, 선택/default LR하나·최대1,024결정·초기/후10회다. LR 자체 문제를 수정한 override의 이유도 같은 필드에 기록한다. 자동 추가 파일럿/본 학습은 없다. 운영 중단의 정확 복구는 #19 범위이며 자동 재개를 넣지 않는다.
+- 각 attempt의 전체 JSONL을 표준 gzip(level1)으로 보존해 반복 관측 로그의 공간을 줄인다. 요약에는 학습/수치·실행 오류, 무효·미업데이트 경험, 활성/실제 시간, 직접 원목, 선택/계획 호출, API비용0을 기록한다. 실패·미실행 슬롯도 분모에 남긴다. 정상/실패 종료 후 공개 초기 heads를 다시 로드해 hash로 복원을 검증하며 파일럿 actor/경험은 공식30,000결정에서 제외한다.
+- bridge/runtime/mod/정보 관측/기준 snapshot은 바꾸지 않는다. 실제 파일럿의 각 step에서 기존 정지 인증을 확인하며 이전 시계 결과를 새 bridge 인증으로 표현하지 않는다. 실제 실행은 artifacts/issue-15/real의 자연 G1만 사용한다. 실제 학습·평가 결과는 PROGRESS에 기록한다. 진단 실패나 결과 때문에 snapshot/시드/후보 규칙을 조정하지 않는다.
+
 ## 2026-11-10 — #14 게시·PR 병합·이슈 종료 승인과 #12 통합
 
 - 사용자가 #14의 push·merge·이슈 종료 후 마무리를 명시적으로 요청했다. 아래 최초 구현 시점의 로컬 전용/Open 상태는 당시 이력이다. 최종 상태는 GitHub PR/#14 조회, `artifacts/issue-14/publication.json`과 최신 로컬 PDF를 따른다.

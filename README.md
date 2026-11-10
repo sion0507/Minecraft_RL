@@ -157,6 +157,22 @@ full 목표 변경은 trace를 이어 가고, task terminal은 bootstrap 0, 유�
 모델 로드 전 실패는 exit 2, 로드 뒤 실패는 exit 1입니다. 실제 게임 학습 성능·파일럿·본 학습·최종 평가 성공을 뜻하지 않습니다.
 `ppo` 설정의 기본값은 PLAN §6.2를 따릅니다. 실제 사건 연결 진단은 #15/#16, 커리큘럼·복구는 #18/#19, 예산/lock은 #20입니다.
 
+## 목재 파일럿 (#15 / T14)
+
+```bash
+uv run --extra model mc-diamond pilot-wood --config configs/wood_pilot.yaml --output runs/wood-pilot
+```
+
+자연 G1 snapshot에서 빈 인벤토리로 원목 4개를 직접 수집합니다. 실행 코드가 고정 목표를 NanoJev 입력에 전달하며 7B/Jev/Astra를 호출하지 않습니다. 활성 상한은 에피소드당 3,600틱이고 실제 경과 상한은 제공 설정에서 15분입니다. 같은 공개 초기 actor/critic과 난수에서 Choice LR 1e-4/3e-4만 바꿔 각 1,024결정·128결정 rollout 8회로 학습합니다. 짧은 에피소드 경계에서는 rollout을 유지하고, GAE trace와 보상 ledger는 새 에피소드로 연결하지 않습니다.
+
+공통 초기 평가 10회와 설정별 학습 후 10회로 예정 분모는 30입니다. 평가 난수 15000–15009는 세 단계에 공통이고 학습 기본 난수 11015와 구분합니다. 서버 오류만 같은 snapshot/평가 난수로 최대 1회 재시도하며, 실패·오류·미실행 슬롯과 모든 attempt 비용을 보존합니다. 성공 수→성공이 있는 동률 설정의 성공 평균 활성 시간→학습/수치 오류 수→기본 LR 순으로 선택하며 불능 설정은 제외합니다. 모두 불능이면 보류합니다. 성적 상승 자체는 완료 조건이 아닙니다.
+
+`--output` 아래 `baseline/manifest.json`, attempt별 `.jsonl.gz`, `summary.json`, 복원용 공개 초기 `initial.safetensors`를 남깁니다. 기존 baseline은 덮어쓰지 않습니다. 전체 관측·후보·선택·사건·보상·전이·PPO 진단은 압축 trace에 있고 stdout은 JSONL 단계 요약입니다. 학습 중 actor는 본 학습 checkpoint로 저장하지 않으며 종료 시 초기 heads를 복원·hash 확인합니다. 파일럿 경험은 본 학습 30,000결정에서 제외됩니다.
+
+확인된 원인을 수정한 뒤에만 같은 output에 `--correction-reason "원인과 수정"`으로 추가 파일럿을 한 번 실행할 수 있습니다. 선택된 LR(선택 근거가 없으면 1e-4) 하나로 최대 1,024결정과 초기/후 각 10회이며 `correction/`을 덮어쓰지 않습니다. 학습률 자체의 문제를 수정할 때만 `--correction-lr`을 함께 주고 그 이유를 correction-reason에 기록합니다. 중단된 run을 새 run처럼 자동 재개하는 기능은 없습니다.
+
+`configs/wood_pilot_mock.yaml`은 **공개 NanoJev + scripted mock 게임**입니다. 물리나 학습 성능의 검증이 아닙니다. 모델 파일 없이 개발 검사에서는 기존 tiny model을 다운로드 경계에서 대체하며 공통 CLI/RPC/PPO는 실제 코드를 사용합니다. 실제 실행 근거와 미실행은 PROGRESS.md를 따릅니다.
+
 ## 실제 Minecraft 실행
 
 이 작업공간에는 사용자의 EULA 동의 후 Minecraft 1.16.5, Fabric Loader 0.16.14, Carpet 1.4.44를 `worlds/server/`에 설치했습니다. Java 21.0.12.1·Node 24.20.0·Mineflayer 4.39.0에서 실제 연결을 확인했습니다. Linux의 `flock`으로 서버 디렉터리 사용을 잠급니다. 출처와 정확한 해시는 `third_party/README.md` 및 로컬 `worlds/server/installation.json`에 있습니다.
