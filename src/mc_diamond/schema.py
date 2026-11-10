@@ -203,6 +203,7 @@ class ErrorInfo(Contract):
         "backend_error", "protocol_error", "timeout", "permission_denied",
         "invalid_request", "invalid_config", "invalid_selection", "invalid_step",
         "planner_error", "planner_unavailable",
+        "jev_error", "jev_unavailable", "budget_exceeded", "model_response_invalid",
     ]
     message: str
     retryable: bool = False
@@ -366,6 +367,18 @@ class PPOConfig(Contract):
     epochs: Positive = 4
     critic_only: bool = False
 
+class JevConfig(Contract):
+    """External Jev selector (T11 #12): the same settings for J and F; only F's planner differs."""
+    model: str = "typesafe/jev-1.13"
+    mode: Literal["native_choice", "sampling"] = "native_choice"  # sampling only after the distribution is verified
+    seed: int = Field(default=11, ge=0, lt=2**63)
+    cap_usd: float = Field(default=10.0, ge=0)  # the whole Jev cap: connection, diagnostics, J/F, failures (user 2026-11-10)
+    reserve_usd: float = Field(default=0.0, ge=0)  # held back for planned slots (F included) this command does not run
+    max_call_usd: float = Field(default=0.001, gt=0)  # held per request before sending; charged for unconfirmed requests
+    ledger: str = "~/.local/share/mc-diamond/jev_ledger.jsonl"  # shared by every checkout; never in Git
+    timeout_seconds: float = Field(default=60.0, gt=0, le=180)
+    network_attempts: int = Field(default=3, ge=1, le=5)
+
 
 class EpisodeConfig(Contract):
     backend: Literal["mock", "rpc"] = "mock"
@@ -378,6 +391,8 @@ class EpisodeConfig(Contract):
     planner: PlannerSettings | None = None
     model: ModelConfig | None = None
     ppo: PPOConfig = Field(default_factory=PPOConfig)
+
+    jev: JevConfig | None = None
 
     @model_validator(mode="after")
     def configured_backend(self) -> Self:

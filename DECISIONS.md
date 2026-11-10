@@ -1,7 +1,7 @@
 # 확정한 결정
 
 문서 버전: v1.4-core-F-S
-수정일: 2026-11-09 (T08 목표 처리·규칙 복구·S 선택기 #9와 실제 검증 사전 등록, #38 병합·종료와 실제 검증의 T08 이관, T07C 후보 상한 16개·종류별 자리 배분 #38, #36·#37·#8 종료, T07B 한 칸 단차 이동·검증 사전 등록; 이전: T07 tunnel·다이아 판정·자연 G2 사전 등록, G2 1차 결함 수정·2차 사전 등록, 연구용 고정 월드 교체 결정)
+수정일: 2026-11-10 (Jev 총 상한 US$10·#12 Jev 연결·sampling 고정·ledger; 이전 2026-11-09: T08 목표 처리·규칙 복구·S 선택기 #9와 실제 검증 사전 등록, #38 병합·종료와 실제 검증의 T08 이관, T07C 후보 상한 16개·종류별 자리 배분 #38, #36·#37·#8 종료, T07B 한 칸 단차 이동·검증 사전 등록; 이전: T07 tunnel·다이아 판정·자연 G2 사전 등록, G2 1차 결함 수정·2차 사전 등록, 연구용 고정 월드 교체 결정)
 
 현행 결정은 2026-10-10 기록이다. 같은 날의 S 필수 진단 보완이 과거 선택 S=규칙 계획/규칙 행동 정의를 대체하며 핵심 F/조건부 7B 학습 결정은 유지한다. 아래 과거 F 제외·계획기 학습 미허용·최종 23회/축소 17회 문구는 당시 결정의 이력이며 해당 부분은 현행 결정으로 대체한다. 과거 기록은 삭제하지 않는다.
 
@@ -16,6 +16,23 @@
 - `smoke-ppo --config configs/ppo_smoke.yaml`은 공개 NanoJev+mock 게임의 2결정 연결 진단이다. 실제 model을 쓰며 결과 actor를 저장하거나 본 학습에 이어 쓰지 않는다. Astra/Jev 유료 호출을 쓰지 않는다. 본 학습/커리큘럼/원자 복구/lock/최종 평가는 #18–#24의 범위다.
 - 최초 전체 회귀248개 통과 뒤 연결 코드 점검에서 드롭 좌표 오해를 발견했다. 실제 생성 좌표 사례로 RED를 재현해 위 반경2 규칙으로 수정했고, 기존 실제 로그5개를 새 ledger로 재생했다. 최종 수정본의 검사·독립 리뷰·후속 수정은 PROGRESS에 별도 기록한다. 실제 게임의 사건→보상→학습 전체 연결은 #15/#16에서 확인한다.
 - 독립 리뷰의 사망 전이 P1을 재현했다. 실제 bridge는 death에서 danger=true라 stable_boundary=false다. 안전 지면은 비종료 bootstrap의 조건이며 신뢰 가능한 task terminal까지 제외하는 조건이 아니다. invalid·검증된 clock을 유지하고 `(stable_boundary or task_terminal)`로 유효 전이를 구분한다. local/full 공개 CLI 사망2검사 RED→GREEN, 같은 Spec 에이전트의 수정 재검토에서 해결을 확인했다.
+
+## 2026-11-10 — Jev 총 상한 US$10과 #12(T11) 실행 승인 (사용자 결정)
+
+- 사용자가 OpenRouter 키를 `~/.config/mc-diamond/jev.env`(`JEV_API_KEY`, 권한 600)에 저장하고, Jev 모델 API 총 상한을 US$5에서 **US$10**으로 올렸다. 연결·진단·A/J·J/F 최종 평가·실패/재시도를 모두 합친 총액이며, 이 안에서 테스트와 실제 구현을 마치라고 #12 구현과 실제 호출을 승인했다("10달러 이내에 테스트 및 실제 구현까지 완료"). 계정 키 한도도 US$10으로 확인했다(`/api/v1/key` limit 10).
+- 이전 US$5 문구는 이 결정으로 대체한다. Astra 지출은 여전히 별도 ledger·별도 승인이며 이 결정에 포함되지 않는다. 충전은 하지 않는다.
+
+## 2026-11-10 — #12(T11) Jev 실제 연결·선택 모드·비용 ledger (구현 선택)
+
+main `b0d239a`에서 worktree 브랜치 `issue-12-t11`. 원래 checkout의 미커밋 #14 변경은 건드리지 않았다. #12/#1 본문·PLAN §6.3·§7.3·§9.3·§11.1.1을 확인했다. 관련 ADR은 없다.
+
+- **요청(`jev.request_body`):** `POST https://openrouter.ai/api/alpha/decisions`, `model=typesafe/jev-1.13`, `state`=공통 `public_state`+목표 JSON 문자열, `questions.action={type:choice, instructions:공통 INSTRUCTIONS, criteria}`. NanoJev와 같은 `choice_input`을 쓰고 바깥 형식만 바꾼다. Jev 전용 전략·안전 힌트 없음. API에 외부 mask가 없어 masked 후보 key는 빼고, 남은 key는 저장 index(`a0`, `a2`…)를 그대로 써서 저장 candidate_id에 일대일 대응한다. 유효 후보가 1개면 유료 요청을 보내지 않는다.
+- **응답 검증:** `answers.action.type=="choice"`이고 `choice`가 보낸 key 안이어야 한다. 아니면(schema 오류·refusal·후보 밖 ID) 같은 body로 1회만 재요청하고, 다시 실패하면 공통 고정 fallback(첫 유효 후보, `selector_mode=fallback`, `error=model_response_invalid`)을 쓴다. 통신 오류(HTTP 0/408/429/5xx/524/529)는 1·2초 backoff로 최대 3회 시도한 뒤 에피소드를 `jev_error`로 멈춘다. NanoJev로 조용히 대체하지 않는다. 401/402/403/404는 `jev_unavailable`(외부 원인 기록용), 그 밖의 4xx는 `jev_error`(요청/설정 버그)로 구분한다.
+- **분포와 선택 모드:** `probabilities`가 보낸 key 전부를 정확히 덮고, 유한·비음수·합 1(반올림 허용오차 1e-3)일 때만 전체 분포로 인정한다. 그 외는 native choice로 기록하고 probabilities=null이다. `confidence`는 분포로 쓰지 않는다. TypeSafe Choice 문서(2026-11-10 재확인)는 `probabilities`=모든 선택지의 전체 분포·합1, `choice`=최고 확률 선택지, `confidence`=분포의 퍼짐에서 계산한 값으로 정의한다. 실제 응답 6건(2·3후보)이 모두 완전·합1이고 choice=argmax였다. 그래서 PLAN §9.3 표의 첫 줄을 적용해 **J/F 주 모드를 로컬 temperature 1 categorical sampling으로 고정**한다(`EvaluationConfig.jev_mode` 기본 `sampling`, 시드 목록은 A/B와 공유). 성능 결과를 보기 전의 고정이다. 실제 J/F 슬롯에 Jev 선택기와 슬롯 시드를 연결하는 것은 T19/T22다.
+- **비용 ledger(`jev.Ledger`):** 모든 요청(실패·재시도·진단 포함)을 `~/.local/share/mc-diamond/jev_ledger.jsonl`에 append한다. 모든 checkout·worktree가 같은 파일을 쓰고 Git 밖이다. `usage.cost`(HTTP 200)가 있으면 확인 비용, 없으면 미확인으로 남기고 상한 계산에는 요청당 `max_call_usd`(US$0.001)를 청구한 것으로 친다. 요청 전마다 `청구합 + max_call_usd ≤ cap_usd − reserve_usd`를 확인하고 넘으면 `budget_exceeded`로 보내지 않는다. `reserve_usd`는 이 명령이 돌리지 않는 예정 슬롯(F 포함) 예약분이다. 값은 T19가 실측 결정당 비용으로 정한다. F 전용 상한은 만들지 않는다. `evaluate`는 `jev_ledger`를 주면 그 청구합에서 이어서 상한을 센다. 계정 측 사용량은 무료 `GET /api/v1/key`로 smoke 전후에 대조한다.
+- **비밀:** 키는 `JEV_API_KEY` 환경변수 또는 위 파일에서만 읽는다. ledger·오류 메시지·로그에 남는 원본 오류에서 키 문자열을 `<redacted>`로 바꾼다. 요청 header는 기록하지 않는다.
+- **`smoke-jev`:** `configs/jev_smoke.yaml`(mock Minecraft·후보 2개 fixture·Jev sampling) reset→관측→목표→후보→실제 Jev 선택→실행→요약 뒤 `jev_summary`에 확인일·endpoint·요청/응답 모델·제공처·응답·분포 판정·argmax 일치·fallback·ledger·계정 사용량 전후를 남긴다. exit 0=검증, 1=접근 불가(미검증 항목·Q2/Q3/Q4 기록)·오류·fallback, 2=키 없음(요청 없음).
+- **범위 밖:** A/J 6상태 진단과 A/J 5분 실행(§7.3)은 실제 초기 actor 고정 후 Task 9(T13/T14)다. Astra는 별도 승인 전이라 호출하지 않았다. 실제 Minecraft 위 Jev 실행은 하지 않았다(mock Minecraft만).
 
 ## 2026-11-09 — #44 게시·병합·종료와 #1·#20 인계 댓글 (사용자 결정)
 
