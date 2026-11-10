@@ -100,6 +100,14 @@ def test_pilot_cli_runs_two_complete_settings_and_restores_initial_actor(
     with gzip.open(traces[0], "rt") as handle:
         goal = next(json.loads(line)["data"] for line in handle if json.loads(line)["type"] == "goal")
     assert goal["quantity"] == 4 and goal["source"] == "fixed"
+    episode_actor_total = 0
+    for trace in (tmp_path / "pilot" / "baseline").glob("lr-0.0001-train-*.jsonl.gz"):
+        with gzip.open(trace, "rt") as handle:
+            for line in handle:
+                row = json.loads(line)
+                if row["type"] == "summary":
+                    episode_actor_total += row["data"]["actor_transitions"]
+    assert episode_actor_total == 1024  # per-episode summaries must not repeat the learner's cumulative count
     from mc_diamond.cli import main
     baseline = (tmp_path / "pilot" / "baseline" / "summary.json").read_bytes()
     assert main() == 1  # existing campaign cannot be overwritten or silently extended

@@ -36,7 +36,7 @@ See `docs/agents/domain.md`.
 
 ## 설치·실행·검사 명령
 
-현재 doctor·smoke-episode·prepare-world·verify-clock·pytest·mypy와 Python/Node 패키지 설정을 구현했다. 모의 검사는 configs/pilot.yaml, 실제 Minecraft 검사는 configs/minecraft.yaml을 사용한다. 서버 설치·snapshot 준비는 README.md의 실제 Minecraft 실행 절을 따른다. 아래 나머지 후속 실험 명령은 각 기능 구현 후 사용한다.
+현재 doctor·smoke-episode·prepare-world·verify-clock·pytest·mypy와 Python/Node 패키지 설정을 구현했다. 기본 모의 검사는 configs/pilot.yaml, 기본 실제 Minecraft 검사는 configs/minecraft.yaml을 사용한다. 목재 파일럿 설정은 README.md의 목재 파일럿 절을 따른다. 서버 설치·snapshot 준비는 README.md의 실제 Minecraft 실행 절을 따른다. 아래 나머지 후속 실험 명령은 각 기능 구현 후 사용한다.
 설치·실행 계약은 `PLAN.md` §14, 검사 도구는 아래 개발 명령을 설정할 때 의존성을 명시한다.
 모든 명령은 저장소 루트에서 실행한다.
 
@@ -51,7 +51,7 @@ uv run mc-diamond smoke-macros --config configs/pilot.yaml
 uv run mc-diamond smoke-planner --config configs/pilot.yaml
 uv run mc-diamond smoke-model --config configs/pilot.yaml
 uv run mc-diamond smoke-jev --config configs/pilot.yaml
-uv run mc-diamond pilot-wood --config configs/pilot.yaml
+uv run mc-diamond pilot-wood --config configs/wood_pilot.yaml
 uv run mc-diamond diagnose-g4 --phase pretrain --config configs/pilot.yaml
 uv run mc-diamond benchmark --config configs/experiment.yaml
 uv run mc-diamond budget --config configs/experiment.yaml

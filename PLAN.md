@@ -963,7 +963,7 @@ uv run mc-diamond smoke-macros --config configs/pilot.yaml
 uv run mc-diamond smoke-planner --config configs/pilot.yaml
 uv run mc-diamond smoke-model --config configs/pilot.yaml
 uv run mc-diamond smoke-jev --config configs/pilot.yaml
-uv run mc-diamond pilot-wood --config configs/pilot.yaml
+uv run mc-diamond pilot-wood --config configs/wood_pilot.yaml
 uv run mc-diamond diagnose-initial --groups A,J --config configs/pilot.yaml
 uv run mc-diamond diagnose-g4 --phase pretrain --config configs/pilot.yaml
 uv run mc-diamond benchmark --config configs/experiment.yaml
