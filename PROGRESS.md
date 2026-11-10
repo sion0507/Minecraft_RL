@@ -1,5 +1,15 @@
 # 실행 기록
 
+## 2026-11-10 — #14 게시·병합·종료 승인 / 원격 #12 통합
+
+사용자가 #14의 push·PR 병합·이슈 종료를 승인했다. 원격 main은 #12 PR #47(`a48253a`)이 앞서 있어 feat/issue-14-ppo에서 보존 merge했다(`cb29ca5`). 충돌한 CLI/schema는 smoke-ppo/smoke-jev·PPO/Jev 두 설정을 모두 유지하고, DECISIONS/PROGRESS의 양쪽 이력도 보존했다. 보고서와 이번 검증에서 #12의 유료 API를 호출하지 않는다.
+
+통합본 개발 검사 원시: `artifacts/issue-14/publication-{pytest,mypy,targeted-uv}.txt`. 처음 `.venv/bin/python -m pytest`로 직접 실행한 일부 CLI 검사는 PATH에 mc-diamond가 없어16개 실패/25개 통과였다(`publication-targeted.txt`). 원인은 설치 부재가 아닌 uv 실행 환경을 거치지 않은 명령이며, 저장소의 uv run 명령으로 다시 확인한다. 전체 suite도 uv run으로 실행한다. 최종 결과는 아래 게시 전 검사 기록에 추가한다.
+
+게시 전 최종 확인: 통합본 전체 **pytest260개/90.39초**, 관련41개/12.79초, strict mypy src/tests36파일 및 diff 검사 통과. .github workflow는 없어 이 결과를 원격 CI 통과로 표시하지 않는다.
+
+실제 게임/모델/유료 API는 게시 때문에 재실행하지 않는다. 최종 push·PR·원격 main merge·#14 종료 상태와 SHA는 `artifacts/issue-14/publication.json`, GitHub PR/#14 및 최신 PDF2개에 남긴다. 아래 미푸시/Open 표시는 승인 전 이력이다.
+
 ## 2026-11-10 — #14 T13 최종 검증·리뷰 수정·로컬 커밋 완료
 
 **코드 기준:** 구현 `7630857`, 리뷰 수정 `34dd151`(main 로컬). 최초 구현/검증 과정은 아래 같은 날 절에 보존한다. push·PR·원격 merge·이슈 종료는 하지 않았다.
