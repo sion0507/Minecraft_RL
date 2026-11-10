@@ -1,3 +1,13 @@
+# #15 — 사용자 지시로 중단, 실제 실행 중단 상태 유지
+
+사용자 최신 지시: "일단 멈춰봐 여기까지 하고 그리고 실제로 의미가 있었나 말해봐". 실제 학습·Minecraft 서버는 exit130으로 종료됐고 GPU 모델 메모리 반환 확인. 사용자가 명시적으로 재개를 요청하기 전에는 실제 게임/모델/학습을 시작하지 않는다. 아래 진행 중 기록은 과거 이력이다.
+
+코드는 main 로컬 f8f3894와 e3b0b9d에 커밋했다. pytest271/124.26초·mypy src/tests38파일·두 축 리뷰0/0. mypy .는 기존 artifacts의 중복 모듈 오류. push/merge/이슈 종료 미실행, #15 실제 수락 검증 미완료.
+
+실제 중단 근거: 초기 평가9/10성공, LR1e-4 619/1024결정·4/8update, PPO512전이 중 actor447. 완료 학습43에피소드42성공은 학습 후 고정 평가가 아니다. LR3e-4·후평가20슬롯·설정 선택 미실행. 학습 연결은 확인했지만 성능 향상/LR우열은 미검증. 초기 heads 복원도 KeyboardInterrupt로 hash미확인; 공개 원본 best.safetensors 고정hash는 일치. 중간 actor/optimizer/RNG checkpoint 없음. 정확 재개 기능 없음.
+
+원시 evidence: artifacts/issue-15/real.stdout/stderr, real/baseline/*.jsonl.gz 및 initial.safetensors, real-loaded-code.json/loaded-source. 원시 episode.actor_transitions는 누적값이므로 합산금지. 별도 artifacts/issue-15/stop-summary.json은 원시자료에서 재구성한 중단 요약. 정상 summary.json은 없음. 보고서 생성기는 /tmp/issue15-stop-pdfs.py, 게임재실행없이PDF2개를작성한다. 최종 기록은 PROGRESS 최신 #15 중단 절을 따른다.
+
 # #15 T14 — 구현·개발 검사/리뷰 완료, 실제 파일럿 진행 중
 
 현재 사용자 요청은 `이슈 15 $implement`. main 시작 SHA f48ccf117c6d4a3b12d67862d022f9bfd113f123. 최신 구현/결정/개발 검사와 미실행은 PROGRESS·DECISIONS 최신 #15 절을 따른다. push/merge/이슈 종료는 요청되지 않았다. 코드 리뷰 Standards/Spec 수정 재확인0/0.

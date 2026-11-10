@@ -46,5 +46,9 @@
 - [ ] Run actual public NanoJev + Minecraft pilot if prerequisites permit; retain all failures and unrun slots, never substitute mock evidence for actual game.
 - [x] Run the full suite once, strict mypy src/tests and diff checks.
 - [x] Apply code-review with independent Standards/Spec agents against starting commit f48ccf117c6d4a3b12d67862d022f9bfd113f123; fix material findings and recheck affected tests.
-- [ ] Record implementation decisions and separate actual/mock/unrun evidence; create two Korean PDFs in reports, verify fonts/extraction/all rendered pages.
-- [ ] Commit to the current branch, verify status and provide commit/PDF links; no publishing or closing issues.
+- [x] Record implementation decisions and separate actual/mock/unrun evidence; create two Korean PDFs in reports, verify fonts/extraction/all rendered pages.
+- [x] Commit to the current branch, verify status and provide commit/PDF links; no publishing or closing issues.
+
+## User-stopped execution — 2026-11-10
+
+User explicitly stopped the actual run at619decisions/4updates. The initial10evaluation slots completed (9successes);20post-training slots and the second setting remain unrun. Do not automatically resume or start another campaign. Software implementation/review/commits are complete, but the full actual pilot and settings comparison remain incomplete. See PROGRESS latest stop record and artifacts/issue-15/stop-summary.json.

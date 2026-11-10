@@ -1,5 +1,19 @@
 # 실행 기록
 
+## 2026-11-10 — #15 사용자 요청으로 실제 파일럿 중단 / 학습 연결 확인·성능 효과 미검증
+
+사용자가 "일단 멈춰봐 여기까지 하고 그리고 실제로 의미가 있었나 말해봐"라고 지시했다. 실제 CLI에 중단 신호를 보내 exit130으로 종료했다. host process 조회에서 학습/Minecraft Java 프로세스가 없고, nvidia-smi compute 목록에서 해당 Python 모델이 사라져 GPU 메모리 반환을 확인했다. 추가 게임/모델/학습/API를 실행하지 않는다. 아래 진행 중 기록은 중단 전 이력이다.
+
+**실제 근거(약98.4분):** 초기 고정 평가10회 중9성공·1활성시간소진. 첫 LR1e-4에서619선택/619실행 결정을 수집했다. 완전128전이 update4회로512유효전이(유효 actor108+111+113+115=447개)를 PPO에 사용했다. Choice/critic은 네 번 모두 변했고 최초 ratio는 모두1, Choice/전체 gradient는 유한했다. 학습 중 완료43에피소드 중42회 원목 목표 달성·직접 원목174개를 기록했다. 이 수치는 정책이 변하는 학습 기록이며 초기/학습 후 고정 평가와 직접 비교하지 않는다. 원목4 고정 목표·7B미호출·실제 정지 인증을 유지했다.
+
+**미완료:** 첫 설정619/1024·4/8update, 두 번째 LR3e-4 미착수, 두 설정 후평가20슬롯 미실행, 설정 선택 보류(사용자 중단). 수집107결정은 PPO 미반영이며 마지막 pending/중간 episode를 포함한다. 본 학습0결정·API US$0이다. 코드 구현과 실제 학습 연결 검증에는 의미가 있었지만 성능 향상·LR우열·본 학습 준비 완료의 증거는 없다. #15 전체 실제 검증/이슈 완료로 표시하지 않는다.
+
+**복원/재개 한계:** 중단 unwind 중 initial heads load도 KeyboardInterrupt로 끝났다. 실행 중 객체의 초기 복원 hash·본체 최종 hash 비교는 미확인이다. 디스크 best.safetensors의 공개 고정 SHA-256 f68c47d66998231b86b7e91b4ed5e82ae23acf104c8b7cd6d165c3ac7b7ffe1b는 일치한다. 원본은 변경되지 않았고 중간 학습 actor/optimizer/RNG checkpoint는 없다. 현재 구현은 이 지점의 정확한 checkpoint 재개를 제공하지 않는다. 원시 로그·초기 heads·네 update는 보존한다. 원시 episode actor 요약은 누적값이므로 합산하지 않고 transition/PPO 필드로 집계했다.
+
+**소프트웨어 상태:** 구현f8f3894·요약 집계 수정e3b0b9d를 현재 main에 로컬 커밋했다. 최종 pytest271개/124.26초·strict mypy src/tests38파일 통과, 두 축 리뷰 미해결0/0. mypy .는 기존 Git 제외 pathfinder artifacts의 중복 analyze.py로 exit2다. push/PR/merge/이슈 종료는 수행하지 않았다.
+
+**증거:** artifacts/issue-15/stop-summary.json은 사용자 중단 뒤 보존된 원시 로그에서 재구성한 별도 중단 요약이다. 정상 종료 baseline/summary.json은 생성되지 않았다. real.stdout/stderr·real/baseline/*.jsonl.gz·real-loaded-code.json·loaded-source와 검사/리뷰 자료를 보존한다. reports의 이 티켓 최신 구현/검증 보고서와 코드 가이드 PDF2개는 중단 상태·한계를 구분하며 보고서 때문에 게임을 재실행하지 않는다. 파일은 reports/issue-015-T14-report.pdf(2쪽)와 issue-015-T14-code-guide.pdf(2쪽)다. 코드 가이드는 e3b0b9da89b91d9d6fea5379513d0ae59622f6a1의 AST 시작 줄을 사용한다. 한글 추출·대체문자 없음, 사용한 한글 TrueType 글꼴의 embedded/subset/Unicode mapping, 1500px 렌더4페이지 전체 가독성을 확인했다. 중간 파일은 /tmp에만 있고 reports는 Git 추적0이다.
+
 ## 2026-11-10 — #15 T14 구현·리뷰 수정 완료 / 실제 파일럿 진행 중
 
 사용자 `$implement`에 따라 main `f48ccf1`에서 구현했다. `pilot-wood`는 고정 원목4 목표를 NanoJev에 전달하고, 동일 공개 초기 heads·난수에서 Choice LR 두 값만 바꾼다. 에피소드 경계를 넘어128결정 rollout을 모으며 각 설정1,024결정/8update, 공통 초기10+후10×2평가를 연결했다. baseline/correction 독점 생성과 추가 파일럿 최대1회, 평가 예정 분모·서버 오류1회 재시도·실패 경험/시간·초기heads복원을 구현했다. 결정은 DECISIONS 최신 #15 절, 계획은 docs/superpowers/plans/2026-11-10-issue-15-wood-pilot.md다.
