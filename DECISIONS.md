@@ -15,6 +15,7 @@
 - PLAN 기본 PPO 설정을 사용한다. actor advantage 정규화는 유효 복수 선택만 대상으로 하며 단일 유효 actor의 정규화 값은0이다. actor 전이가 없으면 Choice gradient/Adam 갱신을 생략한다. 독립 local/full critic 중 해당 목적만 gradient를 받는다.
 - `smoke-ppo --config configs/ppo_smoke.yaml`은 공개 NanoJev+mock 게임의 2결정 연결 진단이다. 실제 model을 쓰며 결과 actor를 저장하거나 본 학습에 이어 쓰지 않는다. Astra/Jev 유료 호출을 쓰지 않는다. 본 학습/커리큘럼/원자 복구/lock/최종 평가는 #18–#24의 범위다.
 - 최초 전체 회귀248개 통과 뒤 연결 코드 점검에서 드롭 좌표 오해를 발견했다. 실제 생성 좌표 사례로 RED를 재현해 위 반경2 규칙으로 수정했고, 기존 실제 로그5개를 새 ledger로 재생했다. 최종 수정본의 검사·독립 리뷰·후속 수정은 PROGRESS에 별도 기록한다. 실제 게임의 사건→보상→학습 전체 연결은 #15/#16에서 확인한다.
+- 독립 리뷰의 사망 전이 P1을 재현했다. 실제 bridge는 death에서 danger=true라 stable_boundary=false다. 안전 지면은 비종료 bootstrap의 조건이며 신뢰 가능한 task terminal까지 제외하는 조건이 아니다. invalid·검증된 clock을 유지하고 `(stable_boundary or task_terminal)`로 유효 전이를 구분한다. local/full 공개 CLI 사망2검사 RED→GREEN, 같은 Spec 에이전트의 수정 재검토에서 해결을 확인했다.
 
 ## 2026-11-09 — #44 게시·병합·종료와 #1·#20 인계 댓글 (사용자 결정)
 

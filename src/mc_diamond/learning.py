@@ -224,7 +224,7 @@ class EpisodeLearner:
         reward = ledger.compute(state.observation, state.goal, step, goal_completed=goal_completed)
         with torch.no_grad():
             _, values = self.model.score_features(state.features, state.mask, state.context)
-        valid = not step.invalid and step.stable_boundary and step.clock_mode in {"mock", "paused"}
+        valid = not step.invalid and (step.stable_boundary or reward.terminal) and step.clock_mode in {"mock", "paused"}
         offered = any(c.candidate_id == selection.candidate_id for c in state.candidates.candidates)
         own = (selection.selector_mode == "sampling" and selection.provider == "local" and not selection.fallback
                and selection.error is None)

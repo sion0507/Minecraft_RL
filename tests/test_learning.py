@@ -312,3 +312,21 @@ def test_actor_exclusions_preserve_costs_and_only_train_valid_critics(
         assert reward["value"] == pytest.approx(-.03)
         row = next(r["data"] for r in output if r["type"] == "transition")
         assert row["trace_break"] == (mode == "cancelled")
+
+
+@pytest.mark.parametrize("objective,expected", [("local", -1.02), ("full", -20.001)])
+def test_observed_death_is_a_learnable_terminal_without_a_safe_standing_boundary(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        objective: str, expected: float) -> None:
+    fixture = json.loads(Path("fixtures/model_episode.json").read_text())
+    fixture["initial"]["objective_kind"] = objective
+    final = fixture["steps"][0]
+    final["observation"].update(objective_kind=objective, health=0., inventory={})
+    final.update(stable_boundary=False, events=[{"kind": "stopped", "source": "mock"}],
+                 reason="death", stop_evidence=["obs-1", "death"])
+    status, output, _ = run_learning_cli(tmp_path, monkeypatch, capsys, fixture)
+    assert status == 0, output[-1]
+    row = next(r["data"] for r in output if r["type"] == "transition")
+    assert row["valid"] and row["actor_valid"] and not row["bootstrap"]
+    assert output[-1]["data"]["reward_total"] == pytest.approx(expected)
+    assert output[-1]["data"]["valid_transitions"] == 1
