@@ -1,4 +1,4 @@
-"""PLAN §7.1: bounded fixed-goal pilot, isolated from main training and final evaluation."""
+"""PLAN §7.1: bounded fixed-goal pilot (empty G1 -> 3 cobblestone), isolated from main training and final evaluation."""
 
 import gzip
 import json
@@ -19,6 +19,8 @@ from .rpc import EpisodeError, RpcSession
 from .schema import EpisodeConfig, ErrorInfo, ModelConfig, PPOConfig
 
 DECISIONS = 1024
+STONE = 3  # wood at 4 logs was 9/10 for the untrained policy (DECISIONS 2026-11-10)
+TICKS = 3600
 EVALUATION_SEEDS = list(range(15000, 15010))
 LEARNING_RATES = (1e-4, 3e-4)
 
@@ -50,8 +52,8 @@ def attempt(config: EpisodeConfig, path: Path, directory: Path, identity: str, n
                 def reset() -> Any:
                     observation = session.reset(identity, attempt_id)
                     if (observation.objective_kind != "local" or observation.active_ticks != 0
-                            or observation.remaining_ticks != 3600 or observation.inventory):
-                        raise ValueError("Wood pilot requires empty local G1 with exactly 3600 active ticks")
+                            or observation.remaining_ticks != TICKS or observation.inventory):
+                        raise ValueError("Pilot requires empty local G1 with exactly 3600 active ticks")
                     return observation
                 summary = run_episode(config, session.policy(), reset, identity, attempt_id, macros=True,
                     select=learner.select if learner else NanoJevSelector(model, "sampling", seed),
@@ -85,13 +87,14 @@ def attempt(config: EpisodeConfig, path: Path, directory: Path, identity: str, n
         summary = summary.model_copy(update=partial)
     valid = summary.error is None and not summary.invalid and (config.backend == "mock" or summary.pause_verified)
     record = {"attempt_id": attempt_id, "seed": seed, "snapshot": snapshot, "trace": str(trace),
-        "success": valid and summary.goal_completed and summary.direct_acquired.get("oak_log", 0) >= 4,
+        "success": valid and summary.goal_completed and summary.direct_acquired.get("cobblestone", 0) >= STONE,
         "valid": valid, "reason": summary.reason,
         "error_code": summary.error.code if summary.error else None if valid else "invalid_step",
         "error": summary.error.model_dump(mode="json") if summary.error else None,
         "active_ticks": summary.active_ticks, "wall_seconds": time.monotonic() - started,
         "collected_decisions": summary.selection_requests, "executed_decisions": summary.decisions,
-        "direct_logs": summary.direct_acquired.get("oak_log", 0), "provided_inventory": summary.provided_inventory,
+        "direct_logs": summary.direct_acquired.get("oak_log", 0),
+        "direct_cobblestone": summary.direct_acquired.get("cobblestone", 0), "provided_inventory": summary.provided_inventory,
         "planner_calls": summary.planner_initial_requests + summary.planner_regeneration_requests,
         "pause_verified": summary.pause_verified, "reward_total": summary.reward_total,
         "api_cost_usd": 0.0}
@@ -123,9 +126,10 @@ def evaluate(config: EpisodeConfig, path: Path, directory: Path, phase: str, mod
 def select_setting(settings: list[dict[str, Any]], evaluations: list[dict[str, Any]]) -> float | None:
     eligible = [setting for setting in settings if setting["usable"]]
     def rank(setting: dict[str, Any]) -> tuple[float, float, int, float]:
-        successes = [row["attempts"][-1]["active_ticks"] for row in evaluations
-                     if row["phase"] == setting["phase"] and row["success"]]
-        return (-len(successes), sum(successes) / len(successes) if successes else 0.,
+        rows = [row for row in evaluations if row["phase"] == setting["phase"]]
+        # Every planned slot counts; a failure costs the whole budget, so failing fast is never a good time.
+        ticks = [row["attempts"][-1]["active_ticks"] if row["success"] else TICKS for row in rows]
+        return (-sum(row["success"] for row in rows), sum(ticks) / len(ticks) if ticks else 0.,
                 len(setting["errors"]), float(setting["choice_lr"]))
     return float(min(eligible, key=rank)["choice_lr"]) if eligible else None
 
@@ -135,7 +139,7 @@ def train_setting(config: EpisodeConfig, path: Path, directory: Path, model: Nan
     phase = f"lr-{lr:g}"
     initial = hashes(model)
     torch.manual_seed(seed)
-    learner = EpisodeLearner(model, PPOConfig(choice_lr=lr), seed, flush_on_finish=False)
+    learner = EpisodeLearner(model, PPOConfig(choice_lr=lr), seed, flush_on_finish=False, critic_warmup=1)
     collected = 0
     episodes: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -178,10 +182,10 @@ def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
     rates: tuple[float, ...] = LEARNING_RATES
     snapshot = "unavailable"
     try:
-        if (config.planner is not None or config.goal.kind != "collect" or config.goal.target != "oak_log"
-                or config.goal.quantity != 4 or config.goal.source != "fixed" or config.ppo != PPOConfig()
+        if (config.planner is not None or config.goal.kind != "collect" or config.goal.target != "cobblestone"
+                or config.goal.quantity != STONE or config.goal.source != "fixed" or config.ppo != PPOConfig()
                 or config.model is not None and config.model.mode != "sampling"):
-            raise ValueError("pilot-wood requires fixed collect oak_log=4, no planner, default PPO and sampling")
+            raise ValueError("pilot-wood requires fixed collect cobblestone=3, no planner, default PPO and sampling")
         if config.backend == "rpc" and (config.command is None or len(config.command) != 4
                 or config.command[-2:] != ["--task", "G1"]
                 or Path(config.command[1]).resolve() != Path("bridge/minecraft.js").resolve()):
@@ -216,6 +220,9 @@ def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
         initial = hashes(model)
         model.save_heads(directory / "initial.safetensors")
         summary["evaluations"] = evaluate(config, path, directory, "initial", model, snapshot)
+        passed = sum(row["success"] for row in summary["evaluations"])
+        if config.backend == "rpc" and not 2 <= passed <= 8:  # registered difficulty band; the scripted mock always succeeds
+            raise ValueError(f"Initial policy succeeded {passed}/10, outside the registered 2-8 band; the user decides the task")
         for lr in rates:
             model.load_heads(directory / "initial.safetensors")
             record = train_setting(config, path, directory, model, settings.seed, snapshot, lr)

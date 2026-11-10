@@ -7,8 +7,8 @@ wall_limit_seconds: 900.0
 goal:
   goal_id: pilot-wood
   kind: collect
-  target: oak_log
-  quantity: 4
+  target: cobblestone
+  quantity: 3
 model:
   checkpoint: ../checkpoints/nanojev
   mode: sampling

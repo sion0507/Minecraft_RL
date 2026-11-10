@@ -44,17 +44,20 @@ def pilot_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
     for i in range(1, 33):
         final = i == 32
         step = {**template["steps"][0], "terminated": final, "reason": "mock_goal_completed" if final else "macro_completed",
-                "source_obs_id": f"obs-{i - 1}", "events": [{"kind": "acquired", "item": "oak_log", "quantity": 1,
-                    "event_id": f"log-{i}", "source": "mock"}] if i % 8 == 0 else [{"kind": "stopped", "source": "mock"}]}
-        step["observation"] = {**initial, "obs_id": f"obs-{i}", "active_ticks": i * 20,
-                               "remaining_ticks": 3600 - i * 20, "inventory": {"oak_log": i // 8}}
+                "source_obs_id": f"obs-{i - 1}", "events": [{"kind": "acquired", "item": "cobblestone", "quantity": 1,
+                    "event_id": f"stone-{i}", "source": "mock"}] if i in (8, 16, 32) else [{"kind": "stopped", "source": "mock"}]}
+        # After the first decision the scripted game already holds the pickaxe and stands next to two exposed stones.
+        step["observation"] = {**initial, "obs_id": f"obs-{i}", "active_ticks": i * 20, "remaining_ticks": 3600 - i * 20,
+                               "inventory": {"wooden_pickaxe": 1, "cobblestone": sum(i >= n for n in (8, 16, 32))},
+                               "tool": "wooden_pickaxe",
+                               "observed_map": [{**cell, "block": "stone"} for cell in initial["observed_map"]]}
         step["stop_evidence"] = [f"obs-{i}", step["reason"]]
         steps.append(step)
     fixture = tmp_path / "wood.json"
     fixture.write_text(json.dumps({"initial": initial, "steps": steps, **fixture_updates}))
     config = tmp_path / "wood.yaml"
     config.write_text(yaml.safe_dump({"backend": "mock", "fixture": str(fixture), "max_decisions": 3600,
-        "goal": {"goal_id": "pilot-wood", "kind": "collect", "target": "oak_log", "quantity": 4}}))
+        "goal": {"goal_id": "pilot-wood", "kind": "collect", "target": "cobblestone", "quantity": 3}}))
     monkeypatch.setattr(sys, "argv", ["mc-diamond", "pilot-wood", "--config", str(config), "--output", str(tmp_path / "pilot")])
     status = main()
     output = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
@@ -80,7 +83,8 @@ def test_pilot_cli_runs_two_complete_settings_and_restores_initial_actor(
         assert setting["collected_decisions"] == 1024
         assert len(setting["updates"]) == 8
         assert all(u["valid_transitions"] == 128 for u in setting["updates"])
-        assert setting["actor_transitions"] == 1024 and setting["backbone_unchanged"]
+        assert setting["actor_transitions"] == 896 and setting["backbone_unchanged"]  # first rollout is critic-only
+        assert setting["updates"][0]["actor_skipped"] and not setting["updates"][1]["actor_skipped"]
         assert setting["choice_changed"] and setting["critic_changed"] and setting["usable"]
     groups = [[r for r in summary["evaluations"] if r["phase"] == phase] for phase in ["initial", "lr-0.0001", "lr-0.0003"]]
     assert [[r["seed"] for r in group] for group in groups] == [list(range(15000, 15010))] * 3
@@ -94,12 +98,12 @@ def test_pilot_cli_runs_two_complete_settings_and_restores_initial_actor(
             assert row["attempts"][0]["seed"] == row["attempts"][1]["seed"]
             assert row["attempts"][0]["snapshot"] == row["attempts"][1]["snapshot"]
             attempt = row["attempts"][-1]
-        assert attempt["direct_logs"] == 4 and attempt["planner_calls"] == 0
+        assert attempt["direct_cobblestone"] == 3 and attempt["planner_calls"] == 0
     import gzip
     traces = list((tmp_path / "pilot" / "baseline").glob("*.jsonl.gz"))
     with gzip.open(traces[0], "rt") as handle:
         goal = next(json.loads(line)["data"] for line in handle if json.loads(line)["type"] == "goal")
-    assert goal["quantity"] == 4 and goal["source"] == "fixed"
+    assert goal["target"] == "cobblestone" and goal["quantity"] == 3 and goal["source"] == "fixed"
     episode_actor_total = 0
     for trace in (tmp_path / "pilot" / "baseline").glob("lr-0.0001-train-*.jsonl.gz"):
         with gzip.open(trace, "rt") as handle:
@@ -107,7 +111,7 @@ def test_pilot_cli_runs_two_complete_settings_and_restores_initial_actor(
                 row = json.loads(line)
                 if row["type"] == "summary":
                     episode_actor_total += row["data"]["actor_transitions"]
-    assert episode_actor_total == 1024  # per-episode summaries must not repeat the learner's cumulative count
+    assert episode_actor_total == 896  # per-episode summaries must not repeat the learner's cumulative count
     from mc_diamond.cli import main
     baseline = (tmp_path / "pilot" / "baseline" / "summary.json").read_bytes()
     assert main() == 1  # existing campaign cannot be overwritten or silently extended
@@ -147,7 +151,7 @@ def test_model_failure_preserves_partial_decisions_time_and_direct_progress(
     first = summary["settings"][0]
     assert not first["usable"] and first["collected_decisions"] == 8
     assert first["episodes"][0]["active_ticks"] == 160
-    assert first["episodes"][0]["direct_logs"] == 1
+    assert first["episodes"][0]["direct_cobblestone"] == 1
     assert first["episodes"][0]["reward_total"] < 0
     assert len(summary["evaluations"]) == 30
 
@@ -160,7 +164,7 @@ def test_model_failure_preserves_partial_decisions_time_and_direct_progress(
     ([3, 1], [10, 100], [0, 0], [False, True], 3e-4),
     ([0, 0], [10, 100], [1, 1], [False, False], None),
 ])
-def test_selection_uses_only_successful_times_and_excludes_unusable_settings(
+def test_selection_charges_failures_the_full_budget_and_excludes_unusable_settings(
         successes: list[int], ticks: list[int], errors: list[int], usable: list[bool], expected: float | None) -> None:
     pytest.importorskip("torch")
     from mc_diamond.wood_pilot import select_setting
@@ -178,7 +182,7 @@ def test_corrective_pilot_requires_baseline_and_a_written_reason(
     from mc_diamond.cli import main
     config = tmp_path / "wood.yaml"
     config.write_text(yaml.safe_dump({"backend": "mock", "fixture": str(Path("fixtures/model_episode.json").resolve()),
-        "goal": {"goal_id": "wood", "kind": "collect", "target": "oak_log", "quantity": 4}}))
+        "goal": {"goal_id": "wood", "kind": "collect", "target": "cobblestone", "quantity": 3}}))
     monkeypatch.setattr(sys, "argv", ["mc-diamond", "pilot-wood", "--config", str(config), "--output", str(tmp_path / "pilot"),
                                       "--correction-reason", "fixed a confirmed execution error"])
     assert main() == 1

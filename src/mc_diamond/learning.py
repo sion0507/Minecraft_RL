@@ -150,9 +150,10 @@ class PPO:
                     raise ValueError("Nonfinite PPO loss")
                 self.optimizer.zero_grad(set_to_none=True)
                 cast(Any, loss).backward()
-                choice_norms.append(math.sqrt(sum(float(p.grad.detach().float().square().sum())
-                    for p in self.model.choice.parameters() if p.grad is not None)))
-                norm = torch.nn.utils.clip_grad_norm_([p for p in self.model.parameters() if p.requires_grad],
+                # The heads share no parameters: clipped apart, a large value loss cannot shrink the Choice step.
+                choice_norms.append(float(torch.nn.utils.clip_grad_norm_(
+                    self.model.choice.parameters(), self.config.grad_norm, error_if_nonfinite=True)))
+                norm = torch.nn.utils.clip_grad_norm_(self.model.critics.parameters(),
                                                      self.config.grad_norm, error_if_nonfinite=True)
                 self.optimizer.step()
                 losses.append(float(loss.detach()))
@@ -167,9 +168,12 @@ class PPO:
 
 
 class EpisodeLearner:
-    def __init__(self, model: NanoJevAdapter, config: PPOConfig, seed: int, *, flush_on_finish: bool = True) -> None:
-        self.model, self.config = model, config
-        self.ppo = PPO(model, config)
+    def __init__(self, model: NanoJevAdapter, config: PPOConfig, seed: int, *, flush_on_finish: bool = True,
+                 critic_warmup: int = 0) -> None:
+        # The first `critic_warmup` rollouts train the value head only: the new critic's first targets are far off.
+        self.model, self.actor_config, self.critic_warmup = model, config, critic_warmup
+        self.config = config.model_copy(update={"critic_only": True}) if critic_warmup else config
+        self.ppo = PPO(model, self.config)
         self.generator = torch.Generator(device=next(model.parameters()).device).manual_seed(seed)
         self.rows: list[Transition] = []
         self.pending: Transition | None = None
@@ -268,6 +272,8 @@ class EpisodeLearner:
             report = self.ppo.update(self.rows)
             self.update_reports.append(report)
             self.updates += bool(report["valid_transitions"])
+            if self.updates >= self.critic_warmup:
+                self.config = self.ppo.config = self.actor_config
             emit("ppo_update", {"update": self.updates, **report})
             self.rows.clear()
 
