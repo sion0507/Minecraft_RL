@@ -1,3 +1,14 @@
+# #49 — 파일럿 종료 후 timeout 진단·재기동 1회 구현 승인 (2026-11-11)
+
+사용자가 현재 파일럿이 끝난 **뒤에** 다음을 적용하라고 명시적으로 승인했다. 현재 실행 중에는 bridge/server.js 및 실행 소스/설정을 바꾸지 않는다. 완료/실패 이벤트가 도착하면 먼저 현재 결과를 보존·보고하고 이 후속 구현을 이어간다. 재승인 질문은 필요 없다.
+
+- 서버 기동 timeout 시 Java 최근 stdout/stderr와 제한 시간 내 jstack(실행 실패/부재도 기록)을 worlds/server/rpc-errors.log에 남긴다. 진단이 종료/복구를 무한히 막지 않도록 한도를 둔다.
+- 간헐적인 **에피소드 시작/reset의 서버 기동 timeout**에 한해 진단 후 해당 Java 프로세스를 강제 종료·회수하고 같은 snapshot/난수/예산으로 최대1회 재기동한다. 두 번째 실패는 기존 중단 규칙이다. 일반 backend 오류·학습 도중 임의 복구·native segfault의 무제한 재시도까지 승인한 것이 아니다.
+- 실패/재기동 전체 실제 경과 시간·시도·오류를 보존한다. 에피소드 중간 ledger와 새 reset을 섞지 않는다. 과거 LR1e-4 실패/미실행 슬롯은 유지하며 이번 승인으로 자동 재학습/새 파일럿을 추가하지 않는다.
+- 기존 server lifecycle과 공개 CLI/RPC/fixture 경계에서 timeout→진단→kill/reap→한 번 복구, 두 번째 실패→중단, 정상 시작 불변을 검증한다. bridge 변경에 따른 새 실제 인증/정보감사 상태를 별도로 기록하고 구현·테스트·리뷰·로컬 커밋 및 PDF2개를 갱신한다. 실제 추가 파일럿/API/push/merge/이슈 종료는 자동 실행하지 않는다.
+
+현재 실행: artifacts/issue-49/real-20261110-232814. 대기 작업 표식 after-pilot-action.json. 직접 원인 자료 lr-1e-4-failure-diagnosis.json 및 lr-1e-4-failure-rpc-errors.log. LR1e-4는59결정/PPO0에서 세 번째 reset의45초 서버 기동 timeout으로 중단됐고 재실행하지 않았다. 현재 LR3e-4 진행 중이다. 완료 이벤트 원래 메시지의 재실행 금지는 현재 캠페인/추가 파일럿에 유지하며 위의 **후속 코드 변경 승인**은 이 최신 사용자 결정으로 따른다.
+
 # #49 — 실제 백그라운드 실행 승인·종료 이벤트로 보고
 
 사용자가 artifacts mypy 제외와 실제 파일럿 실행을 승인했다. 이전 실제 실행 금지를 대체한다. mypy .50파일 통과(artifacts/checkpoints 제외, 기존 도구 타입표기2곳 정리). 실제 실행은 시계63→정보감사→T04macros→T05furnace/production/boundaries→#49두LR파일럿 순서의 detached 프로세스가 담당한다. 중간 모델 polling은 하지 않는다. 단계 실패 시 이후 중단·자동재실행 금지. 완료 시 codex queue --resume으로 이 대화를 재개하여 결과를 보고한다.
