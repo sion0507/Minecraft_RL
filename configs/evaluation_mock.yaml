@@ -7,4 +7,4 @@ scale: core
 evaluation_seeds: [101, 102, 103, 104, 105]
 g4_seeds: [201, 202, 203]
 fixed_seed: 0
-budget_usd: 5.0
+budget_usd: 10.0

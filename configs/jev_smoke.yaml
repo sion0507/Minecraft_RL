@@ -1,0 +1,14 @@
+# Actual Jev (OpenRouter alpha decisions) + explicitly mock Minecraft, with two distinct observed log targets (#12).
+backend: mock
+fixture: ../fixtures/model_episode.json
+max_decisions: 2
+rpc_timeout_seconds: 120.0
+goal:
+  goal_id: jev-wood
+  kind: collect
+  target: oak_log
+  quantity: 1
+jev:
+  model: typesafe/jev-1.13
+  mode: sampling  # fixed 2026-11-10: verified full distribution (PLAN §9.3)
+  cap_usd: 10.0

@@ -1,5 +1,23 @@
 # 실행 기록
 
+## 2026-11-10 — #12(T11) Jev 실제 연결·선택 모드·비용 ledger
+
+브랜치 `issue-12-t11`(main `b0d239a`에서 worktree). 결정은 DECISIONS 2026-11-10 두 절. 원시 기록은 worktree의 `artifacts/issue-12/real-{1,2}/`(Git 제외). 사용자 승인 상한 US$10 안에서 실제 호출했다.
+
+**개발 검사:** pytest 244 통과(새 `tests/test_jev.py` 8건 + 평가 2건: Jev 불가 시 A/B 실행·J/F 미실행 분모 유지, ledger 이어 세기), `mypy src tests` 33파일 통과. 모의 API로 key 매핑·mask 제외·같은 입력 1회 재요청→fallback·통신 재시도 상한/대기·401 키 제거·상한 초과 시 미전송·불완전 분포의 native 분류·후보 1개 무요청을 검사했다.
+
+**실제 Jev (2026-11-10, mock Minecraft):**
+
+|실행|결과|
+|---|---|
+|`smoke-jev` native_choice (real-1)|exit 0. 요청 `typesafe/jev-1.13` → 응답 모델 `typesafe/jev-1.13-20260917`, 제공처 TypeSafe. 후보 2개, `probabilities` {a0 0.69, a1 0.31}(합1), choice=a0=argmax, confidence 0.38(분포와 다른 값). 입력 751·출력 34토큰, US$0.000031542|
+|분포 확인 5회 (3후보 동일 입력)|모두 완전·합1, choice=argmax(a0 0.81–0.83 / a1 0.16–0.18 / a2 0.01). 요청당 US$0.00002961. 응답이 거의 결정적이다|
+|`smoke-jev` sampling (real-2)|exit 0, `selector_mode=sampling`, 확률을 candidate_id로 기록, fallback 0|
+
+- **과금:** 확인 비용 = 입력 토큰 × US$0.042/100만, 출력 US$0(751토큰 → 0.000031542, 정확히 일치). ledger 누적 7요청 **US$0.000211134**(미확인 0). 계정 `/api/v1/key` 사용량은 마지막 요청 직후 0.000179592로 앞 6요청 합과 같다(계정 반영 지연 1건). 키 한도 US$10.
+- **추정(측정 아님):** 실제 C4 결정의 입력은 계획기 기준 약 3,700토큰 상태 + 후보 16개라 요청당 약 6–8천 토큰, 약 US$0.0003으로 본다. J/F 10회×수백 결정이면 약 US$1 수준이다. 실제 요청당 토큰은 T13/T14의 실제 게임 진단에서 잰다.
+- **미실행:** 실제 Minecraft 위 Jev, A/J 6상태 진단·5분 실행(Task 9), Astra 호출(별도 승인 필요), J/F 슬롯의 실제 선택기·슬롯 시드 연결(T19/T22).
+
 ## 2026-11-09 — #44 관측 반경32·공통 256칸 요약 구현과 실제 검증
 
 브랜치 `feat/issue-44-observation`(main `e9e84ae`에서 시작, push 안 함). 커밋은 `b7c0787`(구현), `bf19d8a`(리뷰 반영: 호출별 요약 누락 기록·드문 종류 보장), `e335130`(검사기 단언·문서), `47a9a9e`(원목 후보 결함)다. 결정·사전 등록·실행 중 변경은 DECISIONS 최신 #44 절. 원시 `artifacts/issue-44/real-1/`(Git 제외).
