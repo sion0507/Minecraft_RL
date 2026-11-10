@@ -62,11 +62,11 @@ def test_schedule_fixes_core_g4_and_the_separate_s_denominators(scale: str, core
              for s in by_table["core_c4"]}
     assert seeds[("A", "sampling")] == seeds[("B", "sampling")] == [11, 12, 13, 14, 15][:runs]  # A/B share the list
     assert len(seeds[("A", "argmax")]) == len(seeds[("B", "argmax")]) == 1
-    assert len(seeds[("J", "native_choice")]) == len(seeds[("F", "native_choice")]) == runs
+    assert seeds[("J", "sampling")] == seeds[("F", "sampling")] == seeds[("A", "sampling")]  # verified Jev distribution (T11)
     assert sorted((s.group, s.seed) for s in by_table["g4"]) == [("A", 21), ("A", 22), ("A", 23), ("B", 21), ("B", 22), ("B", 23)]
     assert [(s.group, s.task, s.mode) for s in by_table["s"]] == [("S", "C4", "rule_deterministic")]
     # evaluation blocks interleave the groups (§9.3): block i runs A, B, J, F with the i-th seed
-    mode = {"A": "sampling", "B": "sampling", "J": "native_choice", "F": "native_choice"}
+    mode = {"A": "sampling", "B": "sampling", "J": "sampling", "F": "sampling"}
     assert [s.group for s in by_table["core_c4"] if s.mode == mode[s.group]][:8] == list("ABJFABJF")
     assert [s.group for s in by_table["g4"]][:2] == ["A", "B"]
 
@@ -113,13 +113,13 @@ def test_behaviour_failures_and_contract_errors_are_never_retried(tmp_path: Path
 
 
 def test_cost_stop_keeps_unrun_slots_and_an_unrun_retry_in_the_denominator(tmp_path: Path) -> None:
-    path = config(tmp_path, fixture=failing("core_c4-J-native_choice-3:1"), budget_usd=2.5, mock_cost_per_decision_usd=1.0)
+    path = config(tmp_path, fixture=failing("core_c4-J-sampling-3:1"), budget_usd=2.5, mock_cost_per_decision_usd=1.0)
     _, output = evaluate(path, "J", "C4")
     results = slots(output)
-    assert [results[f"core_c4-J-native_choice-{i}"]["outcome"] for i in range(1, 6)] == [
+    assert [results[f"core_c4-J-sampling-{i}"]["outcome"] for i in range(1, 6)] == [
         "success", "success", "error", "not_run", "not_run"]
-    assert results["core_c4-J-native_choice-3"]["retry"] == "not_run_budget"
-    assert results["core_c4-J-native_choice-4"]["not_run_reason"] == "budget_stopped"
+    assert results["core_c4-J-sampling-3"]["retry"] == "not_run_budget"
+    assert results["core_c4-J-sampling-4"]["not_run_reason"] == "budget_stopped"
     summary = kind(output, "evaluation_summary")[0]
     table = summary["tables"]["core_c4"]
     assert (table["planned"], table["successes"], table["errors"], table["not_run"], table["retries_not_run"]) == (5, 2, 1, 2, 1)
@@ -133,6 +133,15 @@ def test_unavailable_reference_groups_stay_planned_as_not_run(tmp_path: Path) ->
     assert {r["not_run_reason"] for k, r in results.items() if "-F-" in k} == {"astra_unavailable"}
     assert {r["outcome"] for k, r in results.items() if "-J-" in k} == {"success"}
     assert kind(output, "evaluation_summary")[0]["tables"]["core_c4"]["planned"] == 10
+
+
+def test_jev_unavailable_still_runs_local_a_b_and_keeps_j_f_planned(tmp_path: Path) -> None:
+    result, output = evaluate(config(tmp_path, jev_available=False), "A,B,J,F", "C4")
+    assert result.returncode == 0, result.stderr
+    results = slots(output)
+    assert {r["outcome"] for k, r in results.items() if "-A-" in k or "-B-" in k} == {"success"}
+    assert {r["not_run_reason"] for k, r in results.items() if "-J-" in k or "-F-" in k} == {"jev_unavailable"}
+    assert kind(output, "evaluation_summary")[0]["tables"]["core_c4"]["planned"] == 22
 
 
 def test_s_slot_uses_the_rule_selector_and_reports_its_own_table(tmp_path: Path) -> None:
@@ -160,6 +169,14 @@ def test_budget_counts_spend_recorded_before_this_run(tmp_path: Path) -> None:
     _, output = evaluate(config(tmp_path, budget_usd=5.0, jev_spent_usd=4.5, mock_cost_per_decision_usd=1.0), "J", "C4")
     assert [r["outcome"] for r in slots(output).values()] == ["success"] + ["not_run"] * 4
     assert kind(output, "evaluation_summary")[0]["spent_usd"] == 5.5
+
+
+def test_budget_continues_from_the_jev_ledger(tmp_path: Path) -> None:
+    (tmp_path / "ledger.jsonl").write_text('{"cost_usd": 4.0}\n{"cost_usd": null}\n')  # 4.0 confirmed + 1 unconfirmed request
+    _, output = evaluate(config(tmp_path, budget_usd=5.0, jev_ledger=str(tmp_path / "ledger.jsonl"),
+                                mock_cost_per_decision_usd=1.0), "J", "C4")
+    assert [r["outcome"] for r in slots(output).values()] == ["success"] + ["not_run"] * 4
+    assert kind(output, "evaluation_summary")[0]["spent_usd"] == pytest.approx(5.001)
 
 
 @pytest.mark.parametrize("groups, task", [("X", "C4"), ("A", "C5")])

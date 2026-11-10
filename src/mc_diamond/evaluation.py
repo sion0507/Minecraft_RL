@@ -18,10 +18,11 @@ import yaml
 from pydantic import Field, model_validator
 
 from .episode import error_summary, run_episode
+from .jev import Ledger
 from .navigation import SAFE_BAND
 from .rpc import EpisodeError, RpcSession
 from .rule_selector import rule_select
-from .schema import CandidateSet, Contract, EpisodeConfig, EpisodeSummary, Goal, Observation, SelectionResult
+from .schema import CandidateSet, Contract, EpisodeConfig, EpisodeSummary, Goal, JevConfig, Observation, SelectionResult
 from .selectors import Selector, first_candidate
 
 Group = Literal["A", "B", "J", "F", "S"]
@@ -32,7 +33,7 @@ Outcome = Literal["success", "failure", "error", "not_run"]
 GROUPS, TASKS, TABLES = set(get_args(Group)), set(get_args(Task)), get_args(Table)
 SNAPSHOTS = Path(__file__).resolve().parents[2] / "worlds" / "snapshots"
 SERVER_ERRORS = {"backend_error", "timeout", "protocol_error"}
-PRICED = {"J", "F"}  # Jev API calls; Astra planner costs join in T09/T11
+PRICED = {"J", "F"}  # Jev API calls; Astra planner costs keep their own ledger and approved cap
 EXTERNAL_RNG_NOTE = "Local seeds are restored on retry; external API internal randomness is not."
 
 
@@ -44,9 +45,11 @@ class EvaluationConfig(Contract):
     fixed_seed: int = 0  # deterministic slots: A/B argmax and S
     jev_available: bool = True
     astra_available: bool = True
-    jev_mode: Literal["native_choice", "sampling"] = "native_choice"  # fixed in T11 from the actual API
-    budget_usd: Annotated[float, Field(ge=0)] = 5.0  # the whole Jev cap: connection, diagnostics, J/F and failures
-    jev_spent_usd: Annotated[float, Field(ge=0)] = 0.0  # already spent before this run (T11 keeps the ledger)
+    # T11 (2026-11-10): the actual API returned complete distributions matching the documented meaning (§9.3 table).
+    jev_mode: Literal["native_choice", "sampling"] = "sampling"
+    budget_usd: Annotated[float, Field(ge=0)] = 10.0  # the whole Jev cap: connection, diagnostics, J/F and failures
+    jev_spent_usd: Annotated[float, Field(ge=0)] = 0.0  # spent outside the ledger, added to it
+    jev_ledger: str | None = None  # the T11 Jev ledger; its charged total joins the same cap
     mock_cost_per_decision_usd: Annotated[float, Field(ge=0)] = 0.0  # mock J/F only
 
     @model_validator(mode="after")
@@ -201,7 +204,7 @@ def evaluate(config: EvaluationConfig, path: Path, groups: set[str], tasks: set[
             raise ValueError("Actual evaluation planners require per-group wiring and the pre-training lock; use smoke-planner")
         attempt_selector(slot, config, episodes[slot.task].backend)
         reset_state(episodes[slot.task], files[slot.task], slot.task)
-    spent = config.jev_spent_usd
+    spent = config.jev_spent_usd + (Ledger(JevConfig(ledger=config.jev_ledger)).totals()["charged_usd"] if config.jev_ledger else 0.0)
     results: list[SlotResult] = []
     for slot in chosen:
         episode = episodes[slot.task]
