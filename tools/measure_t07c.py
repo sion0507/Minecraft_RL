@@ -146,7 +146,7 @@ def main() -> None:
     if args.tokenizer:
         if hashlib.sha256(args.tokenizer.read_bytes()).hexdigest() != TOKENIZER_SHA256:
             raise SystemExit("tokenizer.json is not the pinned NanoJev unified-games-v1 file")
-        from tokenizers import Tokenizer  # type: ignore[import-not-found]  # measurement-only, not a project dependency
+        from tokenizers import Tokenizer  # measurement-only, not a project dependency
         tokens = Tokenizer.from_file(str(args.tokenizer))
     per_log: dict[str, Any] = {}
     every: list[dict[str, Any]] = []

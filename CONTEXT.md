@@ -1,4 +1,10 @@
-# #49 — 구현 승인, 실제 파일럿 실행 금지
+# #49 — 실제 백그라운드 실행 승인·종료 이벤트로 보고
+
+사용자가 artifacts mypy 제외와 실제 파일럿 실행을 승인했다. 이전 실제 실행 금지를 대체한다. mypy .50파일 통과(artifacts/checkpoints 제외, 기존 도구 타입표기2곳 정리). 실제 실행은 시계63→정보감사→T04macros→T05furnace/production/boundaries→#49두LR파일럿 순서의 detached 프로세스가 담당한다. 중간 모델 polling은 하지 않는다. 단계 실패 시 이후 중단·자동재실행 금지. 완료 시 codex queue --resume으로 이 대화를 재개하여 결과를 보고한다.
+
+실제 PID/상태/소스hash/단계로그/알림결과는 artifacts/issue-49/real-*/의 background-status.json/run-manifest.json/{phase}.stdout·stderr/completion-notification.json을 따른다. pilot/baseline/summary.json/progress.json과 실제 stdout을 읽고 학습/평가/미실행30슬롯·선택·진단·실패/복원을 구분해 한국어로 보고하고 PROGRESS와PDF2개를 최신화한다. nativecrash·사전검증실패·난이도gate실패도 자동재시도하지 않는다. 추가실험/API/push/merge/종료는 금지. 실행 소스/설정은 hash고정하므로 실행 중 바꾸지 않는다.
+
+# #49 — 구현 승인, 실제 파일럿 실행 금지 (이전 이력)
 
 사용자가 #49 `$implement`를 요청하면서 실제 파일럿 테스트는 아직 돌리지 말라고 지시했다. 각 후보 마지막 좌표 중심 3차원 거리16 이내의 현재 가시 비공기 블록 요약(희귀한 순/동률 이름순 최대8종)을 승인했고 #49 본문도 수정했다. 현재 main 시작점 a5ef033에서 작업한다. 새 게임·공개 모델·API 호출은 하지 않는다. tiny/scripted 개발 검사는 허용 범위다.
 
