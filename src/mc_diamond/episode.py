@@ -4,7 +4,7 @@ import json
 import time
 from collections import deque
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ValidationError
 
@@ -19,7 +19,7 @@ from .production import generate_production_candidates
 from .selectors import Selector, first_candidate, signature
 from .schema import (
     Candidate, CandidateSet, EpisodeConfig, EpisodeSummary, ErrorInfo, Event, Goal, GoalOutcome, MacroEvidence, Observation,
-    SelectionResult, allocate,
+    SelectionResult, StepResult, allocate,
 )
 
 
@@ -98,10 +98,29 @@ def admin_verified(log: dict[str, Any], acquired: dict[str, Event]) -> dict[str,
 STALL_LIMIT = 20  # consecutive <=1-tick steps with no position/map/inventory/durability change
 
 
+class LearningObserver(Protocol):
+    actor_transitions: int
+    reward_kind: Literal["local", "full"]
+    @property
+    def needs_bootstrap(self) -> bool: ...
+
+    def reset(self, observation: Observation) -> None: ...
+    def begin(self, observation: Observation, goal: Goal, saved: CandidateSet) -> None: ...
+    def record(self, selection: SelectionResult, step: StepResult, *, goal_completed: bool) -> dict[str, Any]: ...
+    def finish(self) -> None: ...
+
+
+def forced_wait_candidate(observation: Observation) -> Candidate:
+    return Candidate(candidate_id=f"{observation.obs_id}:wait", action_kind="wait", params={},
+        max_ticks=min(20, observation.remaining_ticks), stop_rule_id="no_candidates",
+        source_obs_id=observation.obs_id, description="Wait when no candidate is available")
+
+
 def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 reset: Callable[[], Observation], episode_id: str, attempt_id: str,
                 *, movement: bool = False, macros: bool = False, select: Selector = first_candidate,
-                verification: Callable[[], dict[str, Any]] | None = None, planner: Ask | None = None) -> EpisodeSummary:
+                verification: Callable[[], dict[str, Any]] | None = None, planner: Ask | None = None,
+                learning: LearningObserver | None = None) -> EpisodeSummary:
     """`verification` reads the administrator log only after the last decision, so no policy input can see it.
 
     `config.goal` is the task. Without a planner it is also the one fixed goal, re-adopted at every replan trigger.
@@ -137,6 +156,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     try:
         initial = reset()
         provided_inventory = dict(initial.inventory)
+        if learning is not None:
+            learning.reset(initial)
         start = initial
         emit("reset", initial)
         observation = environment.observe()
@@ -162,6 +183,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             emit("goal", goal)
             saved = policy_candidates(observation, goal, movement=movement, macros=macros)
             emit("candidates", saved)
+            if learning is not None:
+                learning.begin(observation, goal, saved)
             if saved.candidates:
                 asked = time.monotonic()
                 selection = select(observation, goal, saved, tuple(failures))
@@ -171,11 +194,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 candidate = offered[selection.candidate_id]
                 selection = selection.model_copy(update={"latency_seconds": time.monotonic() - asked})
             else:
-                candidate = Candidate(
-                    candidate_id=f"{observation.obs_id}:wait", action_kind="wait", params={},
-                    max_ticks=min(20, observation.remaining_ticks), stop_rule_id="no_candidates",
-                    source_obs_id=observation.obs_id, description="Wait when no candidate is available",
-                )
+                candidate = forced_wait_candidate(observation)
                 selection = SelectionResult(candidate_id=candidate.candidate_id, selector_mode="forced_wait", probabilities=None,
                                             latency_seconds=0.0, provider=None, model=None, usage=None)
             if macros and len(saved.candidates) <= 1:
@@ -250,13 +269,12 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 if ledger is not None and event.item:
                     ledger[event.item] = ledger.get(event.item, 0) + event.quantity
             tally(progress_by_source.setdefault(goal.source, {}), step)
-            reward = float(sum(event.quantity for event in step.events if event.kind == "acquired"))
-            reward_total += reward
-            emit("reward", {"value": reward, "kind": "smoke_acquisition_count", "actor_valid": False,
+            smoke_reward = float(sum(event.quantity for event in step.events if event.kind == "acquired"))
+            reward_record: dict[str, Any] = {"value": smoke_reward, "kind": "smoke_acquisition_count", "actor_valid": False,
                             "trace_mask": 0 if step.cancelled else 1, "goal_id": goal.goal_id, "goal_source": goal.source,
                             "actor_exclusion_reason": "cancelled" if step.cancelled else "no_candidates" if not saved.candidates
                             else "single_candidate" if len(saved.candidates) == 1
-                            else "rule_selector" if selection.selector_mode == "rule_deterministic" else "smoke_selector"})
+                            else "rule_selector" if selection.selector_mode == "rule_deterministic" else "smoke_selector"}
             if saved.candidates and not step.cancelled and failed(step):
                 failures.append(signature(candidate))
             task_event = COMPLETION_EVENT.get(config.goal.kind)
@@ -264,17 +282,25 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                                    if event.kind == task_event and event.item == config.goal.target)
             done = completed(config.goal, start, step, acquired_target)
             trigger = active.record(step) or ""
+            if learning is not None:
+                reward_record = learning.record(selection, step, goal_completed=active.done)
+            reward_total += float(reward_record["value"])
+            emit("reward", reward_record)
             if trigger:
                 outcomes.append(active.outcome(step.observation.active_ticks, trigger))
                 active = None
             terminated, truncated, invalid, reason = step.terminated, step.truncated, step.invalid, step.reason
+            if learning is not None and reward_record["task_terminal"] and not invalid:
+                terminated, truncated = True, False
+                reason = ("death" if step.observation.health <= 0 else "active_tick_limit" if step.observation.remaining_ticks == 0
+                          else "goal_completed" if observation.objective_kind == "local" else "diamond_success")
             unchanged = [step.observation.position, step.observation.map_version, step.observation.inventory, step.observation.tool_durability]
             stalled = stalled + 1 if step.actual_ticks <= 1 and not step.cancelled and unchanged == [
                 observation.position, observation.map_version, observation.inventory, observation.tool_durability] else 0
             observation = step.observation
             if terminated or truncated or invalid:
                 break
-            if macros and done:
+            if macros and done and learning is None:
                 terminated, reason = True, "goal_completed"
                 break
             if stalled >= STALL_LIMIT:
@@ -283,6 +309,12 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                 break
         else:
             truncated, reason = True, "decision_limit"
+        if learning is not None and learning.needs_bootstrap and observation.remaining_ticks > 0 and observation.health > 0:
+            if active is None:
+                adopted, decision = planning.decide(observation, trigger)
+                emit("goal_decision", decision)
+                active = ActiveGoal(adopted, observation)
+            learning.begin(observation, active.goal, policy_candidates(observation, active.goal, movement=movement, macros=macros))
         if verification is not None:
             log = verification()
             emit("admin_verification", log)
@@ -296,6 +328,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         emit("error", error)
     if error and clock_mode != "mock":
         clock_mode, pause_verified = "unverified", False
+    if learning is not None:
+        learning.finish()
     if active is not None:
         outcomes.append(active.outcome(active_ticks, reason))
     summary = EpisodeSummary(
@@ -306,6 +340,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         truncated=truncated, invalid=invalid, reason=reason, error=error,
         active_ticks=active_ticks, wall_seconds=time.monotonic() - started,
         decisions=decisions, reward_total=reward_total,
+        reward_kind=learning.reward_kind if learning is not None else "smoke_acquisition_count",
+        actor_transitions=learning.actor_transitions if learning is not None else 0,
         movement_completed=movement_completed, distance_moved=distance_moved,
         macro_steps=macro_steps, selection_requests=selection_requests, cancelled_selections=cancelled_selections,
         provided_inventory=provided_inventory, direct_crafted=direct_crafted,

@@ -308,9 +308,9 @@ class EpisodeSummary(Contract):
     active_ticks: Count
     wall_seconds: float
     decisions: Count
-    actor_transitions: Literal[0] = 0
+    actor_transitions: Count = 0
     reward_total: float
-    reward_kind: Literal["smoke_acquisition_count"] = "smoke_acquisition_count"
+    reward_kind: Literal["smoke_acquisition_count", "local", "full"] = "smoke_acquisition_count"
     provided_inventory: dict[str, Count] = Field(default_factory=dict)
     direct_crafted: dict[str, Count] = Field(default_factory=dict)
     direct_smelted: dict[str, Count] = Field(default_factory=dict)
@@ -353,6 +353,20 @@ class ModelConfig(Contract):
     seed: int = Field(default=11, ge=0, lt=2**63)
 
 
+class PPOConfig(Contract):
+    choice_lr: float = Field(default=1e-4, gt=0)
+    value_lr: float = Field(default=1e-4, gt=0)
+    clip: float = Field(default=.2, gt=0, lt=1)
+    gae_lambda: float = Field(default=.95, ge=0, le=1)
+    entropy: float = Field(default=.01, ge=0)
+    value_coefficient: float = Field(default=.5, gt=0)
+    grad_norm: float = Field(default=.5, gt=0)
+    rollout: Positive = 128
+    minibatch: Positive = 32
+    epochs: Positive = 4
+    critic_only: bool = False
+
+
 class EpisodeConfig(Contract):
     backend: Literal["mock", "rpc"] = "mock"
     fixture: str | None = None
@@ -363,6 +377,7 @@ class EpisodeConfig(Contract):
     goal: Goal  # the task; without a planner it is also the one fixed goal
     planner: PlannerSettings | None = None
     model: ModelConfig | None = None
+    ppo: PPOConfig = Field(default_factory=PPOConfig)
 
     @model_validator(mode="after")
     def configured_backend(self) -> Self:

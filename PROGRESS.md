@@ -1,5 +1,17 @@
 # 실행 기록
 
+## 2026-11-10 — #14 T13 보상·시간 할인 PPO 연결 (리뷰 전)
+
+**구현:** 사용자 implement 요청으로 main `b0d239a`에서 시작했다. RewardLedger(local/full·제공 제외·진행18·의미 목표8회/4), 실제 틱 할인·저장 State/Transition·GAE/PPO와 공통 run_episode의 학습 연결, 공개 `smoke-ppo`를 추가했다. Choice/독립 critic만 학습하고 본체/관측/bridge/runtime/snapshot은 바꾸지 않았다. sparse 사건은 현재 RPC의 반환 경계 마지막 틱에 배정하며 원시 사건 시각으로 표시하지 않는다(DECISIONS 같은 날 절).
+
+**개발 검사:** 새 learning 검사14개 통과(2.35초), strict mypy src/tests34파일 통과. 최초 전체 pytest248개/82.90초 통과 후 드롭 좌표 계약을 수정했다. 수정본 최종 전체 회귀와 code-review 두 축은 다음 완료 기록에 남긴다. `mypy .`는 기존 Git 제외 artifacts의 pathfinder 두 analyze.py 중복으로 exit2이며 통과로 표시하지 않는다. 결과 파일은 `artifacts/issue-14/{targeted-tests,mypy,mypy-dot,full-pytest}.txt`다.
+
+**실제 공개 모델 + mock 게임:** `public-model-mock-final.jsonl` exit0. 공개 NanoJev revision/초기 weight hash는 #11과 동일하다. 저장된 두 복수 후보 결정·40mock틱·보상합0.96·PPO1회/4epoch, 최초 ratio [1,1], trace [true,false]. 정책 손실 [0,0.00071451,0.00077176,0.00069207], 유한 gradient norm, Choice/critic 변경·본체 hash불변, 전체 약11.74초. 결과 actor는 저장하지 않았다. 원목 획득은 scripted mock 사건이며 실제 Minecraft 성능이 아니다. 실행은 full 다이아 드롭 좌표 수정 전이며 해당 local 원목 경로는 수정하지 않았다. 첫 단일 전이 진단도 보존했다(정규화 advantage0, actor는 entropy 경로); 최종 두 전이 결과와 혼동하지 않는다. 첫 uv 시도는 sandbox 밖 캐시 쓰기 때문에 exit2, 승인 후 실행했다. 유료 API0·본 학습0이다.
+
+**기존 실제 로그 재생(새 게임 실행 아님):** #44 원시 G1(3step), 제작(54), G3(15), 자연 G4(63), 지급 다이아(2)를 새 ledger로 재생했다. local G1/G3/G4 성공+1, 제작 직접 진행18·목표0.5, 지급 다이아 성공 보상0을 확인했다. 드롭의 비정수 생성 좌표를 블록 좌표와 같다고 보던 결함을 RED→GREEN으로 수정했다. `previous-real-log-replay.json`에 출처와 구성별 합계를 남겼다. 새 게임/모델과의 전체 연결 검증으로 주장하지 않는다.
+
+**미실행/후속:** 실제 Minecraft PPO·새 63조건/정보 감사(bridge 변경 없음)·실제 모델 full 학습·파일럿·30,000결정 본 학습·커리큘럼/복구/lock·최종 C4/G4·Jev/Astra·7B 학습은 미실행이다. 실제 사건/보상 전체 연결은 #15/#16, 예산은 #20에서 확인한다. push/PR/원격 merge/이슈 종료는 요청되지 않았다. 로컬 PDF2개와 최종 커밋/리뷰 결과는 완료 기록에서 제공한다.
+
 ## 2026-11-09 — #44 관측 반경32·공통 256칸 요약 구현과 실제 검증
 
 브랜치 `feat/issue-44-observation`(main `e9e84ae`에서 시작, push 안 함). 커밋은 `b7c0787`(구현), `bf19d8a`(리뷰 반영: 호출별 요약 누락 기록·드문 종류 보장), `e335130`(검사기 단언·문서), `47a9a9e`(원목 후보 결함)다. 결정·사전 등록·실행 중 변경은 DECISIONS 최신 #44 절. 원시 `artifacts/issue-44/real-1/`(Git 제외).

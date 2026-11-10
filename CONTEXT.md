@@ -1,4 +1,12 @@
-# #44 관측 반경32·공통 256칸 요약 — 구현·실제 검증 완료, 게시 대기
+# #14 T13 — 보상·시간 할인 PPO 구현, 독립 리뷰와 최종 기록 진행
+
+사용자 implement 요청으로 현재 main `b0d239a`에서 구현한다. 새 브랜치/push/PR/merge/이슈 종료는 요청하지 않았다. 결정은 DECISIONS 2026-11-10 #14, 검증은 PROGRESS 같은 절이다.
+- local/full RewardLedger, 저장 후보/특징/old logprob·GAE·PPO, 공통 실행기의 학습 연결, 공개 smoke-ppo를 구현했다. 현재 새 learning14검사·mypy34파일 통과, 첫 전체248통과 후 다이아 드롭 좌표 수정/실제 로그 재생을 완료했다. 최종 회귀·두 축 리뷰·보고서·커밋은 진행 중이다.
+- 실제 공개 NanoJev+mock 게임2결정/PPO1회 통과: 보상0.96, ratio1, Choice/critic 변화·본체불변. #44 실제 로그5개 offline 재생을 별도로 했다. 실제 게임 PPO/본 학습/유료 API는 실행하지 않았다.
+- sparse 사건은 RPC에 개별 시각이 없어 반환 경계 마지막 틱 보상이다. 자연 다이아 최종 성공은 기존 관리자 검증을 유지한다. bridge/runtime/관측은 불변이다.
+- 다음 파일럿 #15와 커리큘럼 #18의 학습 기반이며 실제 연결/처리량/복구/lock을 완료했다고 표시하지 않는다.
+
+# #44 관측 반경32·공통 256칸 요약 — 구현·실제 검증 완료, 게시 대기 (이전 기록)
 
 브랜치 `feat/issue-44-observation`(로컬 커밋, push 안 함). 결정·사전 등록은 DECISIONS 최신 #44 절, 결과는 PROGRESS 같은 제목 절, 원시 `artifacts/issue-44/real-1/`.
 - 결정 관측 반경32·매크로 틱 정지 검사 반경8, 정책 지도는 비공기 전부+공기 Chebyshev 18, explore는 `discovered_open`, 계획기/NanoJev 공통 `public_state` 256칸 종류별 균등 요약.
