@@ -1,5 +1,19 @@
 # 실행 기록
 
+## 2026-11-10 — #14 T13 최종 검증·리뷰 수정·로컬 커밋 완료
+
+**코드 기준:** 구현 `7630857`, 리뷰 수정 `34dd151`(main 로컬). 최초 구현/검증 과정은 아래 같은 날 절에 보존한다. push·PR·원격 merge·이슈 종료는 하지 않았다.
+
+**최종 개발 검사:** learning16개/2.59초, 전체 **pytest250개/82.83초**, strict **mypy src/tests34파일** 통과, diff 공백 검사 통과. 원시 `artifacts/issue-14/{targeted-tests,full-pytest-final,mypy}.txt`. `mypy .`의 기존 pathfinder artifacts 중복 모듈 exit2는 앞선 기록대로 유지한다.
+
+**독립 리뷰:** code-review의 Standards0, Spec P1 1건을 수정했다. 실제 bridge는 사망에서 stable_boundary=false이므로 이를 무조건 요구하면 사망 -1/-20이 actor/critic에서 사라졌다. 공개 CLI local/full 사망2검사를 RED로 재현한 뒤, 신뢰할 수 있는 task terminal은 안전 지면 없이도 학습하고 bootstrap0을 유지하도록 수정했다. 같은 Spec 에이전트의 재검토에서 기존 P1 해결·새 material 지적0을 확인했다. `docs/reviews/issue-14-T13-2026-11-10.md`에 두 축을 분리해 남겼다.
+
+**검증 범위:** 실제 공개 NanoJev+mock 게임2전이/1update와 기존 실제 로그5개 offline 재생은 아래 기록을 따른다. 공개 모델 진단은 정상 local 경로에서 수행했고, 다이아/사망 분기 수정 뒤 새 GPU·게임 진단은 하지 않았다. 해당 수정은 공개 수치/CLI 검사·기존 실제 로그와 최종 전체 회귀로 확인했다. 새 실제 게임 PPO·물리·파일럿·본 학습·처리량/예산/lock·외부 API를 검증했다고 표시하지 않는다. 사건별 발생 틱은 RPC에 없어 sparse 보상은 반환 경계 마지막 틱이다.
+
+**보고서:** `reports/issue-014-T13-report.pdf`(2쪽), `reports/issue-014-T13-code-guide.pdf`(3쪽). 코드 가이드는 `34dd151a4add14e48028d5df8951482b1afbc153`과 AST 시작 줄을 기준으로 한다. 한글 추출·대체문자 없음, 사용한 한글 TrueType 글꼴의 embedded/subset/Unicode mapping과 1500px 렌더5페이지 전체 가독성을 확인했다. reports는 Git 제외/추적0이며 이 티켓 PDF2개만 두었다. 중간 생성기·텍스트·PNG는 /tmp에만 있다. 보고서 때문에 모델/게임을 재실행하지 않았다. `artifacts/issue-14/evidence.json`에 코드 SHA-256·검사/모델 근거를 보존했다.
+
+**다음:** #15 목재 파일럿과 #18 커리큘럼이 사용할 학습 기반을 구현했다. #12 Jev는 별도 착수 가능하다. 실제 게임의 사건/목표/보상 전체 연결은 #15/#16, 복구는 #19, 실제 처리량·예산/lock은 #20에서 검증한다.
+
 ## 2026-11-10 — #14 T13 보상·시간 할인 PPO 연결 (리뷰 전)
 
 **구현:** 사용자 implement 요청으로 main `b0d239a`에서 시작했다. RewardLedger(local/full·제공 제외·진행18·의미 목표8회/4), 실제 틱 할인·저장 State/Transition·GAE/PPO와 공통 run_episode의 학습 연결, 공개 `smoke-ppo`를 추가했다. Choice/독립 critic만 학습하고 본체/관측/bridge/runtime/snapshot은 바꾸지 않았다. sparse 사건은 현재 RPC의 반환 경계 마지막 틱에 배정하며 원시 사건 시각으로 표시하지 않는다(DECISIONS 같은 날 절).

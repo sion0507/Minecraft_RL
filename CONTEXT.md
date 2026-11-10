@@ -1,10 +1,11 @@
-# #14 T13 — 보상·시간 할인 PPO 구현, 독립 리뷰와 최종 기록 진행
+# #14 T13 — 구현·검증·리뷰 수정 완료, main 로컬 커밋
 
-사용자 implement 요청으로 현재 main `b0d239a`에서 구현한다. 새 브랜치/push/PR/merge/이슈 종료는 요청하지 않았다. 결정은 DECISIONS 2026-11-10 #14, 검증은 PROGRESS 같은 절이다.
-- local/full RewardLedger, 저장 후보/특징/old logprob·GAE·PPO, 공통 실행기의 학습 연결, 공개 smoke-ppo를 구현했다. 현재 새 learning14검사·mypy34파일 통과, 첫 전체248통과 후 다이아 드롭 좌표 수정/실제 로그 재생을 완료했다. 최종 회귀·두 축 리뷰·보고서·커밋은 진행 중이다.
+사용자 implement 요청으로 main `b0d239a`에서 구현했다. 구현 `7630857`, 사망 전이 리뷰 수정 `34dd151`을 로컬 커밋했다. push/PR/원격 merge/이슈 종료는 하지 않았다. 결정은 DECISIONS 2026-11-10 #14, 검증은 PROGRESS 최상단 절이다.
+- local/full RewardLedger, 저장 후보/특징/old logprob·GAE·PPO, 공통 실행기의 학습 연결, 공개 smoke-ppo를 구현했다. 최종 learning16검사·전체pytest250·mypy34파일 통과. Standards0/Spec 최초P1 1건(사망 전이 누락)을 RED→GREEN으로 수정하고 같은 리뷰어가 해결을 확인했다.
 - 실제 공개 NanoJev+mock 게임2결정/PPO1회 통과: 보상0.96, ratio1, Choice/critic 변화·본체불변. #44 실제 로그5개 offline 재생을 별도로 했다. 실제 게임 PPO/본 학습/유료 API는 실행하지 않았다.
 - sparse 사건은 RPC에 개별 시각이 없어 반환 경계 마지막 틱 보상이다. 자연 다이아 최종 성공은 기존 관리자 검증을 유지한다. bridge/runtime/관측은 불변이다.
 - 다음 파일럿 #15와 커리큘럼 #18의 학습 기반이며 실제 연결/처리량/복구/lock을 완료했다고 표시하지 않는다.
+- 로컬PDF2개: reports/issue-014-T13-{report,code-guide}.pdf. 2+3쪽의 한글 추출·폰트·전체 페이지를 검수했고 Git에서 제외했다. 원시 artifacts/issue-14, 리뷰 docs/reviews/issue-14-T13-2026-11-10.md. 보고서 때문에 실제 모델/게임을 재실행하지 않는다.
 
 # #44 관측 반경32·공통 256칸 요약 — 구현·실제 검증 완료, 게시 대기 (이전 기록)
 
