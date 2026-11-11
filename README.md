@@ -173,11 +173,15 @@ PYTHONFAULTHANDLER=1 uv run --extra model mc-diamond pilot-wood --config configs
 
 `--output` 아래 `baseline/manifest.json`, attempt별 `.jsonl.gz`, `summary.json`, 복원용 공개 초기 `initial.safetensors`를 남깁니다. 기존 baseline은 덮어쓰지 않습니다. 전체 관측·후보·선택·사건·보상·전이·PPO 진단은 압축 trace에 있고 stdout은 JSONL 단계 요약입니다. 학습 중 actor는 본 학습 checkpoint로 저장하지 않으며 종료 시 초기 heads를 복원·hash 확인합니다. 파일럿 경험은 본 학습 30,000결정에서 제외됩니다.
 
-#49 실행 자체가 #15의 원인 수정 추가 파일럿 허용량을 소진하므로 `--correction-reason`/`--correction-lr`로 추가 campaign을 실행할 수 없습니다. 과거 #15 출력은 보존하고 새 출력 폴더를 사용합니다. `progress.json`은 실행 중 attempt·trace·update 위치를 원자적으로 기록하며 Python faulthandler를 켭니다. native crash는 자동 재실행하지 않고 남은 위치를 사용자에게 보고합니다. 중단 지점의 정확 재개 기능은 없습니다.
+#49 실행 자체가 #15의 원인 수정 추가 파일럿 허용량을 소진합니다. **2026-11-11 사용자가 별도로 승인한 예외는 서버 기동 실패로 미완료된 LR1e-4 보완 실행 한 번**입니다. 기존 `--output`에 `--correction-reason "승인된 서버 기동 복구" --correction-lr 0.0001`을 붙이면 기존 `baseline/`을 보존하고 독점 생성한 `correction/`에 LR1e-4만 처음부터1,024결정/8update와 후평가10회를 실행합니다. 원래 초기10회·등록된 시간동률폭과 LR3e-4 후평가는 참조하며 재실행하지 않습니다. 같은 config/snapshot/훈련·평가 seed/입력규칙/모델revision·가중치/초기heads hash를 검사하고, 이미 유효한 LR1e-4·다른 LR·중복 보완 실행은 거부합니다. 이전 실패 LR1e-4 오류도 최종 선택의 오류 수에 포함하고 원래30슬롯과 보완10슬롯을 구분합니다.
+
+`progress.json`은 실행 중 attempt·trace·update 위치를 원자적으로 기록하며 Python faulthandler를 켭니다. native crash는 자동 재실행하지 않고 남은 위치를 사용자에게 보고합니다. 중단 지점의 정확 재개 기능은 없습니다.
 
 설정별 시작 상태의 저장된 특징으로 update 0–8의 후보 확률·정규화 엔트로피를 비교합니다(추가 backbone 호출/표집 없음). 학습 에피소드 앞/뒤 절반 성공·실제/실패 포함 틱과 발견 보상 횟수, 곡괭이 보유·돌 첫 관측/채굴/드롭 획득 틱을 기록합니다. MC critic EV는 끝까지 유효하게 완료된 에피소드의 할인 실제 return과 당시 예측으로 계산합니다. bootstrap이 필요한 운영 절단·무효 궤적은 제외하고, 표본이 없거나 return 분산이 0이면 EV는 null입니다. 학습과 초기/학습 후 평가 지표는 분리합니다.
 
 2026-11-10 후속 사용자 지시로 실제 #49 실행을 승인했습니다. 변경된 브리지의 시계 63조건 재인증·정보 감사·관련 T04/T05 회귀가 모두 통과한 뒤 파일럿을 시작합니다. 백그라운드 실행기는 단계별 종료 코드를 기록하고 실패하면 다음 단계로 가지 않습니다. 종료 시 `codex queue --resume`으로 같은 대화에 완료/실패 이벤트를 보내 결과 보고를 재개합니다. 모델이 중간 로그를 반복 조회하지 않으며, 실제 상태는 실행 폴더의 `background-status.json`을 따릅니다. PC와 로컬 Codex daemon이 계속 실행 중이어야 자동 재개할 수 있습니다.
+
+서버 기동 timeout은45초를 유지합니다. timeout 때 최근 Java stdout/stderr64KiB와 최대5초/1MiB의 jstack 결과(도구 부재/실패 포함)를 관리자 `worlds/server/rpc-errors.log`에 남기고 소유한 Java를 SIGKILL한 뒤 최대5초 안에 회수를 확인합니다. reset의 `Server.restore`에서만 같은 snapshot을 다시 복원해 한 번 재기동하며, 두 번째 timeout·회수 실패·다른 서버 오류는 중단합니다. 중간 에피소드의 경험/ledger를 새 reset에 이어 붙이지 않습니다. 실패/복구 시간은 attempt 전체 실제 경과 시간에 포함하고, 관리자 진단은 정책 입력에 제공하지 않습니다.
 
 `configs/wood_pilot_mock.yaml`은 **공개 NanoJev + scripted mock 게임**입니다. 물리나 학습 성능의 검증이 아닙니다. 모델 파일 없이 개발 검사에서는 기존 tiny model을 다운로드 경계에서 대체하며 공통 CLI/RPC/PPO는 실제 코드를 사용합니다. 실제 실행 근거와 미실행은 PROGRESS.md를 따릅니다.
 

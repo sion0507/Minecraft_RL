@@ -1,6 +1,7 @@
 """T14 public CLI: real execution/PPO with a tiny model at the downloaded-weight boundary."""
 
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -135,7 +136,7 @@ def test_pilot_cli_runs_two_complete_settings_and_restores_initial_actor(
     assert not (tmp_path / "pilot" / "correction").exists()
     monkeypatch.setattr(sys, "argv", original_args)
     monkeypatch.setattr(sys, "argv", [*sys.argv, "--correction-reason", "verified execution correction"])
-    assert main() == 1  # #49 already consumes the corrective allowance; no additional campaign
+    assert main() == 1  # a usable LR1e-4 setting cannot be supplemented
     assert not (tmp_path / "pilot" / "correction").exists()
     capsys.readouterr()
 
@@ -177,6 +178,59 @@ def test_final_verification_failure_excludes_training_attempt_from_mc_ev(
         assert setting["mc_critic"] == {"transitions": 0, "explained_variance": None}
 
 
+def test_failed_lr1e4_supplement_reuses_initial_evaluation_and_preserves_original_run(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    status, original, model = pilot_cli(tmp_path, monkeypatch, capsys,
+                                      server_error_attempts=["lr-0.0001-train-3:1"])
+    assert status == 0 and not original["settings"][0]["usable"] and original["settings"][1]["usable"]
+    from mc_diamond.cli import main
+    directory = tmp_path / "pilot"
+    baseline = (directory / "baseline/summary.json").read_bytes()
+    args = list(sys.argv)
+    monkeypatch.setattr(sys, "argv", [*args, "--correction-reason", "approved", "--correction-lr", "0.0003"])
+    assert main() == 1 and not (directory / "correction").exists()
+    monkeypatch.setattr(sys, "argv", [*args, "--correction-reason", "approved startup recovery supplement",
+                                      "--correction-lr", "0.0001"])
+    manifest = directory / "baseline/manifest.json"
+    manifest_bytes = manifest.read_bytes()
+    changed = json.loads(manifest_bytes)
+    changed["input_hash"] = "mismatched policy input"
+    manifest.write_text(json.dumps(changed))
+    assert main() == 1 and not (directory / "correction").exists()
+    manifest.write_bytes(manifest_bytes)
+    assert main() == 0
+    corrected = json.loads((directory / "correction/summary.json").read_text())
+    assert corrected["planned_slots"] == len(corrected["evaluations"]) == 10
+    assert corrected["restored_initial"]
+    assert len(corrected["settings"]) == 1
+    record = corrected["settings"][0]
+    assert record["choice_lr"] == 1e-4 and record["usable"] and record["collected_decisions"] == 1024
+    assert len(record["updates"]) == 8 and record["updates"][0]["actor_skipped"]
+    assert record["initial_hashes"] == original["settings"][1]["initial_hashes"]
+    assert corrected["time_tie_ticks"] == original["time_tie_ticks"]
+    assert corrected["comparison"]["prior_failed_setting_errors"] == ["backend_error"]
+    assert corrected["selected_choice_lr"] == 3e-4  # equal score/time: retain the original LR1e-4 backend error
+    assert all(row["phase"] == "lr-0.0001" and row["success"] for row in corrected["evaluations"])
+    assert not list((directory / "correction").glob("initial-eval*"))
+    assert (directory / "baseline/summary.json").read_bytes() == baseline
+    saved = (directory / "correction/summary.json").read_bytes()
+    assert main() == 1
+    assert (directory / "correction/summary.json").read_bytes() == saved
+    # A failed supplement stays a failure even though the completed original LR3e-4 is still selectable.
+    other = tmp_path / "failed-supplement"
+    shutil.copytree(directory / "baseline", other / "baseline")
+    def model_failure(encoded: Any) -> Any:
+        raise RuntimeError("supplement numerical failure")
+    model.encode_candidates = model_failure
+    monkeypatch.setattr(sys, "argv", [*args[:-1], str(other), "--correction-reason", "approved startup supplement"])
+    assert main() == 1
+    failed = json.loads((other / "correction/summary.json").read_text())
+    assert failed["selected_choice_lr"] == 3e-4 and not failed["settings"][0]["usable"]
+    assert failed["restored_initial"] and len(failed["evaluations"]) == 10
+    assert all(not r["attempts"] for r in failed["evaluations"])
+    capsys.readouterr()
+
+
 @pytest.mark.parametrize(("successes", "ticks", "errors", "usable", "expected"), [
     ([1, 2], [10, 100], [0, 0], [True, True], 3e-4),
     ([1, 1], [100, 20], [0, 1], [True, True], 3e-4),
@@ -203,12 +257,13 @@ def test_corrective_pilot_requires_baseline_and_a_written_reason(
     from mc_diamond.cli import main
     config = tmp_path / "wood.yaml"
     config.write_text(yaml.safe_dump({"backend": "mock", "fixture": str(Path("fixtures/model_episode.json").resolve()),
+        "discovery_reward": .05,
         "goal": {"goal_id": "wood", "kind": "collect", "target": "cobblestone", "quantity": 3}}))
     monkeypatch.setattr(sys, "argv", ["mc-diamond", "pilot-wood", "--config", str(config), "--output", str(tmp_path / "pilot"),
                                       "--correction-reason", "fixed a confirmed execution error"])
     assert main() == 1
     last = json.loads(capsys.readouterr().out.splitlines()[-1])
-    assert "corrective allowance" in last["data"]["error"].lower()
+    assert "baseline" in last["data"]["error"].lower()
     assert not (tmp_path / "pilot" / "correction").exists()
 
 

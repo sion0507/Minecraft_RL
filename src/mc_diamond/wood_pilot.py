@@ -2,6 +2,7 @@
 
 import faulthandler
 import gzip
+import hashlib
 import json
 import math
 import statistics
@@ -83,7 +84,7 @@ def hashes(model: NanoJevAdapter) -> dict[str, str]:
 def attempt(config: EpisodeConfig, path: Path, directory: Path, identity: str, number: int,
             model: NanoJevAdapter, seed: int, snapshot: str,
             learner: EpisodeLearner | None = None) -> dict[str, Any]:
-    attempt_id = f"{identity}:{number}"
+    attempt_id = f"{'correction:' if directory.name == 'correction' else ''}{identity}:{number}"
     started = time.monotonic()
     trace = directory / f"{identity}-{number}.jsonl.gz"
     interrupted = False
@@ -245,15 +246,22 @@ def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
     summary: dict[str, Any] = {"mock": config.backend == "mock", "planned_slots": 30, "settings": [], "evaluations": [],
         "selected_choice_lr": None, "restored_initial": False, "main_training_decisions": 0,
         "planner_calls": 0, "api_cost_usd": 0.0, "error": None, "time_tie_ticks": None}
-    directory = output / "baseline"
+    correction = correction_reason is not None
+    directory = output / ("correction" if correction else "baseline")
     model: NanoJevAdapter | None = None
     initial: dict[str, str] = {}
     reserved = False
     rates: tuple[float, ...] = LEARNING_RATES
+    phases = ["initial", *(f"lr-{lr:g}" for lr in rates)]
+    previous: dict[str, Any] = {}
+    prior_failed: dict[str, Any] = {}
+    prior_other: dict[str, Any] = {}
     snapshot = "unavailable"
     try:
-        if correction_reason is not None or correction_lr is not None:
-            raise ValueError("#49 already uses the corrective allowance; no additional corrective pilot is allowed")
+        if correction_lr is not None and not correction:
+            raise ValueError("An LR override requires --correction-reason")
+        if correction and (not correction_reason or not correction_reason.strip() or correction_lr not in (None, 1e-4)):
+            raise ValueError("The approved supplement requires a reason and only LR1e-4")
         if (config.planner is not None or config.goal.kind != "collect" or config.goal.target != "cobblestone"
                 or config.goal.quantity != STONE or config.goal.source != "fixed" or config.ppo != PPOConfig()
                 or config.discovery_reward != .05
@@ -264,6 +272,32 @@ def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
                 or Path(config.command[1]).resolve() != Path("bridge/minecraft.js").resolve()):
             raise ValueError("Actual pilot requires natural bridge/minecraft.js --task G1 --budget-ticks 1800")
         snapshot = reset_state(config, path, "G1")
+        if correction:
+            baseline = output / "baseline/summary.json"
+            previous = json.loads(baseline.read_text(encoding="utf-8"))
+            prior_manifest = json.loads((baseline.parent / "manifest.json").read_text(encoding="utf-8"))
+            prior_failed = next((s for s in previous.get("settings", []) if s.get("choice_lr") == 1e-4), {})
+            prior_other = next((s for s in previous.get("settings", []) if s.get("choice_lr") == 3e-4), {})
+            if (previous.get("mock") != summary["mock"] or previous.get("error") is not None
+                    or not previous.get("restored_initial") or prior_failed.get("usable", True)
+                    or "backend_error" not in prior_failed.get("errors", []) or not prior_other.get("usable")
+                    or prior_other.get("collected_decisions") != DECISIONS or len(prior_other.get("updates", [])) != 8
+                    or prior_manifest.get("snapshot") != snapshot or prior_manifest.get("config") != config.model_dump(mode="json")
+                    or prior_manifest.get("input_hash") != INPUT_HASH or prior_manifest.get("revision") != REVISION
+                    or prior_manifest.get("weights_sha256") != WEIGHTS_SHA256
+                    or prior_manifest.get("evaluation_seeds") != EVALUATION_SEEDS):
+                raise ValueError("Supplement requires the same completed baseline with failed LR1e-4 and usable LR3e-4")
+            reference_initial = [r for r in previous["evaluations"] if r["phase"] == "initial"]
+            reference_other = [r for r in previous["evaluations"] if r["phase"] == prior_other["phase"]]
+            if (len(reference_other) != 10 or not all(r["attempts"] for r in reference_initial + reference_other)
+                    or previous.get("time_tie_ticks") != time_tie_threshold(reference_initial)
+                    or prior_manifest.get("training_seed") != (config.model or ModelConfig()).seed):
+                raise ValueError("Supplement requires the original evaluation slots, training seed and registered threshold")
+            summary.update(planned_slots=10, time_tie_ticks=previous["time_tie_ticks"], reference={
+                "summary": str(baseline.resolve()), "sha256": hashlib.sha256(baseline.read_bytes()).hexdigest(),
+                "initial_evaluations": reference_initial})
+            rates = (1e-4,)
+            phases = ["lr-0.0001"]
         directory.mkdir(parents=True, exist_ok=False)
         reserved = True
         settings = config.model or ModelConfig()
@@ -271,18 +305,25 @@ def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
             "training_seed": settings.seed, "evaluation_seeds": EVALUATION_SEEDS, "input_hash": INPUT_HASH,
             "revision": REVISION, "weights_sha256": WEIGHTS_SHA256, "decisions_per_setting": DECISIONS,
             "learning_rates": rates, "planned_slots": summary["planned_slots"], "corrective_allowance": "this_#49_campaign",
-            "faulthandler_enabled": faulthandler.is_enabled(), "time_tie_ticks": None,
+            "faulthandler_enabled": faulthandler.is_enabled(), "time_tie_ticks": summary["time_tie_ticks"],
             "time_tie_rule": "2 * sample_SD(initial_10_slot_ticks; failure=1800) * sqrt(2/10)"}
+        if correction:
+            manifest.update(correction_reason=correction_reason, reference=summary["reference"],
+                            corrective_allowance="approved_failed_LR1e-4_supplement")
         write_json(directory / "manifest.json", manifest)
         torch.manual_seed(settings.seed)
         model = NanoJevAdapter.load((path.parent / settings.checkpoint).resolve())
         initial = hashes(model)
+        if correction and (initial != prior_failed.get("initial_hashes") or initial != prior_other.get("initial_hashes")):
+            raise ValueError("Fresh public model/critics must match the baseline initial hashes")
         model.save_heads(directory / "initial.safetensors")
-        summary["evaluations"] = evaluate(config, path, directory, "initial", model, snapshot)
-        summary["time_tie_ticks"] = manifest["time_tie_ticks"] = time_tie_threshold(summary["evaluations"])
-        write_json(directory / "manifest.json", manifest)  # register the threshold before either setting trains
-        passed = sum(row["success"] for row in summary["evaluations"])
-        if config.backend == "rpc" and not 2 <= passed <= 8:  # registered difficulty band; the scripted mock always succeeds
+        if not correction:
+            summary["evaluations"] = evaluate(config, path, directory, "initial", model, snapshot)
+            summary["time_tie_ticks"] = manifest["time_tie_ticks"] = time_tie_threshold(summary["evaluations"])
+            write_json(directory / "manifest.json", manifest)  # register before either setting trains
+        reference_initial = summary["reference"]["initial_evaluations"] if correction else summary["evaluations"]
+        passed = sum(row["success"] for row in reference_initial)
+        if config.backend == "rpc" and not 2 <= passed <= 8:
             raise ValueError(f"Initial policy succeeded {passed}/10, outside the registered 2-8 band; the user decides the task")
         for lr in rates:
             model.load_heads(directory / "initial.safetensors")
@@ -290,7 +331,18 @@ def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
             summary["settings"].append(record)
             summary["evaluations"].extend(evaluate(config, path, directory, record["phase"], model, snapshot,
                 unavailable=None if record["usable"] else "setting_unusable"))
-        summary["selected_choice_lr"] = select_setting(summary["settings"], summary["evaluations"],
+        comparison_settings = summary["settings"]
+        comparison_evaluations = summary["evaluations"]
+        if correction:
+            comparison_settings = [{**summary["settings"][0],
+                "errors": prior_failed["errors"] + summary["settings"][0]["errors"]}, prior_other]
+            comparison_evaluations = summary["evaluations"] + reference_other
+            summary["comparison"] = {"reference_summary": summary["reference"]["summary"],
+                "original_planned_slots": previous["planned_slots"], "supplement_planned_slots": 10,
+                "prior_failed_setting_errors": prior_failed["errors"],
+                "prior_failed_setting_decisions": prior_failed["collected_decisions"],
+                "reference_lr3e4_evaluations": reference_other}
+        summary["selected_choice_lr"] = select_setting(comparison_settings, comparison_evaluations,
                                                        time_tie_ticks=summary["time_tie_ticks"])
     except (ImportError, OSError, ValueError, RuntimeError, EpisodeError) as failure:
         summary["error"] = str(failure)
@@ -304,7 +356,7 @@ def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
         summary["wall_seconds"] = time.monotonic() - started
     if reserved:
         existing = {row["slot_id"] for row in summary["evaluations"]}
-        for phase in ["initial", *(f"lr-{lr:g}" for lr in rates)]:
+        for phase in phases:
             if any(row["phase"] == phase for row in summary["evaluations"]):
                 continue
             missing = evaluate(config, path, directory, phase, model, snapshot, unavailable="pilot_incomplete")
@@ -312,7 +364,10 @@ def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
         summary["evaluation_critic"] = {phase: critic_diagnostics([
             r["attempts"][-1]["diagnostics"] for r in summary["evaluations"]
             if r["phase"] == phase and r["attempts"] and r["attempts"][-1]["valid"]])
-            for phase in ["initial", *(f"lr-{lr:g}" for lr in rates)]}
+            for phase in phases}
         write_json(directory / "summary.json", summary)
     emit("pilot_summary", summary)
-    return 0 if summary["selected_choice_lr"] is not None and summary["restored_initial"] and not summary["error"] else 1
+    okay = summary["selected_choice_lr"] is not None and summary["restored_initial"] and not summary["error"]
+    if correction:
+        okay = okay and bool(summary["settings"] and summary["settings"][0]["usable"])
+    return 0 if okay else 1

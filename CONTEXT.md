@@ -1,3 +1,13 @@
+# #49 — 복구 패치 개발 검증 완료·LR1e-4 보완 background 준비 (2026-11-11)
+
+최초 real-20261110-232814 pipeline은completed(exit0). 원래30슬롯 중20실행/10미실행: 초기2/10, LR1e-4는59결정/PPO0/reset기동timeout으로불능·후10미실행, LR3e-4는1024/8update/actor641/후4/10·초기복원true. 코드의LR3선택은 유일usable설정의임시선택이다. 원래30슬롯/실패와약3h35m PC비용을보존한다.
+
+승인된패치와단일보완경로를구현했다.45초기동timeout→최근64KiB+jstack5초/1MiB→소유Java SIGKILL/회수5초→restore에서같은snapshot1회재기동,두번째/일반오류는중단. 이전child의늦은Done출력을무시하는리뷰P2수정도했다. correction flags는같은baseline/설정/seed/초기hash의실패LR1e-4만독점correction폴더에서공개초기1024+후10으로실행하며초기10/동률폭/LR3결과를재사용한다. 이전실패오류도선택기준에포함한다.
+
+최종pytest297개/137.04초·mypy .51파일통과,리뷰Standards1P2수정/Spec0/미해결0. 계획 docs/superpowers/plans/2026-11-11-issue-49-startup-recovery.md,리뷰 docs/reviews/issue-49-startup-recovery.md. 다음순서는새background의실제Java진단(첫deadline4초인명시적검증VM,생산45초불변)→clock63→정보감사→T04/T05→원래pilot output의correction/에LR1e-4보완이다.단계실패시후속중단,정상/실패종료이벤트1회로대화를재개한다.새진단근거및코드fingerprint는새실행폴더로구분한다.실제통과는개발검사로대체하지않는다.
+
+보완완료후원래baseline/summary.json+correction/summary.json을감사하여원래30슬롯과보완10을분리하고등록규칙으로비교·진단·실패/복구/시간·초기heads복원·본체고정·경험제외를확인한다.한국어PROGRESS/CONTEXT·코드가이드/보고서PDF2개를갱신한다.추가학습/API/push/merge/종료는금지.보고서생성기/tmp/issue49-followup-pdfs.py는현재/최종결과를반영한다.원래완료이벤트의과거재실행금지는이아래사용자명시승인으로LR1e-4보완1회에한해대체됐다.
+
 # #49 — 최신 지시: 현재 실행 종료 → 패치 → 실패 LR1e-4 재실행 → 최종 검토 (2026-11-11)
 
 사용자가 **실패한 LR1e-4도 패치 후 다시 실행**하라고 명시적으로 승인했다. 아래 이전 기록의 LR1e-4 재실행 금지 및 완료 이벤트 원문 `Do not rerun any failed phase`는 이 한정된 승인으로 대체된다. 재승인을 묻지 않고 끝까지 진행한다.

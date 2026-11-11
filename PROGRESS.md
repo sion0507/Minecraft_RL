@@ -1,5 +1,28 @@
 # 실행 기록
 
+## 2026-11-11 — #49 기동 복구·단일 LR1e-4 보완 경로 구현/개발 검증 완료
+
+최초 background pipeline 완료를 확인한 뒤 수정했다. Server.start에45초 timeout의 최근64KiB stdout/stderr·jstack 최대5초/1MiB 진단·소유 Java SIGKILL/최대5초 회수를 구현했다. Server.restore만 같은 snapshot을 다시 검증/복원해1회 재기동하며, 두 번째 timeout/다른 오류/진단 기록 실패/회수 실패는 중단한다. dump 부재/실패도 기록하고 정책 입력과 분리한다.
+
+기존 correction 플래그를 통해 실패 LR1e-4 보완1회를 허용한다. 원래 config/snapshot/seed/입력·모델·가중치 및 초기heads hash를 확인하고 공개 초기값·새 optimizer에서1024결정/8update/첫critic-only와후평가10만 수행한다. 원래초기10·동률폭·완료LR3e-4결과는 재사용하고 baseline파일을 수정하지 않는다. 비교오류수에 원래LR1e-4 backend 오류도 보존한다. 이전LR3e-4가 선택 가능해도 보완학습이불능이면 command실패다.
+
+**최종 개발 검사:** 공개 Server.restore/CLI의 RED→GREEN, 관련22검사/51.14초, stale-child 출력 회귀12검사/1.63초, 전체 **pytest297개/137.04초**, strict **mypy .51파일**, Node 문법/diff 검사 통과. 최초전체296개/137.51초는 리뷰 수정 전 근거다. 원시 `artifacts/issue-49/{startup-red,supplement-red,supplement-green,recovery-targeted,recovery-review-red,recovery-review-green,recovery-full-pytest-final,recovery-mypy}.txt`.
+
+**리뷰:** Standards P2 1건(종료된 Java의 늦은 Done이 새 Java를 준비 완료로 오인)을 재현·수정했다. 현재 child 출력만 전달하도록 하여 RED freshReady=false→GREEN을 확인했고 전체 재검사했다. Spec0·미해결0. `docs/reviews/issue-49-startup-recovery.md`.
+
+**실제 검증/실행:** 수정 코드의 새 실제 Java 진단·63조건 인증·정보감사·T04/T05 및 보완학습은 다음 pinned background chain에서 순차 수행하며 현재 개발 검사만으로 실제 성공을 주장하지 않는다. 이 별도 진단 VM은 첫 기동 deadline만4초로 줄여 실제 jstack/kill/restart 경로를 확인하며 생산 코드45초는 바꾸지 않는다. 모든 사전 단계 통과 후에만 보완학습을 시작한다. 코드·명령·원래baseline/hash·이전/새fingerprint·RPC오류/전체시간을 보존하고 완료이벤트로 결과감사를 재개한다. push/merge/이슈종료/API 미실행.
+
+## 2026-11-11 — #49 최초 실제 캠페인 종료·보완 실행 착수
+
+종료 이벤트가 실제로 같은 대화를 재개했다. `real-20261110-232814` pipeline은3시간35분17.79초, 파일럿 단계3시간5분41.81초에 종료(exit0). 사전 시계63/63·정보감사·T04/T05 회귀 통과. 정상 종료와 모든 설정의 완주를 구분한다.
+
+- 초기평가 **2/10**, 실패포함 평균1710.5틱. 등록된 시간동률폭202.282640547틱.
+- LR1e-4: **59/1024결정·PPO0**, third reset 서버 기동45초 timeout으로 불능. 미업데이트59전이, 후평가 **10슬롯 미실행**을 원래30슬롯 분모에 유지한다.
+- LR3e-4: **1024/1024결정·PPO8회·actor641**, 유효전이1024/무효0, 본체불변·Choice/critic변경. 후평가 **4/10**, 실패포함 평균1651.7틱. 초기대비 성공2회 증가지만 짧은10회 결과이며 학습 효과의 통계적 우월성을 확정하지 않는다. 시작확률 최대변화0.009376, 정규화엔트로피0.997210→0.998664. 평가 MC critic EV0.043719→0.101343; 학습 MC EV는−0.484373로 별도 지표다. 학습 앞17에피소드10성공/뒤18에피소드8성공은 고정 평가가 아니다.
+- 원래30슬롯 중20실행/10미실행. 코드 selected_choice_lr=3e-4는 유일하게 usable한 설정의 임시 선택이며 두 설정 비교 완료가 아니다. 공개 초기heads 복원true, 추가 본 학습0·API US$0. 돌/원목 드롭 병합 관련 진단은 stderr에 남아 있으며 성공·실패로 조용히 덮지 않는다.
+
+앞서 승인된 순서에 따라 timeout 진단/1회 재기동 패치를 구현·검증한 뒤 LR1e-4만 공개 초기 상태에서 보완 실행한다. 원래 기록은 수정하지 않는다. 실행계획 docs/superpowers/plans/2026-11-11-issue-49-startup-recovery.md. 완료 이벤트의 이전 재실행 금지 문구보다 사용자의 후속 명시 승인/CONTEXT 최상단을 따른다.
+
 ## 2026-11-11 — timeout 패치 후 실패 LR1e-4 재실행과 최종 검토 승인
 
 사용자가 현재 백그라운드 실행 종료 알림 후 패치를 적용하고 실패한 LR1e-4도 다시 실행한 뒤 원래 예정한 검토·검증을 마무리하라고 지시했다. 이전 LR1e-4 자동 재실행 금지를 이 보완 실행1회에 한해 대체한다. 현재 실행 소스는 그대로 두고 종료 후 구현/검증 → 새 시계 인증·정보감사·회귀 → 공개 초기 상태에서 LR1e-4 1024결정/8update·후평가 → 등록한 비교/진단/복원/비용 감사·최신PDF2개 순서로 진행한다. 원래 실패59결정·미실행 슬롯과 LR3e-4 결과를 보존하고 별도 경로/코드 기준으로 보완한다. CONTEXT·DECISIONS와 after-pilot-action.json에 최신 승인을 기록했다. 실제 패치/보완 학습은 아직 미실행이며 현재 캠페인 종료를 기다린다.
