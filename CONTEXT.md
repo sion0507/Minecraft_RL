@@ -1,4 +1,12 @@
-# #49 — 복구 패치 개발 검증 완료·LR1e-4 보완 background 준비 (2026-11-11)
+# #49 — 보완 background 실행 중·실제 Java 복구 진단 통과 (2026-11-11)
+
+구현커밋 **de4effb3af924807dbd78a0ef0497ff28d08a292**에서 새 background **artifacts/issue-49/supplement-20261111-102747**을 시작했다(PID373632,2026-11-11 10:29:04KST). run-manifest.json에 실행소스/원래baseline/명령을 고정했다. 실제 Java controlled 진단은12.835초에 passed: 첫deadline만VM에서4초로 줄여 진짜jstack성공→소유Java강제종료/회수→같은G1snapshot재복원/새Java기동성공/정상종료를 확인했다. 생산45초는불변이고 자연45초timeout근본원인재현이아니다. 현재초기확인은clock단계진행중이다.
+
+다음순서 clock63→정보감사→T04/T05→LR1e-4보완. 실제보완결과는 **artifacts/issue-49/real-20261110-232814/pilot/correction/**에만쓴다. 원래baseline/summary.json 보존. 상태/단계로그/이전·새clockcertificate/RPC신규진단/알림결과는새background폴더에보존한다. 모두끝나면한번의codex queue --resume 이벤트로이대화를재개한다. 모델중간polling/추가재실행금지.
+
+PDF 최신본은보고서3쪽·가이드2쪽, 한글추출/글꼴포함/전체5쪽가독성을확인하고 현재원래실제결과·패치/검사·보완진행상태를반영했다. reports는Git제외다. 보완완료후아래최종감사와PDF재갱신을마친다. 소스는작업중바꾸지않는다(이후문서상태커밋만허용).
+
+# #49 — 복구 패치 개발 검증 완료·LR1e-4 보완 background 준비 (직전 기록)
 
 최초 real-20261110-232814 pipeline은completed(exit0). 원래30슬롯 중20실행/10미실행: 초기2/10, LR1e-4는59결정/PPO0/reset기동timeout으로불능·후10미실행, LR3e-4는1024/8update/actor641/후4/10·초기복원true. 코드의LR3선택은 유일usable설정의임시선택이다. 원래30슬롯/실패와약3h35m PC비용을보존한다.
 

@@ -1,5 +1,13 @@
 # 실행 기록
 
+## 2026-11-11 — LR1e-4 보완 background 시작·실제 Java/jstack 복구 진단 통과
+
+구현/실행코드 **de4effb**를 고정해2026-11-11 10:29:04KST에 `artifacts/issue-49/supplement-20261111-102747`에서 detached supervisor(PID373632)를 시작했다. 승인된새실행만수행하며원래자료는보존한다. 실제LR1e-4출력은원래pilot의독점correction/에쓸예정이다. 현재상태의정본은새background-status.json이다.
+
+첫실제검증startup은exit0/12.835초: 실제Java기동·실제jstack출력성공·소유프로세스SIGKILL/회수·같은G1snapshot재복원/재기동성공·정상종료를확인했다. 이검증VM에서만첫기동deadline을4초로줄였고생산소스45초는그대로다. 자연기동45초지연원인을재현/해결했다고주장하지않는다. 원시startup-real.json/stdout/stderr 및 RPC timeout/retry기록을보존했다. 현재초기확인에서다음clock단계가진행중이며새실제63조건·정보감사·T04/T05후에만학습한다.
+
+보고서/가이드PDF2개를원래실제30슬롯결과(초기2/10·LR3후4/10·LR1후10미실행)·복구코드·개발297검사/타입51파일·리뷰수정·현재보완대기상태로갱신했다. 보고서3쪽/가이드2쪽의한글추출·한글폰트embedding·전체5쪽렌더를검수했고Git추적0이다. 생성기는/tmp/issue49-followup-pdfs.py이며보고서때문에게임을재실행하지않았다. 보완완료이벤트후등록비교/진단/시간·실패회계/본체고정·복원/경험제외를최종감사하고PDF를다시갱신한다. push/merge/이슈종료/API미실행.
+
 ## 2026-11-11 — #49 기동 복구·단일 LR1e-4 보완 경로 구현/개발 검증 완료
 
 최초 background pipeline 완료를 확인한 뒤 수정했다. Server.start에45초 timeout의 최근64KiB stdout/stderr·jstack 최대5초/1MiB 진단·소유 Java SIGKILL/최대5초 회수를 구현했다. Server.restore만 같은 snapshot을 다시 검증/복원해1회 재기동하며, 두 번째 timeout/다른 오류/진단 기록 실패/회수 실패는 중단한다. dump 부재/실패도 기록하고 정책 입력과 분리한다.

@@ -44,6 +44,8 @@ Final development verification:297pytest/137.04s, mypy .51files. Standards P2 st
 
 ### Task3 — Real verification, background supplement and final reporting
 
-- [ ] Record original actual results and updated Korean report/code-guide PDFs; verify fonts/extraction/all pages without rerunning games for reports.
-- [ ] Launch pinned background real verification→LR1e-4 supplement, using one completion callback and no model polling. Retain source/command hashes and all stderr/stdout.
+- [x] Record original actual results and updated Korean report/code-guide PDFs; verify fonts/extraction/all pages without rerunning games for reports.
+- [x] Launch pinned background real verification→LR1e-4 supplement, using one completion callback and no model polling. Retain source/command hashes and all stderr/stdout.
 - [ ] On the next completion event audit slot/attempt costs, registered selection, probabilities/entropy/MC EV/progress, restoration and backbone invariance; update records and two local PDFs.
+
+Background supplement-20261111-102747 pins de4effb, launched10:29:04KST. Real-Java recovery diagnostic passed with actual jstack/kill/reap/same-snapshot restart; first deadline4s only in the diagnostic VM, production45s unchanged. New clock/information/regressions run next before LR1e-4. The original30slots and new10supplement slots remain separate. Korean PDFs currently3+2pages; final comparative audit awaits the completion event.
