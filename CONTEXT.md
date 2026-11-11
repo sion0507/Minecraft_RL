@@ -1,3 +1,15 @@
+# #49 — 승인된 보완 및 최종 감사 완료 (2026-11-11)
+
+최신 결과: 원래 초기2/10·1710.5틱, 원래LR3e-4후4/10·1651.7틱, 보완LR1e-4후2/10·1749.1틱. 등록 성공수 우선으로 **LR3e-4** 선택. 시간차97.4<등록동률폭202.282640547이지만성공수가달라선택불변. 원래LR1 backend_error1건도비교에포함. 고정월드10회씩의파일럿이며통계적우월성/일반화주장불가.
+
+원래30슬롯=20실행/10미실행 유지, 보완10=10실행/0미실행; 합산예정40/실제30. 원래실패59결정/PPO0/후10미실행을삭제하지않았다. 보완LR1은1024/8update/actor669, 원래LR3는1024/8/actor641. 공개초기hash/heads동일·본체불변·Choice/critic변경·양실행초기복원true. 총학습수집2107/사용2048/폐기59·본학습0/API US$0.
+
+보완background **artifacts/issue-49/supplement-20261111-102747**은전단계exit0, 완료알림전송exit0. controlled 실제Java/jstack복구통과(검증VM첫deadline4초,생산45초), 새clock63/63·정보감사·T04/T05통과. 보완학습/평가자연timeout/backend/nativecrash0. 원래기동지연근본원인은미확정. 원래/보완104attempt trace·후보계약/actor제외/도달/발견/MC return/EV·소스/원래baseline/publichash감사passed; final-audit.json을따른다. 원목드롭진단6건보존.
+
+실제summary: artifacts/issue-49/real-20261110-232814/pilot/{baseline,correction}/summary.json. 최종선택/진단/앞뒤절반/도달·발견/비용은PROGRESS최신절및final-audit.json. PC합산6시간35분12.14초(원래3:35:17.79+보완2:59:54.35), GPU-hours/전력은미측정. 실제소스de4effb, 기존개발297pytest/mypy51·리뷰미해결0기록유지. 이번은오프라인최종감사/문서/PDF만이며검사나게임을반복하지않았다.
+
+한국어최신PDF2개: reports/issue-049-T14A-report.pdf 및 reports/issue-049-T14A-code-guide.pdf, 생성기/tmp/issue49-final-pdfs.py. 소스변경없음. 결과문서로컬commit만하며push/merge/이슈종료없음. **승인된작업완료. 더이상훈련·추가파일럿·API·재시도하지않는다.** 아래진행중/대기문구는과거이력이다.
+
 # #49 — 보완 background 실행 중·실제 Java 복구 진단 통과 (2026-11-11)
 
 구현커밋 **de4effb3af924807dbd78a0ef0497ff28d08a292**에서 새 background **artifacts/issue-49/supplement-20261111-102747**을 시작했다(PID373632,2026-11-11 10:29:04KST). run-manifest.json에 실행소스/원래baseline/명령을 고정했다. 실제 Java controlled 진단은12.835초에 passed: 첫deadline만VM에서4초로 줄여 진짜jstack성공→소유Java강제종료/회수→같은G1snapshot재복원/새Java기동성공/정상종료를 확인했다. 생산45초는불변이고 자연45초timeout근본원인재현이아니다. 현재초기확인은clock단계진행중이다.

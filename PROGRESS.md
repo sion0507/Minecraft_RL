@@ -1,5 +1,25 @@
 # 실행 기록
 
+## 2026-11-11 — #49 LR1e-4 보완 완료·등록 비교 및 최종 감사 완료
+
+**실제 결과:** 원래 초기 2/10 성공·실패 포함 평균 1710.5틱, 원래 LR3e-4 후평가 4/10·1651.7틱, 보완 LR1e-4 후평가 2/10·1749.1틱이다. 등록된 성공 수 우선 규칙으로 **LR3e-4 (0.0003)**를 선택했다. 두 설정 평균 차이 97.4틱은 초기 10회에서 사전 등록한 동률 폭 202.282640547틱보다 작지만 성공 수가 달라 시간/오류 동률 판단 전에 선택된다. 원래 LR1e-4 backend_error 1건도 비교 오류 수에 보존했다. 초기 대비 LR3는 +20%p, LR1은 변화 없으며, 각각 10회의 고정 월드 파일럿으로 통계적 우월성/새 월드 일반화/본 학습 효과를 주장하지 않는다.
+
+**분모·실패 보존:** 원래 30슬롯은 20실행·10미실행 그대로다. LR1e-4는 59결정/PPO0/세 번째 reset 기동45초 timeout 및 후평가10미실행을 유지했다. 별도 correction의 10슬롯은 모두 실행했다. 합계는 예정40 중30실행·10미실행이며 참조 초기10/LR3후10을 중복 실행으로 세지 않는다. 보완 LR1 후 실패8회와 LR3 후 실패6회는 모두 active_tick_limit이다. 보완 학습/평가 backend 오류·자연 startup timeout·native crash는 0건이다. 원래 Java 지연의 근본 원인은 미확정이다.
+
+**학습·진단:** 보완 LR1은1024결정/8update/actor669/유효1024/무효0/미반영0, 원래LR3은1024/8/actor641이다. 각 첫128전이는 critic-only, 원래실패59전이는 폐기·미재사용이다. 시작 동일 특징에서 update0–8 확률/엔트로피를 저장했으며 LR1 최대 확률 변화0.004856·정규화 엔트로피0.997210→0.996377, LR3은0.009376·0.997210→0.998663이다. 평가 MC EV는 초기0.043719→LR1 0.332486/LR3 0.101343; 학습 MC EV는 각각−0.102003(1011전이)/−0.484373(1001전이)로 별도다. 마지막 운영 절단 전이는 MC return에서 제외했다. 학습 앞/뒤 절반 성공은 LR1 5/18→10/18(실패 포함 평균1606.61→1483.06틱), LR3 10/17→8/18(1531.76→1543.67틱)이며 고정 평가와 직접 비교하지 않는다.
+
+**도달·발견:** 평가 곡괭이 도달 중앙값은 초기448틱(9/10), LR1 578(9/10), LR3 470(9/10). 돌 현재가시는 모두83(9/10), 첫돌채굴/조약돌획득은 초기1385(3/10), LR1 1501(4/10), LR3 1385(5/10)다. 미도달은 중앙값에서 제외하므로 검열된 비교다. 발견보상은 세 평가 모두9에피소드에서1회씩(각0.05), 총9회다. 보완 stderr의 기존 원목 드롭 gone/count mismatch 진단6건도 보존했으며 해결됐다고 표시하지 않는다.
+
+**실제 수정 코드 인증:** pinned 구현 de4effb에서 startup→clock→information→T04→T05→pilot 모두exit0. 실제 Java/jstack 진단은 첫deadline만검증VM에서4초로줄여 dump성공→소유PID강제종료/회수→같은snapshot재복원/새Java기동/정상종료를12.835초에확인했다. 생산45초불변. rpc-errors-new.log는 이 controlled timeout/retry 각1건뿐이며 자연 간헐장애의 현장복구 검증은 아니다. 새 시계63/63·정보감사통과, T04 목재/도구/위험/드롭/빈후보/취소/복원 및 T05 furnace(철괴1/205틱)/production(철괴3/1684틱)/경계/취소/복원통과. T04 hazard/empty의CLI exit1은 기대음성검사다. 실제 controlled fixture이며 자연G2/G4를 추가하지 않았다.
+
+**무결성·오프라인 감사:** 원래58+보완46=104개attempt trace 전체에서 후보ID/내용/순서/마스크와선택/실행/actor제외·빈reset·도달/발견/MC return/EV가요약과일치했다. 실행manifest고정 소스/설정/원래baseline hash는불변이다. 공개 best.safetensors SHA256 f68c47d66998231b86b7e91b4ed5e82ae23acf104c8b7cd6d165c3ac7b7ffe1b/revision047b927b30882a1138fc504821b82ac145a4b81a 확인, 원래/보완 initial.safetensors동일·세설정초기parameter hash동일. 양실행restored_initial=true·본체불변·학습Choice/critic변경이다. 오프라인 감사는 게임/모델추론/API를 호출하지 않았다.
+
+**시간·비용:** 원래pipeline3시간35분17.79초(파일럿3시간5분41.81초), 보완pipeline2시간59분54.35초(파일럿2시간29분35.29초), 합산PC점유6시간35분12.14초다. 보완 사전단계는 controlled startup12.89초·clock512.26초·정보감사776.45초·T04235.68초·T05280.11초를 포함한다. 학습수집2107=사용2048+폐기59결정, PPO actor합계1310. API US$0·7B계획호출0·본학습0결정. GPU사용률적분/전력·전기료/실제GPU-hours는미측정이며PC wall time과구분한다.
+
+**검증·리뷰·상태:** 기존 최종 개발검사 pytest297/137.04초·mypy .51파일 및 두축리뷰Standards P2 1건수정/Spec0/미해결0 기록을 유지했다. 실행소스변경이없어 이번에는 전체개발검사/게임을 재실행하지 않고 저장trace/hash/결과감사를 수행했다. 구현로컬commit de4effb, 실행전상태문서28b37d8. 최종결과문서만추가로컬commit하며 push/PR/merge/이슈종료없음. background완료/알림전송각exit0를확인했고 더이상학습/파일럿/API/자동재시도는없다.
+
+**산출물:** 원래/보완 summary는 artifacts/issue-49/real-20261110-232814/pilot/{baseline,correction}/summary.json, 새실제검증/단계로그/RPC/알림/최종감사는 artifacts/issue-49/supplement-20261111-102747/ (final-audit.json/stdout/stderr). 감사스크립트사본도같은폴더에보존한다. 최신한국어PDF2개(보고서4쪽·가이드2쪽, 전체6쪽)는 reports/issue-049-T14A-{report,code-guide}.pdf이며 코드기준de4effb와실행코드차이·실제/mock/미실행·commit/push/merge/종료상태를분리했다. PDF한글추출/한글폰트embedding/모든페이지렌더를검수하고 reports Git추적0을확인한다. 중간자료는/tmp, 생성기는/tmp/issue49-final-pdfs.py다.
+
 ## 2026-11-11 — LR1e-4 보완 background 시작·실제 Java/jstack 복구 진단 통과
 
 구현/실행코드 **de4effb**를 고정해2026-11-11 10:29:04KST에 `artifacts/issue-49/supplement-20261111-102747`에서 detached supervisor(PID373632)를 시작했다. 승인된새실행만수행하며원래자료는보존한다. 실제LR1e-4출력은원래pilot의독점correction/에쓸예정이다. 현재상태의정본은새background-status.json이다.
