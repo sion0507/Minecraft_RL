@@ -86,7 +86,7 @@ def models(output: Path) -> None:
 
     planner_config = yaml.safe_load(Path("configs/planner_minecraft.yaml").read_text())["planner"]
     qwen_root = Path("checkpoints/qwen2.5-7b")
-    qwen = AutoTokenizer.from_pretrained(qwen_root, local_files_only=True)
+    qwen: Any = AutoTokenizer.from_pretrained(qwen_root, local_files_only=True)
     calls: list[dict[str, Any]] = []
     planner = LocalPlanner(LocalPlannerConfig.model_validate(planner_config), qwen_root.resolve(), lambda kind, data: calls.append({"kind": kind, **data}))
     nanojev = NanoJevAdapter.load(Path("checkpoints/nanojev"))

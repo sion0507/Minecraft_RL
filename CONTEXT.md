@@ -1,4 +1,80 @@
-# #15 — 사용자 지시로 중단, 실제 실행 중단 상태 유지
+# #49 — 사용자 승인으로 게시·PR 병합·종료·main 정리 진행 (2026-11-11)
+
+사용자 최신 지시는 #49의 현재 상태 기록·종료·push·merge·로컬 main 동기화다. 이전 게시/종료 금지는 대체된다. **새 이슈는 다른 세션에서 발행하므로 만들지 않는다.** 후속 코드 변경·게임·학습·API도 추가하지 않는다. 원격 main=a5ef033과 로컬 main=09557d4 사이 #49의7커밋 및 기존 미커밋 DECISIONS/PROGRESS의 후속 진단기록을 feat/issue-49-pilot-signal에 보존해 PR로 병합한다. 실제 최종 상태는 artifacts/issue-49/publication.json과 원격 PR/#49를 따른다.
+
+후속 trace 재검토와 사용자 승인 probe 기록도 이번 종료 근거다. 4/10 대2/10은 등록상 LR3 선택일 뿐 학습 효과 근거가 없다. 고정 특징/합성 보상에서 head 학습은 가능하나 실제 게임 원인의 단독 확정은 아니다. Jev 30요청 US$0.009003708·fallback0/ledger누적US$0.009214842는 기존 게임pipeline API0과 분리한다. 관련 내용은 PROGRESS 최신 진단절을 따른다. 이번에는 해당 진단·API도 재실행하지 않는다. 남은 문제는 후속 이슈 범위로만 기록한다.
+
+아래 진행중·로컬전용·게시금지 문구는 그 시점의 이력이다. 최종PDF는 게시/종료 상태와 추가 진단을 반영해 최신2개로 교체한다. reports/artifacts/모델/월드 원시자료는 삭제하거나 Git에 넣지 않는다.
+
+# #49 — 승인된 보완 및 최종 감사 완료 (2026-11-11)
+
+최신 결과: 원래 초기2/10·1710.5틱, 원래LR3e-4후4/10·1651.7틱, 보완LR1e-4후2/10·1749.1틱. 등록 성공수 우선으로 **LR3e-4** 선택. 시간차97.4<등록동률폭202.282640547이지만성공수가달라선택불변. 원래LR1 backend_error1건도비교에포함. 고정월드10회씩의파일럿이며통계적우월성/일반화주장불가.
+
+원래30슬롯=20실행/10미실행 유지, 보완10=10실행/0미실행; 합산예정40/실제30. 원래실패59결정/PPO0/후10미실행을삭제하지않았다. 보완LR1은1024/8update/actor669, 원래LR3는1024/8/actor641. 공개초기hash/heads동일·본체불변·Choice/critic변경·양실행초기복원true. 총학습수집2107/사용2048/폐기59·본학습0/API US$0.
+
+보완background **artifacts/issue-49/supplement-20261111-102747**은전단계exit0, 완료알림전송exit0. controlled 실제Java/jstack복구통과(검증VM첫deadline4초,생산45초), 새clock63/63·정보감사·T04/T05통과. 보완학습/평가자연timeout/backend/nativecrash0. 원래기동지연근본원인은미확정. 원래/보완104attempt trace·후보계약/actor제외/도달/발견/MC return/EV·소스/원래baseline/publichash감사passed; final-audit.json을따른다. 원목드롭진단6건보존.
+
+실제summary: artifacts/issue-49/real-20261110-232814/pilot/{baseline,correction}/summary.json. 최종선택/진단/앞뒤절반/도달·발견/비용은PROGRESS최신절및final-audit.json. PC합산6시간35분12.14초(원래3:35:17.79+보완2:59:54.35), GPU-hours/전력은미측정. 실제소스de4effb, 기존개발297pytest/mypy51·리뷰미해결0기록유지. 이번은오프라인최종감사/문서/PDF만이며검사나게임을반복하지않았다.
+
+한국어최신PDF2개: reports/issue-049-T14A-report.pdf 및 reports/issue-049-T14A-code-guide.pdf, 생성기/tmp/issue49-final-pdfs.py. 소스변경없음. 결과문서로컬commit만하며push/merge/이슈종료없음. **승인된작업완료. 더이상훈련·추가파일럿·API·재시도하지않는다.** 아래진행중/대기문구는과거이력이다.
+
+# #49 — 보완 background 실행 중·실제 Java 복구 진단 통과 (2026-11-11)
+
+구현커밋 **de4effb3af924807dbd78a0ef0497ff28d08a292**에서 새 background **artifacts/issue-49/supplement-20261111-102747**을 시작했다(PID373632,2026-11-11 10:29:04KST). run-manifest.json에 실행소스/원래baseline/명령을 고정했다. 실제 Java controlled 진단은12.835초에 passed: 첫deadline만VM에서4초로 줄여 진짜jstack성공→소유Java강제종료/회수→같은G1snapshot재복원/새Java기동성공/정상종료를 확인했다. 생산45초는불변이고 자연45초timeout근본원인재현이아니다. 현재초기확인은clock단계진행중이다.
+
+다음순서 clock63→정보감사→T04/T05→LR1e-4보완. 실제보완결과는 **artifacts/issue-49/real-20261110-232814/pilot/correction/**에만쓴다. 원래baseline/summary.json 보존. 상태/단계로그/이전·새clockcertificate/RPC신규진단/알림결과는새background폴더에보존한다. 모두끝나면한번의codex queue --resume 이벤트로이대화를재개한다. 모델중간polling/추가재실행금지.
+
+PDF 최신본은보고서3쪽·가이드2쪽, 한글추출/글꼴포함/전체5쪽가독성을확인하고 현재원래실제결과·패치/검사·보완진행상태를반영했다. reports는Git제외다. 보완완료후아래최종감사와PDF재갱신을마친다. 소스는작업중바꾸지않는다(이후문서상태커밋만허용).
+
+# #49 — 복구 패치 개발 검증 완료·LR1e-4 보완 background 준비 (직전 기록)
+
+최초 real-20261110-232814 pipeline은completed(exit0). 원래30슬롯 중20실행/10미실행: 초기2/10, LR1e-4는59결정/PPO0/reset기동timeout으로불능·후10미실행, LR3e-4는1024/8update/actor641/후4/10·초기복원true. 코드의LR3선택은 유일usable설정의임시선택이다. 원래30슬롯/실패와약3h35m PC비용을보존한다.
+
+승인된패치와단일보완경로를구현했다.45초기동timeout→최근64KiB+jstack5초/1MiB→소유Java SIGKILL/회수5초→restore에서같은snapshot1회재기동,두번째/일반오류는중단. 이전child의늦은Done출력을무시하는리뷰P2수정도했다. correction flags는같은baseline/설정/seed/초기hash의실패LR1e-4만독점correction폴더에서공개초기1024+후10으로실행하며초기10/동률폭/LR3결과를재사용한다. 이전실패오류도선택기준에포함한다.
+
+최종pytest297개/137.04초·mypy .51파일통과,리뷰Standards1P2수정/Spec0/미해결0. 계획 docs/superpowers/plans/2026-11-11-issue-49-startup-recovery.md,리뷰 docs/reviews/issue-49-startup-recovery.md. 다음순서는새background의실제Java진단(첫deadline4초인명시적검증VM,생산45초불변)→clock63→정보감사→T04/T05→원래pilot output의correction/에LR1e-4보완이다.단계실패시후속중단,정상/실패종료이벤트1회로대화를재개한다.새진단근거및코드fingerprint는새실행폴더로구분한다.실제통과는개발검사로대체하지않는다.
+
+보완완료후원래baseline/summary.json+correction/summary.json을감사하여원래30슬롯과보완10을분리하고등록규칙으로비교·진단·실패/복구/시간·초기heads복원·본체고정·경험제외를확인한다.한국어PROGRESS/CONTEXT·코드가이드/보고서PDF2개를갱신한다.추가학습/API/push/merge/종료는금지.보고서생성기/tmp/issue49-followup-pdfs.py는현재/최종결과를반영한다.원래완료이벤트의과거재실행금지는이아래사용자명시승인으로LR1e-4보완1회에한해대체됐다.
+
+# #49 — 최신 지시: 현재 실행 종료 → 패치 → 실패 LR1e-4 재실행 → 최종 검토 (2026-11-11)
+
+사용자가 **실패한 LR1e-4도 패치 후 다시 실행**하라고 명시적으로 승인했다. 아래 이전 기록의 LR1e-4 재실행 금지 및 완료 이벤트 원문 `Do not rerun any failed phase`는 이 한정된 승인으로 대체된다. 재승인을 묻지 않고 끝까지 진행한다.
+
+1. 현재 백그라운드 캠페인의 종료/실패 알림을 기다리고 기존 결과·실패·미실행 슬롯을 보존한다. 실행 중 소스 변경/끼어들기 금지.
+2. 아래 승인된 Java 최근 출력+jstack, 기동 timeout 강제종료/회수 후 최대1회 재기동 패치를 구현·테스트·리뷰한다. 실제 시계63조건 재인증·정보감사·관련 회귀를 수정 코드로 확인한 뒤 재학습한다.
+3. 실패했던 **LR1e-4만** 공개 초기 actor/critic·새 optimizer·같은 snapshot/훈련·평가 seed/1,800틱·발견0.05에서 처음부터1,024결정/8update(첫 rollout critic-only) 및 후평가를 다시 실행한다. 59결정의 중간 경험을 이어 붙이지 않는다. 기존 LR3e-4 결과는 보존하고 자동 재학습하지 않는다. 별도 출력 폴더에 재실행 근거·모든 비용·각 코드 SHA/bridge fingerprint를 기록한다. 기존 실행 기록을 덮어쓰거나 실패/미실행을 삭제하지 않는다.
+4. LR1e-4 완료 후 원래 예정한 설정 비교·검토·검증(등록한 성공/평균틱 동률폭/오류/LR 규칙, 확률/엔트로피·critic EV·학습 절반·도달틱/발견진단, 본체 고정·초기복원·경험 제외·시도/시간/미실행 감사)을 수행하고 한국어 결과와 최신 로컬PDF2개를 제공한다. 원래 캠페인과 패치 후 보완 실행의 분모·코드 차이를 명시한다.
+
+재실행도 detached 실행 + 종료 이벤트로 보고하고 중간 모델 polling은 하지 않는다. 실패 LR1e-4의 이번 보완 실행만 추가 승인됐으며 무제한 새 파일럿·LR탐색·유료API·push·merge·이슈 종료는 승인되지 않았다. 현재 대기 표식 artifacts/issue-49/real-20261110-232814/after-pilot-action.json을 이 순서로 갱신했다.
+
+# #49 — 파일럿 종료 후 timeout 진단·재기동 1회 구현 승인 (이전 지시, 재실행 제한은 위 최신 지시로 대체)
+
+사용자가 현재 파일럿이 끝난 **뒤에** 다음을 적용하라고 명시적으로 승인했다. 현재 실행 중에는 bridge/server.js 및 실행 소스/설정을 바꾸지 않는다. 완료/실패 이벤트가 도착하면 먼저 현재 결과를 보존·보고하고 이 후속 구현을 이어간다. 재승인 질문은 필요 없다.
+
+- 서버 기동 timeout 시 Java 최근 stdout/stderr와 제한 시간 내 jstack(실행 실패/부재도 기록)을 worlds/server/rpc-errors.log에 남긴다. 진단이 종료/복구를 무한히 막지 않도록 한도를 둔다.
+- 간헐적인 **에피소드 시작/reset의 서버 기동 timeout**에 한해 진단 후 해당 Java 프로세스를 강제 종료·회수하고 같은 snapshot/난수/예산으로 최대1회 재기동한다. 두 번째 실패는 기존 중단 규칙이다. 일반 backend 오류·학습 도중 임의 복구·native segfault의 무제한 재시도까지 승인한 것이 아니다.
+- 실패/재기동 전체 실제 경과 시간·시도·오류를 보존한다. 에피소드 중간 ledger와 새 reset을 섞지 않는다. 과거 LR1e-4 실패/미실행 슬롯은 유지하며 이번 승인으로 자동 재학습/새 파일럿을 추가하지 않는다.
+- 기존 server lifecycle과 공개 CLI/RPC/fixture 경계에서 timeout→진단→kill/reap→한 번 복구, 두 번째 실패→중단, 정상 시작 불변을 검증한다. bridge 변경에 따른 새 실제 인증/정보감사 상태를 별도로 기록하고 구현·테스트·리뷰·로컬 커밋 및 PDF2개를 갱신한다. 실제 추가 파일럿/API/push/merge/이슈 종료는 자동 실행하지 않는다.
+
+현재 실행: artifacts/issue-49/real-20261110-232814. 대기 작업 표식 after-pilot-action.json. 직접 원인 자료 lr-1e-4-failure-diagnosis.json 및 lr-1e-4-failure-rpc-errors.log. LR1e-4는59결정/PPO0에서 세 번째 reset의45초 서버 기동 timeout으로 중단됐고 재실행하지 않았다. 현재 LR3e-4 진행 중이다. 완료 이벤트 원래 메시지의 재실행 금지는 현재 캠페인/추가 파일럿에 유지하며 위의 **후속 코드 변경 승인**은 이 최신 사용자 결정으로 따른다.
+
+# #49 — 실제 백그라운드 실행 승인·종료 이벤트로 보고
+
+사용자가 artifacts mypy 제외와 실제 파일럿 실행을 승인했다. 이전 실제 실행 금지를 대체한다. mypy .50파일 통과(artifacts/checkpoints 제외, 기존 도구 타입표기2곳 정리). 실제 실행은 시계63→정보감사→T04macros→T05furnace/production/boundaries→#49두LR파일럿 순서의 detached 프로세스가 담당한다. 중간 모델 polling은 하지 않는다. 단계 실패 시 이후 중단·자동재실행 금지. 완료 시 codex queue --resume으로 이 대화를 재개하여 결과를 보고한다.
+
+실제 PID/상태/소스hash/단계로그/알림결과는 artifacts/issue-49/real-*/의 background-status.json/run-manifest.json/{phase}.stdout·stderr/completion-notification.json을 따른다. pilot/baseline/summary.json/progress.json과 실제 stdout을 읽고 학습/평가/미실행30슬롯·선택·진단·실패/복원을 구분해 한국어로 보고하고 PROGRESS와PDF2개를 최신화한다. nativecrash·사전검증실패·난이도gate실패도 자동재시도하지 않는다. 추가실험/API/push/merge/종료는 금지. 실행 소스/설정은 hash고정하므로 실행 중 바꾸지 않는다.
+
+# #49 — 구현 승인, 실제 파일럿 실행 금지 (이전 이력)
+
+사용자가 #49 `$implement`를 요청하면서 실제 파일럿 테스트는 아직 돌리지 말라고 지시했다. 각 후보 마지막 좌표 중심 3차원 거리16 이내의 현재 가시 비공기 블록 요약(희귀한 순/동률 이름순 최대8종)을 승인했고 #49 본문도 수정했다. 현재 main 시작점 a5ef033에서 작업한다. 새 게임·공개 모델·API 호출은 하지 않는다. tiny/scripted 개발 검사는 허용 범위다.
+
+구현: 발견 보상 기본0/파일럿0.05, 파일럿 budget1800(브리지 기본 불변), 공통 이동 설명, 초기10슬롯 표본SD 기반 시간동률, 저장 시작 특징 update0–8 확률/엔트로피, 앞/뒤 절반·MC EV·도달틱·발견횟수, faulthandler/progress.json. #49 캠페인이 추가파일럿 허용량을 쓰므로 또 다른 correction을 거부한다. 자세한 범위/미실행은 DECISIONS/PROGRESS 최신 #49 절과 docs/superpowers/plans/2026-11-10-issue-49-pilot-signal.md.
+
+최종 개발 검사 pytest286개/120.46초·mypy src/tests40파일 통과. mypy .는 기존 artifacts/issue-15/loaded-source 상대 import 오류. Standards P2 1건은 invalid attempt의 학습 MC EV 집계 제외로 RED→GREEN 수정, Spec0건·미해결0건. docs/reviews/issue-49.md와 artifacts/issue-49 참조. 현재 main에 로컬 커밋하고 로컬PDF2개로 전달한다.
+
+실제63조건 인증·정보감사·회귀는 미실행이며 변경된 bridge에 과거 인증을 승계하지 않는다. 구현 완료 뒤에도 실제 파일럿·설정 선택·push·merge·#49 종료는 하지 않는다. 아래 #15 기록은 과거 이력이며 #15는 현재 결과로 종료하고 설정선택을 #49로 이관했다.
+
+# #15 — 사용자 지시로 중단, 실제 실행 중단 상태 유지 (과거 이력)
 
 사용자 최신 지시: "일단 멈춰봐 여기까지 하고 그리고 실제로 의미가 있었나 말해봐". 실제 학습·Minecraft 서버는 exit130으로 종료됐고 GPU 모델 메모리 반환 확인. 사용자가 명시적으로 재개를 요청하기 전에는 실제 게임/모델/학습을 시작하지 않는다. 아래 진행 중 기록은 과거 이력이다.
 

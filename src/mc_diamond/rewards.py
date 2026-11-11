@@ -7,7 +7,7 @@ so their reward is assigned to its last tick (not spread uniformly over the macr
 import math
 from dataclasses import dataclass
 
-from .goals import COMPLETION_EVENT, LOGS
+from .goals import COMPLETION_EVENT, LOGS, TOOLS
 from .navigation import PICKS
 from .schema import Goal, Observation, StepResult
 
@@ -29,7 +29,11 @@ class Reward:
 
 
 class RewardLedger:
-    def __init__(self, initial: Observation) -> None:
+    def __init__(self, initial: Observation, *, discovery_reward: float = 0.) -> None:
+        if not math.isfinite(discovery_reward) or discovery_reward < 0:
+            raise ValueError("Discovery reward must be finite and nonnegative")
+        self.discovery_reward = discovery_reward
+        self.seen_blocks = {cell.block for cell in initial.observed_map if cell.visible}
         self.objective = initial.objective_kind
         self.max_ticks = initial.active_ticks + initial.remaining_ticks
         if self.max_ticks <= 0:
@@ -76,6 +80,15 @@ class RewardLedger:
         if goal.kind == "mine_diamond":
             success = success and diamond
         if self.objective == "local":
+            visible = {cell.block for cell in step.observation.observed_map if cell.visible}
+            needed = {"cobblestone": "stone", "diamond": "diamond_ore", "iron_ingot": "iron_ore"}
+            required = {needed.get(goal.target, goal.target)}
+            if goal.target in TOOLS and not any(before.inventory.get(pick, 0) for pick in PICKS):
+                required.update(LOGS)
+            discovered = (visible - self.seen_blocks) & required
+            self.seen_blocks.update(visible)
+            if self.discovery_reward and discovered:
+                components["discovery"] = self.discovery_reward * len(discovered)
             if success and not self.local_paid:
                 components["success"], self.local_paid = 1., True
         else:

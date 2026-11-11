@@ -1,7 +1,7 @@
 """Conservative walking (level or one-block steps) and stair choices over directly observed cells only."""
 
 import math
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Iterable
 
 from .schema import Candidate, CandidateSet, Observation, Surface, allocate
@@ -83,12 +83,20 @@ def generate_movement_candidates(observation: Observation) -> CandidateSet:
             if previous and point in visited and tuple(math.floor(v) for v in previous[-1]) not in visited:
                 continue
             directions[direction] = path
-    candidates = [Candidate(
-        candidate_id=f"{observation.obs_id}:move:{index}", action_kind="move_observed",
-        params={"path": [[value for value in point] for point in route], "map_version": observation.map_version},
-        max_ticks=min(400, observation.remaining_ticks), stop_rule_id="observed_path_or_hazard",
-        source_obs_id=observation.obs_id, description=f"Walk over observed cells to {route[-1]}",
-    ) for index, route in enumerate(directions.values()) if observation.remaining_ticks]
+    candidates = []
+    for index, route in enumerate(directions.values()):
+        if not observation.remaining_ticks:
+            break
+        counts = Counter(cell.block for cell in observation.observed_map
+                         if cell.visible and cell.block not in {"air", "cave_air", "void_air"}
+                         and math.dist(cell.position, route[-1]) <= 16)
+        nearby = ", ".join(f"{block} {counts[block]}" for block in sorted(counts, key=lambda b: (counts[b], b))[:8])
+        candidates.append(Candidate(
+            candidate_id=f"{observation.obs_id}:move:{index}", action_kind="move_observed",
+            params={"path": [[value for value in point] for point in route], "map_version": observation.map_version},
+            max_ticks=min(400, observation.remaining_ticks), stop_rule_id="observed_path_or_hazard",
+            source_obs_id=observation.obs_id, description=f"Walk over observed cells to {route[-1]}; "
+                f"currently visible within 16 blocks of it: {nearby or 'none'}"))
     return allocate(candidates)
 
 

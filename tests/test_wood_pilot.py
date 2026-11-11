@@ -1,6 +1,7 @@
 """T14 public CLI: real execution/PPO with a tiny model at the downloaded-weight boundary."""
 
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -39,7 +40,7 @@ def pilot_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
     initial_hash = parameter_hash(model)
     monkeypatch.setattr(NanoJevAdapter, "load", classmethod(lambda cls, root: model))
     template = json.loads(Path("fixtures/model_episode.json").read_text())
-    initial = {**template["initial"], "remaining_ticks": 3600}
+    initial = {**template["initial"], "remaining_ticks": 1800}
     steps = []
     for i in range(1, 33):
         final = i == 32
@@ -47,7 +48,7 @@ def pilot_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
                 "source_obs_id": f"obs-{i - 1}", "events": [{"kind": "acquired", "item": "cobblestone", "quantity": 1,
                     "event_id": f"stone-{i}", "source": "mock"}] if i in (8, 16, 32) else [{"kind": "stopped", "source": "mock"}]}
         # After the first decision the scripted game already holds the pickaxe and stands next to two exposed stones.
-        step["observation"] = {**initial, "obs_id": f"obs-{i}", "active_ticks": i * 20, "remaining_ticks": 3600 - i * 20,
+        step["observation"] = {**initial, "obs_id": f"obs-{i}", "active_ticks": i * 20, "remaining_ticks": 1800 - i * 20,
                                "inventory": {"wooden_pickaxe": 1, "cobblestone": sum(i >= n for n in (8, 16, 32))},
                                "tool": "wooden_pickaxe",
                                "observed_map": [{**cell, "block": "stone"} for cell in initial["observed_map"]]}
@@ -56,7 +57,7 @@ def pilot_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
     fixture = tmp_path / "wood.json"
     fixture.write_text(json.dumps({"initial": initial, "steps": steps, **fixture_updates}))
     config = tmp_path / "wood.yaml"
-    config.write_text(yaml.safe_dump({"backend": "mock", "fixture": str(fixture), "max_decisions": 3600,
+    config.write_text(yaml.safe_dump({"backend": "mock", "fixture": str(fixture), "max_decisions": 3600, "discovery_reward": .05,
         "goal": {"goal_id": "pilot-wood", "kind": "collect", "target": "cobblestone", "quantity": 3}}))
     monkeypatch.setattr(sys, "argv", ["mc-diamond", "pilot-wood", "--config", str(config), "--output", str(tmp_path / "pilot")])
     status = main()
@@ -76,6 +77,7 @@ def test_pilot_cli_runs_two_complete_settings_and_restores_initial_actor(
     assert summary["planned_slots"] == 30 and len(summary["evaluations"]) == 30
     assert summary["selected_choice_lr"] == 1e-4
     assert summary["main_training_decisions"] == 0
+    assert summary["time_tie_ticks"] > 0  # one failed initial slot is charged the full 1,800 ticks
     settings = summary["settings"]
     assert [s["choice_lr"] for s in settings] == [1e-4, 3e-4]
     assert settings[0]["initial_hashes"] == settings[1]["initial_hashes"]
@@ -86,6 +88,16 @@ def test_pilot_cli_runs_two_complete_settings_and_restores_initial_actor(
         assert setting["actor_transitions"] == 896 and setting["backbone_unchanged"]  # first rollout is critic-only
         assert setting["updates"][0]["actor_skipped"] and not setting["updates"][1]["actor_skipped"]
         assert setting["choice_changed"] and setting["critic_changed"] and setting["usable"]
+        assert [p["update"] for p in setting["start_state_probes"]] == list(range(9))
+        assert all(0 <= p["normalized_entropy"] <= 1.000001 for p in setting["start_state_probes"])
+        assert setting["start_state_probes"][0]["probabilities"] == setting["start_state_probes"][1]["probabilities"]
+        assert setting["episode_halves"]["first"]["episodes"] == setting["episode_halves"]["last"]["episodes"] == 16
+        diagnostics = setting["episodes"][0]["diagnostics"]
+        assert diagnostics["first_pickaxe_tick"] == diagnostics["first_stone_visible_tick"] == 20
+        assert diagnostics["first_cobblestone_tick"] == 160
+        assert diagnostics["discovery_awards"] == 1
+        assert len(diagnostics["mc_returns"]) == 32
+        assert setting["mc_critic"]["transitions"] == 1024
     groups = [[r for r in summary["evaluations"] if r["phase"] == phase] for phase in ["initial", "lr-0.0001", "lr-0.0003"]]
     assert [[r["seed"] for r in group] for group in groups] == [list(range(15000, 15010))] * 3
     for row in summary["evaluations"]:
@@ -99,6 +111,8 @@ def test_pilot_cli_runs_two_complete_settings_and_restores_initial_actor(
             assert row["attempts"][0]["snapshot"] == row["attempts"][1]["snapshot"]
             attempt = row["attempts"][-1]
         assert attempt["direct_cobblestone"] == 3 and attempt["planner_calls"] == 0
+        assert attempt["diagnostics"]["discovery_awards"] == 1
+        assert len(attempt["diagnostics"]["mc_returns"]) == 32
     import gzip
     traces = list((tmp_path / "pilot" / "baseline").glob("*.jsonl.gz"))
     with gzip.open(traces[0], "rt") as handle:
@@ -122,20 +136,14 @@ def test_pilot_cli_runs_two_complete_settings_and_restores_initial_actor(
     assert not (tmp_path / "pilot" / "correction").exists()
     monkeypatch.setattr(sys, "argv", original_args)
     monkeypatch.setattr(sys, "argv", [*sys.argv, "--correction-reason", "verified execution correction"])
-    assert main() == 0
-    corrected = json.loads((tmp_path / "pilot" / "correction" / "summary.json").read_text())
-    assert corrected["planned_slots"] == 20 and len(corrected["evaluations"]) == 20
-    assert len(corrected["settings"]) == 1 and corrected["selected_choice_lr"] == 1e-4
-    assert corrected["restored_initial"]
-    saved = (tmp_path / "pilot" / "correction" / "summary.json").read_bytes()
-    assert main() == 1  # a second corrective pilot is never launched
-    assert (tmp_path / "pilot" / "correction" / "summary.json").read_bytes() == saved
+    assert main() == 1  # a usable LR1e-4 setting cannot be supplemented
+    assert not (tmp_path / "pilot" / "correction").exists()
     capsys.readouterr()
 
 
 def test_wrong_reset_budget_defers_settings_but_keeps_all_slots_and_restores(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    bad = json.loads(Path("fixtures/model_episode.json").read_text())["initial"]  # 100 ticks instead of 3,600
+    bad = json.loads(Path("fixtures/model_episode.json").read_text())["initial"]  # 100 ticks instead of 1,800
     status, summary, _ = pilot_cli(tmp_path, monkeypatch, capsys, initial=bad)
     assert status == 1 and summary["selected_choice_lr"] is None and summary["restored_initial"]
     assert len(summary["evaluations"]) == 30
@@ -152,8 +160,75 @@ def test_model_failure_preserves_partial_decisions_time_and_direct_progress(
     assert not first["usable"] and first["collected_decisions"] == 8
     assert first["episodes"][0]["active_ticks"] == 160
     assert first["episodes"][0]["direct_cobblestone"] == 1
-    assert first["episodes"][0]["reward_total"] < 0
+    assert first["episodes"][0]["reward_total"] == pytest.approx(.05 - .1 * 160 / 1800)
     assert len(summary["evaluations"]) == 30
+
+
+def test_final_verification_failure_excludes_training_attempt_from_mc_ev(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from mc_diamond.rpc import EpisodeError, RpcSession
+    from mc_diamond.schema import ErrorInfo
+    def failed_verification(*args: Any, **kwargs: Any) -> Any:
+        raise EpisodeError(ErrorInfo(code="invalid_step", message="final verification failed after terminal transition"))
+    monkeypatch.setattr(RpcSession, "verification_log", failed_verification)
+    status, summary, _ = pilot_cli(tmp_path, monkeypatch, capsys)
+    assert status == 1 and summary["restored_initial"]
+    for setting in summary["settings"]:
+        assert not setting["episodes"][0]["valid"]
+        assert setting["mc_critic"] == {"transitions": 0, "explained_variance": None}
+
+
+def test_failed_lr1e4_supplement_reuses_initial_evaluation_and_preserves_original_run(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    status, original, model = pilot_cli(tmp_path, monkeypatch, capsys,
+                                      server_error_attempts=["lr-0.0001-train-3:1"])
+    assert status == 0 and not original["settings"][0]["usable"] and original["settings"][1]["usable"]
+    from mc_diamond.cli import main
+    directory = tmp_path / "pilot"
+    baseline = (directory / "baseline/summary.json").read_bytes()
+    args = list(sys.argv)
+    monkeypatch.setattr(sys, "argv", [*args, "--correction-reason", "approved", "--correction-lr", "0.0003"])
+    assert main() == 1 and not (directory / "correction").exists()
+    monkeypatch.setattr(sys, "argv", [*args, "--correction-reason", "approved startup recovery supplement",
+                                      "--correction-lr", "0.0001"])
+    manifest = directory / "baseline/manifest.json"
+    manifest_bytes = manifest.read_bytes()
+    changed = json.loads(manifest_bytes)
+    changed["input_hash"] = "mismatched policy input"
+    manifest.write_text(json.dumps(changed))
+    assert main() == 1 and not (directory / "correction").exists()
+    manifest.write_bytes(manifest_bytes)
+    assert main() == 0
+    corrected = json.loads((directory / "correction/summary.json").read_text())
+    assert corrected["planned_slots"] == len(corrected["evaluations"]) == 10
+    assert corrected["restored_initial"]
+    assert len(corrected["settings"]) == 1
+    record = corrected["settings"][0]
+    assert record["choice_lr"] == 1e-4 and record["usable"] and record["collected_decisions"] == 1024
+    assert len(record["updates"]) == 8 and record["updates"][0]["actor_skipped"]
+    assert record["initial_hashes"] == original["settings"][1]["initial_hashes"]
+    assert corrected["time_tie_ticks"] == original["time_tie_ticks"]
+    assert corrected["comparison"]["prior_failed_setting_errors"] == ["backend_error"]
+    assert corrected["selected_choice_lr"] == 3e-4  # equal score/time: retain the original LR1e-4 backend error
+    assert all(row["phase"] == "lr-0.0001" and row["success"] for row in corrected["evaluations"])
+    assert not list((directory / "correction").glob("initial-eval*"))
+    assert (directory / "baseline/summary.json").read_bytes() == baseline
+    saved = (directory / "correction/summary.json").read_bytes()
+    assert main() == 1
+    assert (directory / "correction/summary.json").read_bytes() == saved
+    # A failed supplement stays a failure even though the completed original LR3e-4 is still selectable.
+    other = tmp_path / "failed-supplement"
+    shutil.copytree(directory / "baseline", other / "baseline")
+    def model_failure(encoded: Any) -> Any:
+        raise RuntimeError("supplement numerical failure")
+    model.encode_candidates = model_failure
+    monkeypatch.setattr(sys, "argv", [*args[:-1], str(other), "--correction-reason", "approved startup supplement"])
+    assert main() == 1
+    failed = json.loads((other / "correction/summary.json").read_text())
+    assert failed["selected_choice_lr"] == 3e-4 and not failed["settings"][0]["usable"]
+    assert failed["restored_initial"] and len(failed["evaluations"]) == 10
+    assert all(not r["attempts"] for r in failed["evaluations"])
+    capsys.readouterr()
 
 
 @pytest.mark.parametrize(("successes", "ticks", "errors", "usable", "expected"), [
@@ -182,6 +257,7 @@ def test_corrective_pilot_requires_baseline_and_a_written_reason(
     from mc_diamond.cli import main
     config = tmp_path / "wood.yaml"
     config.write_text(yaml.safe_dump({"backend": "mock", "fixture": str(Path("fixtures/model_episode.json").resolve()),
+        "discovery_reward": .05,
         "goal": {"goal_id": "wood", "kind": "collect", "target": "cobblestone", "quantity": 3}}))
     monkeypatch.setattr(sys, "argv", ["mc-diamond", "pilot-wood", "--config", str(config), "--output", str(tmp_path / "pilot"),
                                       "--correction-reason", "fixed a confirmed execution error"])

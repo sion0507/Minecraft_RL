@@ -1,7 +1,11 @@
 """PLAN §7.1: bounded fixed-goal pilot (empty G1 -> 3 cobblestone), isolated from main training and final evaluation."""
 
+import faulthandler
 import gzip
+import hashlib
 import json
+import math
+import statistics
 import sys
 import time
 from contextlib import redirect_stdout
@@ -12,17 +16,58 @@ import torch
 
 from .episode import emit, error_summary, run_episode
 from .evaluation import SERVER_ERRORS, bridge_command, reset_state
-from .learning import EpisodeLearner
+from .learning import EpisodeLearner, State
 from .model_input import INPUT_HASH
 from .nanojev import REVISION, WEIGHTS_SHA256, NanoJevAdapter, NanoJevSelector, parameter_hash
 from .rpc import EpisodeError, RpcSession
-from .schema import EpisodeConfig, ErrorInfo, ModelConfig, PPOConfig
+from .pilot_diagnostics import critic_diagnostics, episode_halves, trace_diagnostics
+from .schema import CandidateSet, EpisodeConfig, ErrorInfo, Goal, ModelConfig, Observation, PPOConfig
 
 DECISIONS = 1024
 STONE = 3  # wood at 4 logs was 9/10 for the untrained policy (DECISIONS 2026-11-10)
-TICKS = 3600
+TICKS = 1800
 EVALUATION_SEEDS = list(range(15000, 15010))
 LEARNING_RATES = (1e-4, 3e-4)
+
+
+class PilotLearner(EpisodeLearner):
+    """Score the same cached starting features after each update without sampling or re-encoding."""
+
+    def __init__(self, model: NanoJevAdapter, config: PPOConfig, seed: int, discovery_reward: float) -> None:
+        super().__init__(model, config, seed, flush_on_finish=False, critic_warmup=1, discovery_reward=discovery_reward)
+        self.start_state: State | None = None
+        self.start_state_probes: list[dict[str, Any]] = []
+
+    def probe(self) -> None:
+        state = self.start_state
+        if state is None:
+            return
+        training = self.model.training
+        self.model.eval()  # Keep attention's evaluation kernel identical across diagnostic snapshots.
+        try:
+            with torch.no_grad():
+                logits, _ = self.model.score_features(state.features, state.mask, state.context)
+                probabilities = logits.softmax(-1)
+                positive = probabilities[probabilities > 0]
+                entropy = float(-(positive * positive.log()).sum())
+        finally:
+            self.model.train(training)
+        report = {"update": self.updates, "candidate_ids": [c.candidate_id for c in state.candidates.candidates],
+            "mask": state.mask.tolist(), "probabilities": probabilities.cpu().tolist(),
+            "normalized_entropy": entropy / math.log(int(state.mask.sum())) if state.mask.sum() > 1 else 0.}
+        self.start_state_probes.append(report)
+        emit("pilot_probe", report)
+
+    def begin(self, observation: Observation, goal: Goal, saved: CandidateSet) -> None:
+        super().begin(observation, goal, saved)
+        if self.start_state is None and saved.candidates:
+            self.start_state = self.current
+            self.probe()
+
+    def update(self) -> None:
+        if self.rows:
+            super().update()
+            self.probe()
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
@@ -39,10 +84,12 @@ def hashes(model: NanoJevAdapter) -> dict[str, str]:
 def attempt(config: EpisodeConfig, path: Path, directory: Path, identity: str, number: int,
             model: NanoJevAdapter, seed: int, snapshot: str,
             learner: EpisodeLearner | None = None) -> dict[str, Any]:
-    attempt_id = f"{identity}:{number}"
+    attempt_id = f"{'correction:' if directory.name == 'correction' else ''}{identity}:{number}"
     started = time.monotonic()
     trace = directory / f"{identity}-{number}.jsonl.gz"
     interrupted = False
+    write_json(directory / "progress.json", {"status": "attempt_started", "attempt_id": attempt_id,
+        "trace": str(trace), "seed": seed, "update": learner.updates if learner else None})
     # Full public execution evidence stays on disk; stdout reports bounded phase/attempt summaries.
     with gzip.open(trace, "xt", encoding="utf-8", compresslevel=1) as handle, redirect_stdout(handle):
         try:
@@ -53,7 +100,7 @@ def attempt(config: EpisodeConfig, path: Path, directory: Path, identity: str, n
                     observation = session.reset(identity, attempt_id)
                     if (observation.objective_kind != "local" or observation.active_ticks != 0
                             or observation.remaining_ticks != TICKS or observation.inventory):
-                        raise ValueError("Pilot requires empty local G1 with exactly 3600 active ticks")
+                        raise ValueError("Pilot requires empty local G1 with exactly 1800 active ticks")
                     return observation
                 summary = run_episode(config, session.policy(), reset, identity, attempt_id, macros=True,
                     select=learner.select if learner else NanoJevSelector(model, "sampling", seed),
@@ -97,7 +144,10 @@ def attempt(config: EpisodeConfig, path: Path, directory: Path, identity: str, n
         "direct_cobblestone": summary.direct_acquired.get("cobblestone", 0), "provided_inventory": summary.provided_inventory,
         "planner_calls": summary.planner_initial_requests + summary.planner_regeneration_requests,
         "pause_verified": summary.pause_verified, "reward_total": summary.reward_total,
-        "api_cost_usd": 0.0}
+        "api_cost_usd": 0.0, "diagnostics": trace_diagnostics(trace, config.discovery_reward)}
+    record["wall_seconds"] = time.monotonic() - started
+    write_json(directory / "progress.json", {"status": "attempt_finished", "attempt_id": attempt_id,
+        "trace": str(trace), "seed": seed, "update": learner.updates if learner else None, "error": record["error"]})
     emit("pilot_attempt", record)
     return record
 
@@ -123,15 +173,29 @@ def evaluate(config: EpisodeConfig, path: Path, directory: Path, phase: str, mod
     return rows
 
 
-def select_setting(settings: list[dict[str, Any]], evaluations: list[dict[str, Any]]) -> float | None:
+def time_tie_threshold(evaluations: list[dict[str, Any]]) -> float:
+    ticks = [row["attempts"][-1]["active_ticks"] if row["success"] else TICKS
+             for row in evaluations if row["phase"] == "initial"]
+    if len(ticks) != 10:
+        raise ValueError("Time tie threshold requires all ten initial evaluation slots")
+    return float(2 * statistics.stdev(ticks) * math.sqrt(2 / 10))
+
+
+def select_setting(settings: list[dict[str, Any]], evaluations: list[dict[str, Any]], *,
+                   time_tie_ticks: float = 0.) -> float | None:
     eligible = [setting for setting in settings if setting["usable"]]
     def rank(setting: dict[str, Any]) -> tuple[float, float, int, float]:
         rows = [row for row in evaluations if row["phase"] == setting["phase"]]
         # Every planned slot counts; a failure costs the whole budget, so failing fast is never a good time.
         ticks = [row["attempts"][-1]["active_ticks"] if row["success"] else TICKS for row in rows]
-        return (-sum(row["success"] for row in rows), sum(ticks) / len(ticks) if ticks else 0.,
-                len(setting["errors"]), float(setting["choice_lr"]))
-    return float(min(eligible, key=rank)["choice_lr"]) if eligible else None
+        errors = len(setting["errors"]) + sum(bool(a.get("error_code")) for row in rows for a in row["attempts"])
+        return (-sum(row["success"] for row in rows), sum(ticks) / len(ticks) if ticks else 0., errors, float(setting["choice_lr"]))
+    if not eligible:
+        return None
+    best = min(map(rank, eligible))
+    tied = [s for s in eligible if rank(s)[0] == best[0]
+            and (rank(s)[1] == best[1] or rank(s)[1] - best[1] < time_tie_ticks)]
+    return float(min(tied, key=lambda s: rank(s)[2:])["choice_lr"])
 
 
 def train_setting(config: EpisodeConfig, path: Path, directory: Path, model: NanoJevAdapter,
@@ -139,7 +203,7 @@ def train_setting(config: EpisodeConfig, path: Path, directory: Path, model: Nan
     phase = f"lr-{lr:g}"
     initial = hashes(model)
     torch.manual_seed(seed)
-    learner = EpisodeLearner(model, PPOConfig(choice_lr=lr), seed, flush_on_finish=False, critic_warmup=1)
+    learner = PilotLearner(model, PPOConfig(choice_lr=lr), seed, config.discovery_reward)
     collected = 0
     episodes: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -163,7 +227,14 @@ def train_setting(config: EpisodeConfig, path: Path, directory: Path, model: Nan
         "updates": learner.update_reports, "episodes": episodes, "errors": errors, "usable": usable,
         "backbone_unchanged": initial["backbone"] == final["backbone"],
         "choice_changed": initial["choice"] != final["choice"], "critic_changed": initial["critics"] != final["critics"],
-        "unupdated_transitions": len(learner.rows) + int(learner.pending is not None)}
+        "unupdated_transitions": len(learner.rows) + int(learner.pending is not None),
+        "start_state_probes": learner.start_state_probes,
+        "start_state": None if learner.start_state is None else {
+            "observation": learner.start_state.observation.model_dump(mode="json"),
+            "goal": learner.start_state.goal.model_dump(mode="json"),
+            "candidates": learner.start_state.candidates.model_dump(mode="json")},
+        "episode_halves": episode_halves(episodes, TICKS),
+        "mc_critic": critic_diagnostics([r["diagnostics"] for r in episodes if r["valid"]])}
     emit("pilot_setting", record)
     return record
 
@@ -171,57 +242,88 @@ def train_setting(config: EpisodeConfig, path: Path, directory: Path, model: Nan
 def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
                correction_reason: str | None = None, correction_lr: float | None = None) -> int:
     started = time.monotonic()
+    faulthandler.enable(file=2, all_threads=True)
     summary: dict[str, Any] = {"mock": config.backend == "mock", "planned_slots": 30, "settings": [], "evaluations": [],
         "selected_choice_lr": None, "restored_initial": False, "main_training_decisions": 0,
-        "planner_calls": 0, "api_cost_usd": 0.0, "error": None}
+        "planner_calls": 0, "api_cost_usd": 0.0, "error": None, "time_tie_ticks": None}
     correction = correction_reason is not None
     directory = output / ("correction" if correction else "baseline")
     model: NanoJevAdapter | None = None
     initial: dict[str, str] = {}
     reserved = False
     rates: tuple[float, ...] = LEARNING_RATES
+    phases = ["initial", *(f"lr-{lr:g}" for lr in rates)]
+    previous: dict[str, Any] = {}
+    prior_failed: dict[str, Any] = {}
+    prior_other: dict[str, Any] = {}
     snapshot = "unavailable"
     try:
+        if correction_lr is not None and not correction:
+            raise ValueError("An LR override requires --correction-reason")
+        if correction and (not correction_reason or not correction_reason.strip() or correction_lr not in (None, 1e-4)):
+            raise ValueError("The approved supplement requires a reason and only LR1e-4")
         if (config.planner is not None or config.goal.kind != "collect" or config.goal.target != "cobblestone"
                 or config.goal.quantity != STONE or config.goal.source != "fixed" or config.ppo != PPOConfig()
+                or config.discovery_reward != .05
                 or config.model is not None and config.model.mode != "sampling"):
-            raise ValueError("pilot-wood requires fixed collect cobblestone=3, no planner, default PPO and sampling")
-        if config.backend == "rpc" and (config.command is None or len(config.command) != 4
-                or config.command[-2:] != ["--task", "G1"]
+            raise ValueError("pilot-wood requires fixed collect cobblestone=3, discovery_reward=0.05, no planner, default PPO and sampling")
+        if config.backend == "rpc" and (config.command is None or len(config.command) != 6
+                or config.command[2:] != ["--task", "G1", "--budget-ticks", "1800"]
                 or Path(config.command[1]).resolve() != Path("bridge/minecraft.js").resolve()):
-            raise ValueError("Actual pilot requires the natural bridge/minecraft.js --task G1")
+            raise ValueError("Actual pilot requires natural bridge/minecraft.js --task G1 --budget-ticks 1800")
         snapshot = reset_state(config, path, "G1")
         if correction:
-            if not correction_reason or not correction_reason.strip():
-                raise ValueError("Corrective pilot needs the confirmed cause/fix and any LR change reason")
-            baseline = output / "baseline" / "summary.json"
-            if not baseline.exists():
-                raise ValueError("Corrective pilot requires a recorded baseline pilot")
+            baseline = output / "baseline/summary.json"
             previous = json.loads(baseline.read_text(encoding="utf-8"))
-            manifest = json.loads((baseline.parent / "manifest.json").read_text(encoding="utf-8"))
-            if manifest["snapshot"] != snapshot or previous["mock"] != summary["mock"]:
-                raise ValueError("Corrective pilot must retain the baseline reset state and backend")
-            rates = (correction_lr if correction_lr is not None else previous["selected_choice_lr"] or 1e-4,)
-            if not 0 < rates[0] < 1:
-                raise ValueError("Invalid corrective Choice LR")
-            summary["planned_slots"] = 20
-        elif correction_lr is not None:
-            raise ValueError("An LR override requires --correction-reason")
-        summary["correction_reason"] = correction_reason
+            prior_manifest = json.loads((baseline.parent / "manifest.json").read_text(encoding="utf-8"))
+            prior_failed = next((s for s in previous.get("settings", []) if s.get("choice_lr") == 1e-4), {})
+            prior_other = next((s for s in previous.get("settings", []) if s.get("choice_lr") == 3e-4), {})
+            if (previous.get("mock") != summary["mock"] or previous.get("error") is not None
+                    or not previous.get("restored_initial") or prior_failed.get("usable", True)
+                    or "backend_error" not in prior_failed.get("errors", []) or not prior_other.get("usable")
+                    or prior_other.get("collected_decisions") != DECISIONS or len(prior_other.get("updates", [])) != 8
+                    or prior_manifest.get("snapshot") != snapshot or prior_manifest.get("config") != config.model_dump(mode="json")
+                    or prior_manifest.get("input_hash") != INPUT_HASH or prior_manifest.get("revision") != REVISION
+                    or prior_manifest.get("weights_sha256") != WEIGHTS_SHA256
+                    or prior_manifest.get("evaluation_seeds") != EVALUATION_SEEDS):
+                raise ValueError("Supplement requires the same completed baseline with failed LR1e-4 and usable LR3e-4")
+            reference_initial = [r for r in previous["evaluations"] if r["phase"] == "initial"]
+            reference_other = [r for r in previous["evaluations"] if r["phase"] == prior_other["phase"]]
+            if (len(reference_other) != 10 or not all(r["attempts"] for r in reference_initial + reference_other)
+                    or previous.get("time_tie_ticks") != time_tie_threshold(reference_initial)
+                    or prior_manifest.get("training_seed") != (config.model or ModelConfig()).seed):
+                raise ValueError("Supplement requires the original evaluation slots, training seed and registered threshold")
+            summary.update(planned_slots=10, time_tie_ticks=previous["time_tie_ticks"], reference={
+                "summary": str(baseline.resolve()), "sha256": hashlib.sha256(baseline.read_bytes()).hexdigest(),
+                "initial_evaluations": reference_initial})
+            rates = (1e-4,)
+            phases = ["lr-0.0001"]
         directory.mkdir(parents=True, exist_ok=False)
         reserved = True
         settings = config.model or ModelConfig()
-        write_json(directory / "manifest.json", {"snapshot": snapshot, "config": config.model_dump(mode="json"),
+        manifest = {"snapshot": snapshot, "config": config.model_dump(mode="json"),
             "training_seed": settings.seed, "evaluation_seeds": EVALUATION_SEEDS, "input_hash": INPUT_HASH,
             "revision": REVISION, "weights_sha256": WEIGHTS_SHA256, "decisions_per_setting": DECISIONS,
-            "learning_rates": rates, "planned_slots": summary["planned_slots"], "correction_reason": correction_reason})
+            "learning_rates": rates, "planned_slots": summary["planned_slots"], "corrective_allowance": "this_#49_campaign",
+            "faulthandler_enabled": faulthandler.is_enabled(), "time_tie_ticks": summary["time_tie_ticks"],
+            "time_tie_rule": "2 * sample_SD(initial_10_slot_ticks; failure=1800) * sqrt(2/10)"}
+        if correction:
+            manifest.update(correction_reason=correction_reason, reference=summary["reference"],
+                            corrective_allowance="approved_failed_LR1e-4_supplement")
+        write_json(directory / "manifest.json", manifest)
         torch.manual_seed(settings.seed)
         model = NanoJevAdapter.load((path.parent / settings.checkpoint).resolve())
         initial = hashes(model)
+        if correction and (initial != prior_failed.get("initial_hashes") or initial != prior_other.get("initial_hashes")):
+            raise ValueError("Fresh public model/critics must match the baseline initial hashes")
         model.save_heads(directory / "initial.safetensors")
-        summary["evaluations"] = evaluate(config, path, directory, "initial", model, snapshot)
-        passed = sum(row["success"] for row in summary["evaluations"])
-        if config.backend == "rpc" and not 2 <= passed <= 8:  # registered difficulty band; the scripted mock always succeeds
+        if not correction:
+            summary["evaluations"] = evaluate(config, path, directory, "initial", model, snapshot)
+            summary["time_tie_ticks"] = manifest["time_tie_ticks"] = time_tie_threshold(summary["evaluations"])
+            write_json(directory / "manifest.json", manifest)  # register before either setting trains
+        reference_initial = summary["reference"]["initial_evaluations"] if correction else summary["evaluations"]
+        passed = sum(row["success"] for row in reference_initial)
+        if config.backend == "rpc" and not 2 <= passed <= 8:
             raise ValueError(f"Initial policy succeeded {passed}/10, outside the registered 2-8 band; the user decides the task")
         for lr in rates:
             model.load_heads(directory / "initial.safetensors")
@@ -229,7 +331,19 @@ def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
             summary["settings"].append(record)
             summary["evaluations"].extend(evaluate(config, path, directory, record["phase"], model, snapshot,
                 unavailable=None if record["usable"] else "setting_unusable"))
-        summary["selected_choice_lr"] = select_setting(summary["settings"], summary["evaluations"])
+        comparison_settings = summary["settings"]
+        comparison_evaluations = summary["evaluations"]
+        if correction:
+            comparison_settings = [{**summary["settings"][0],
+                "errors": prior_failed["errors"] + summary["settings"][0]["errors"]}, prior_other]
+            comparison_evaluations = summary["evaluations"] + reference_other
+            summary["comparison"] = {"reference_summary": summary["reference"]["summary"],
+                "original_planned_slots": previous["planned_slots"], "supplement_planned_slots": 10,
+                "prior_failed_setting_errors": prior_failed["errors"],
+                "prior_failed_setting_decisions": prior_failed["collected_decisions"],
+                "reference_lr3e4_evaluations": reference_other}
+        summary["selected_choice_lr"] = select_setting(comparison_settings, comparison_evaluations,
+                                                       time_tie_ticks=summary["time_tie_ticks"])
     except (ImportError, OSError, ValueError, RuntimeError, EpisodeError) as failure:
         summary["error"] = str(failure)
         print(f"pilot-wood failed: {failure}", file=sys.stderr)
@@ -242,11 +356,18 @@ def pilot_wood(config: EpisodeConfig, path: Path, output: Path,
         summary["wall_seconds"] = time.monotonic() - started
     if reserved:
         existing = {row["slot_id"] for row in summary["evaluations"]}
-        for phase in ["initial", *(f"lr-{lr:g}" for lr in rates)]:
+        for phase in phases:
             if any(row["phase"] == phase for row in summary["evaluations"]):
                 continue
             missing = evaluate(config, path, directory, phase, model, snapshot, unavailable="pilot_incomplete")
             summary["evaluations"].extend(row for row in missing if row["slot_id"] not in existing)
+        summary["evaluation_critic"] = {phase: critic_diagnostics([
+            r["attempts"][-1]["diagnostics"] for r in summary["evaluations"]
+            if r["phase"] == phase and r["attempts"] and r["attempts"][-1]["valid"]])
+            for phase in phases}
         write_json(directory / "summary.json", summary)
     emit("pilot_summary", summary)
-    return 0 if summary["selected_choice_lr"] is not None and summary["restored_initial"] and not summary["error"] else 1
+    okay = summary["selected_choice_lr"] is not None and summary["restored_initial"] and not summary["error"]
+    if correction:
+        okay = okay and bool(summary["settings"] and summary["settings"][0]["usable"])
+    return 0 if okay else 1

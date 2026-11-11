@@ -169,7 +169,7 @@ class PPO:
 
 class EpisodeLearner:
     def __init__(self, model: NanoJevAdapter, config: PPOConfig, seed: int, *, flush_on_finish: bool = True,
-                 critic_warmup: int = 0) -> None:
+                 critic_warmup: int = 0, discovery_reward: float = 0.) -> None:
         # The first `critic_warmup` rollouts train the value head only: the new critic's first targets are far off.
         self.model, self.actor_config, self.critic_warmup = model, config, critic_warmup
         self.config = config.model_copy(update={"critic_only": True}) if critic_warmup else config
@@ -182,6 +182,7 @@ class EpisodeLearner:
         self.reward_kind: Literal["local", "full"] = "local"
         self.actor_transitions = self.valid_transitions = self.excluded_transitions = self.updates = 0
         self.flush_on_finish = flush_on_finish
+        self.discovery_reward = discovery_reward
         self.update_reports: list[dict[str, Any]] = []
 
     @property
@@ -191,7 +192,7 @@ class EpisodeLearner:
     def reset(self, observation: Observation) -> None:
         if self.pending is not None:
             raise ValueError("Finish the previous episode before resetting the reward ledger")
-        self.ledger = RewardLedger(observation)
+        self.ledger = RewardLedger(observation, discovery_reward=self.discovery_reward)
         self.reward_kind = observation.objective_kind
         self.current = None
 
@@ -311,7 +312,7 @@ def smoke_ppo(config: EpisodeConfig, config_path: Path) -> int:
         emit("learning_loaded", {"model": "C-Tianyu/NanoJev", "revision": REVISION,
             "initial_weights_sha256": WEIGHTS_SHA256, "input_hash": INPUT_HASH, "seed": settings.seed,
             "ppo": config.ppo.model_dump(), "environment_backend": config.backend})
-        learner = EpisodeLearner(model, config.ppo, settings.seed)
+        learner = EpisodeLearner(model, config.ppo, settings.seed, discovery_reward=config.discovery_reward)
         command = config.command
         if config.backend == "mock":
             assert config.fixture is not None

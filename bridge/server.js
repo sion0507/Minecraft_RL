@@ -1,7 +1,7 @@
 // Local administrator lifecycle. Policy requests never receive console access.
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const { spawn } = require('node:child_process')
+const { spawn, execFile } = require('node:child_process')
 const { createInterface } = require('node:readline')
 const { createHash, randomUUID } = require('node:crypto')
 const { once } = require('node:events')
@@ -77,29 +77,76 @@ class Server {
     })
     this.process = child
     this.initiallyFrozen = false
+    const started = Date.now()
+    let recent = Buffer.alloc(0)
+    const captures = []
     const ready = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Server startup timeout')), 45000)
-      const fail = () => { clearTimeout(timeout); reject(new Error('Server startup failed')) }
+      const cleanup = () => {
+        clearTimeout(timeout)
+        this.listeners.delete(receive)
+        child.removeListener('error', fail)
+        child.removeListener('exit', fail)
+        for (const [stream, capture] of captures) stream.removeListener('data', capture)
+      }
+      const timeout = setTimeout(() => {
+        cleanup()
+        const error = new Error('Server startup timeout')
+        error.code = 'server_startup_timeout'
+        error.pid = child.pid
+        reject(error)
+      }, 45000)
+      const fail = () => { cleanup(); reject(new Error('Server startup failed')) }
       child.once('error', fail)
       child.once('exit', fail)
-      this.listeners.add(line => {
+      const receive = line => {
         if (line.includes('Done (')) {
-          clearTimeout(timeout)
-          child.removeListener('error', fail)
-          child.removeListener('exit', fail)
+          cleanup()
           resolve()
         }
-      })
+      }
+      this.listeners.add(receive)
     })
-    for (const stream of [child.stdout, child.stderr]) {
+    for (const [label, stream] of [['stdout', child.stdout], ['stderr', child.stderr]]) {
+      const capture = chunk => { recent = Buffer.concat([recent, Buffer.from(`[${label}] `), chunk]).subarray(-65536) }
+      captures.push([stream, capture])
+      stream.on('data', capture)
       createInterface({ input: stream }).on('line', line => {
+        if (this.process !== child) return
         if (line.includes('- mc_diamond_pause 1.0.0')) this.initiallyFrozen = true
         // Full administrator output stays in the local server log, not RPC stdout.
         for (const listener of this.listeners) listener(line)
       })
     }
     child.on('exit', () => { if (this.process === child) this.process = null })
-    await ready
+    try { await ready } catch (error) {
+      if (!child.pid && this.process === child) this.process = null
+      if (error.code !== 'server_startup_timeout') throw error
+      try {
+        const jstack = await new Promise(resolve => {
+          execFile('jstack', ['-l', String(child.pid)], { timeout: 5000, maxBuffer: 1048576, killSignal: 'SIGKILL' },
+            (failure, stdout, stderr) => resolve({ status: failure ? 'failed' : 'ok', stdout, stderr,
+              error: failure ? String(failure) : null }))
+        })
+        await fs.appendFile(path.join(this.root, 'rpc-errors.log'), JSON.stringify({
+          diagnostic: 'server_startup_timeout', timestamp: new Date().toISOString(), pid: child.pid,
+          timeout_ms: 45000, elapsed_ms: Date.now() - started, recent_output: recent.toString('utf8'), jstack }) + '\n')
+      } finally { await this.kill(child) }
+      throw error
+    }
+  }
+
+  async kill (child) {
+    if (child.exitCode !== null || child.signalCode !== null) return
+    if (this.process !== child) throw new Error('Refusing to kill an unowned Java process')
+    await new Promise((resolve, reject) => {
+      const cleanup = () => { clearTimeout(timeout); child.removeListener('exit', exited); child.removeListener('error', failed) }
+      const exited = () => { cleanup(); resolve() }
+      const failed = error => { cleanup(); reject(error) }
+      const timeout = setTimeout(() => { cleanup(); reject(new Error('Server force-kill timeout')) }, 5000)
+      child.once('exit', exited)
+      child.once('error', failed)
+      try { child.kill('SIGKILL') } catch (error) { failed(error) }
+    })
   }
 
   async command (text) {
@@ -188,23 +235,32 @@ class Server {
   async restore (task) {
     if (!['C4', 'G1', 'G2', 'G3', 'G4'].includes(task)) throw new Error('Unknown task')
     await this.claim()
-    const source = path.join(this.snapshots, task)
-    for (const directory of [this.root, this.snapshots, source, path.join(this.root, 'world')]) {
-      if (!(await fs.lstat(directory)).isDirectory()) throw new Error('Symlink directory forbidden')
+    const started = Date.now()
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const source = path.join(this.snapshots, task)
+      for (const directory of [this.root, this.snapshots, source, path.join(this.root, 'world')]) {
+        if (!(await fs.lstat(directory)).isDirectory()) throw new Error('Symlink directory forbidden')
+      }
+      const manifest = JSON.parse(await fs.readFile(path.join(source, 'snapshot.json'), 'utf8'))
+      if (manifest.task !== task || manifest.sha256 !== await treeHash(path.join(source, 'world'))) throw new Error('Snapshot hash mismatch')
+      await this.stop()
+      const staged = path.join(this.root, 'world-stage-' + randomUUID())
+      await fs.cp(path.join(source, 'world'), staged, { recursive: true, errorOnExist: true, force: false })
+      if (manifest.sha256 !== await treeHash(staged)) throw new Error('Restored snapshot hash mismatch')
+      // Retain the prior mutable world so an interrupted swap cannot destroy it.
+      const previous = path.join(this.root, 'world-previous-' + randomUUID())
+      await fs.rename(path.join(this.root, 'world'), previous)
+      try { await fs.rename(staged, path.join(this.root, 'world')) } catch (error) { await fs.rename(previous, path.join(this.root, 'world')); throw error }
+      try { await this.start() } catch (error) {
+        if (error.code !== 'server_startup_timeout' || attempt === 2 || this.closed) throw error
+        await fs.appendFile(path.join(this.root, 'rpc-errors.log'), JSON.stringify({
+          diagnostic: 'server_startup_retry', timestamp: new Date().toISOString(), task, pid: error.pid,
+          retry: 1, elapsed_ms: Date.now() - started }) + '\n')
+        continue
+      }
+      await fs.rm(previous, { recursive: true })
+      return manifest
     }
-    const manifest = JSON.parse(await fs.readFile(path.join(source, 'snapshot.json'), 'utf8'))
-    if (manifest.task !== task || manifest.sha256 !== await treeHash(path.join(source, 'world'))) throw new Error('Snapshot hash mismatch')
-    await this.stop()
-    const staged = path.join(this.root, 'world-stage-' + randomUUID())
-    await fs.cp(path.join(source, 'world'), staged, { recursive: true, errorOnExist: true, force: false })
-    if (manifest.sha256 !== await treeHash(staged)) throw new Error('Restored snapshot hash mismatch')
-    // Retain the prior mutable world so an interrupted swap cannot destroy it.
-    const previous = path.join(this.root, 'world-previous-' + randomUUID())
-    await fs.rename(path.join(this.root, 'world'), previous)
-    try { await fs.rename(staged, path.join(this.root, 'world')) } catch (error) { await fs.rename(previous, path.join(this.root, 'world')); throw error }
-    await this.start()
-    await fs.rm(previous, { recursive: true })
-    return manifest
   }
 
   async close () {

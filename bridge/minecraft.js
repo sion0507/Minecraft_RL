@@ -51,7 +51,11 @@ let natural = false
 let verification = []
 const clockTrials = new Set()
 const observationId = () => observationEpoch + ':' + observationIndex
-const budget = { C4: 36000, G1: 3600, G2: 12000, G3: 18000, G4: 18000 }[task]
+const defaultBudget = { C4: 36000, G1: 3600, G2: 12000, G3: 18000, G4: 18000 }[task]
+const budget = Number(option('--budget-ticks', defaultBudget))
+if (!defaultBudget || !Number.isSafeInteger(budget) || budget <= 0 || budget > defaultBudget) {
+  throw new Error('Invalid backend configuration: --budget-ticks must be a positive integer reduction')
+}
 
 async function fingerprint () {
   const hash = createHash('sha256')

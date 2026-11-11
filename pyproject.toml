@@ -30,5 +30,5 @@ addopts = ["--disable-plugin-autoload"]
 [tool.mypy]
 strict = true
 files = ["src", "tests"]
-exclude = ["^\\.bootstrap/", "^\\.tools/", "^archive/"]
+exclude = ["^\\.bootstrap/", "^\\.tools/", "^archive/", "^artifacts/", "^checkpoints/"]
 plugins = ["pydantic.mypy"]
