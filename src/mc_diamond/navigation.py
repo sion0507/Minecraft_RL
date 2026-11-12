@@ -143,6 +143,7 @@ def escape_candidates(observation: Observation) -> CandidateSet | None:
     return generate_movement_candidates(observation)
 
 
+STONE_STAIRS: int | None = None  # set by mc_diamond.exp --stone-stairs; None keeps every open direction (6 slots)
 ORE_TOP = {"iron_ore": 63, "diamond_ore": 15}  # Highest generation layer in 1.16.5: range(64) and range(16).
 
 
@@ -279,6 +280,8 @@ def stone_search_choices(observation: Observation, reserve: int) -> list[Candida
     y = math.floor(observation.position[1])
     durability = (observation.tool_durability or 0) - reserve
     broad, narrow = _stairs(observation, ["diamond_ore"], min(4, y - SAFE_BAND[0], durability // 3))
+    if STONE_STAIRS is not None:  # experiment arm: directions are near-duplicates, so fewer of them and no 1-stair copies
+        broad, narrow = broad[:STONE_STAIRS], []
     return [*broad, *walking, *narrow]
 
 

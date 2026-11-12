@@ -80,3 +80,23 @@ def test_pilot_tick_cost_prices_every_active_tick_and_default_keeps_the_plan_rat
     priced = RewardLedger(start, pilot_signal=True, tick_cost=1 / 1200).compute(start, craft, step, goal_completed=False)
     plain = RewardLedger(start, pilot_signal=True).compute(start, craft, step, goal_completed=False)
     assert abs(priced.components["time"] + 0.1) < 1e-9 and abs(plain.components["time"] + 0.1 * 120 / 1800) < 1e-9
+
+
+def test_carried_crafting_table_with_no_cell_to_put_it_on_offers_walks_instead_of_nothing() -> None:
+    from mc_diamond.production import generate_production_candidates
+    span = [(float(x), float(z)) for x in range(-3, 4) for z in range(-3, 4)]
+    pit = ([{"block": "dirt", "position": [x, 63.0, z], "support": True} for x, z in span]
+           + [{"block": "stone", "position": [x, 64.0, z], "support": True} for x, z in span if (x, z) != (0, 0)]
+           + [{"block": "air", "position": [0.0, 64.0, 0.0], "passable": True}]
+           + [{"block": "air", "position": [x, y, z], "passable": True} for x, z in span for y in (65.0, 66.0, 67.0)])
+    observation = scene("dirt", [], observed_map=pit, inventory={"cobblestone": 3, "stick": 2, "wooden_pickaxe": 1, "crafting_table": 1})
+    saved = generate_production_candidates(observation, Goal(goal_id="pick", kind="craft", target="stone_pickaxe", quantity=1))
+    assert saved.candidates and all(c.action_kind == "move_observed" for c in saved.candidates)
+
+
+def test_stone_stair_cap_keeps_the_first_directions_at_full_depth_only(monkeypatch: Any) -> None:
+    from mc_diamond import navigation
+    full = [c for c in generate_resource_candidates(scene("dirt", []), STONE).candidates if c.action_kind == "stair_down"]
+    monkeypatch.setattr(navigation, "STONE_STAIRS", 2)
+    capped = [c for c in generate_resource_candidates(scene("dirt", []), STONE).candidates if c.action_kind == "stair_down"]
+    assert len(full) > 2 and [c.params["stairs"] for c in capped] == [4, 4]

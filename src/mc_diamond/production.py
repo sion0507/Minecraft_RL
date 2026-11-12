@@ -50,7 +50,9 @@ def generate_production_candidates(observation: Observation, goal: Goal) -> Cand
                 point = min(sites, key=lambda p: (math.dist(p, observation.position), p))
                 return choice("place_or_equip", {"item": item, "position": [v for v in point],
                     "map_version": observation.map_version}, f"Place {item} on observed support")
-            return allocate([])
+            # Carried but no free cell to put it on (the foot of a cut staircase): walking on is the way to one,
+            # never forced waits to the end of the budget (exp/candidate-structure, arm T training episode 49).
+            return generate_movement_candidates(observation)
         if facilities(item):
             routes = [path for point, path in observed_routes(observation).items() if path and
                       any(math.dist([v + 0.5 for v in p], [point[0] + 0.5, point[1] + 1.62, point[2] + 0.5]) <= 2

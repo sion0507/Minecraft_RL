@@ -17,6 +17,7 @@ from typing import Any
 
 import yaml
 
+from . import navigation
 from .episode import emit, error_summary, run_episode
 from .evaluation import SERVER_ERRORS, bridge_command
 from .rpc import EpisodeError, RpcSession
@@ -85,8 +86,11 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=11015)
     parser.add_argument("--gpu-fraction", type=float, default=.75)
     parser.add_argument("--critic-replay-epochs", type=int, default=0, help="cumulative MC critic fit after each update")
+    parser.add_argument("--eval-offset", type=int, default=0, help="first evaluation slot (seed 15000+offset)")
+    parser.add_argument("--stone-stairs", type=int, help="cap on stair choices in the stone search (default: all)")
     args = parser.parse_args()
     tasks = [(path, EpisodeConfig.model_validate(yaml.safe_load(path.read_text()))) for path in args.config]
+    navigation.STONE_STAIRS = args.stone_stairs
     args.output.mkdir(parents=True, exist_ok=False)
     summary: dict[str, Any] = {"args": {k: str(v) if isinstance(v, (Path, list)) else v for k, v in vars(args).items()},
                                "tasks": [c.model_dump(mode="json") for _, c in tasks], "episodes": [], "updates": [],
@@ -110,7 +114,7 @@ def main() -> int:
         model.save_heads(args.output / "initial.safetensors")
 
     def evaluate(phase: str, slots: int) -> None:
-        for index in range(slots):
+        for index in range(args.eval_offset, args.eval_offset + slots):
             for name, (path, config) in enumerate(tasks):
                 seed = EVALUATION_SEED + index
                 for number in (1, 2):  # server errors only: one retry on the same seed
