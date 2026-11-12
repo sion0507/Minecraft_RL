@@ -159,6 +159,16 @@ def _ready(observation: Observation, walking: list[Candidate]) -> list[Candidate
     return None
 
 
+def supports_way_back(observation: Observation, point: Iterable[float]) -> bool:
+    """The block is the floor of a cell the agent has stood in: cutting it breaks the steps it came down by.
+
+    Nothing digs upward, so a cut staircase is the only way back to the surface and to what was left there
+    (exp/candidate-structure: 3 of 10 untrained stone-pickaxe episodes ended sealed in a two-cell pocket).
+    """
+    x, y, z = point
+    return [float(x), float(y) + 1, float(z)] in observation.visited
+
+
 def _open(observation: Observation, stop_blocks: list[str], column: list[tuple[int, int, int]],
           floor: tuple[int, int, int]) -> bool:
     """Only an observed cell can veto a cut: a nearby hazard, an open floor, or a stop ore/bedrock in it.
@@ -168,6 +178,8 @@ def _open(observation: Observation, stop_blocks: list[str], column: list[tuple[i
     cells = {tuple(cell.position): cell for cell in observation.observed_map}
     hazards = [cell.position for cell in cells.values() if cell.hazard]
     if any(max(abs(a - b) for a, b in zip(point, hazard)) <= 1 for hazard in hazards for point in (*column, floor)):
+        return False
+    if any(supports_way_back(observation, point) for point in column):
         return False
     if floor in cells and not cells[floor].support:
         return False

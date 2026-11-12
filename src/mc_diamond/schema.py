@@ -393,6 +393,7 @@ class EpisodeConfig(Contract):
     ppo: PPOConfig = Field(default_factory=PPOConfig)
     discovery_reward: float = Field(default=0., ge=0)  # pilot opt-in; PLAN §8.1 defaults are unchanged
     pilot_signal: bool = False  # T14B only: per-unit reward, fixed subgoals and visible potential
+    pilot_tick_cost: float | None = Field(default=None, ge=0)  # exp: reward price per active tick (None: PLAN 8.1)
     chain: list[Goal] = Field(default_factory=list)  # exp/candidate-structure: the fixed subgoals, ending in `goal`
 
     jev: JevConfig | None = None

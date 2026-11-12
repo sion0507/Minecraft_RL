@@ -1,0 +1,15 @@
+# exp/candidate-structure P2 with a real price on time (arm T); stone_pick.yaml keeps the PLAN 8.1 reward (arm D).
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G1, --budget-ticks, "3600"]
+rpc_timeout_seconds: 180.0
+max_decisions: 3600
+wall_limit_seconds: 1800.0
+pilot_signal: true
+pilot_tick_cost: 0.000833333  # 1 per 1200 active ticks: one subgoal reward per game minute
+goal: {goal_id: "pilot:stone_pick", kind: craft, target: stone_pickaxe, quantity: 1}
+chain:
+  - {goal_id: "pilot:logs", kind: collect, target: oak_log, quantity: 3}
+  - {goal_id: "pilot:pick", kind: craft, target: wooden_pickaxe, quantity: 1}
+  - {goal_id: "pilot:stone", kind: collect, target: cobblestone, quantity: 3}
+  - {goal_id: "pilot:stone_pick", kind: craft, target: stone_pickaxe, quantity: 1}
+model: {checkpoint: ../../checkpoints/nanojev, mode: sampling, seed: 11015}

@@ -57,3 +57,26 @@ def test_remembered_crafting_table_beyond_every_route_offers_walking_back_toward
     observation = scene("dirt", table, inventory={"cobblestone": 3, "stick": 2, "wooden_pickaxe": 1})
     saved = generate_production_candidates(observation, Goal(goal_id="pick", kind="craft", target="stone_pickaxe", quantity=1))
     assert saved.candidates[0].description.startswith("Walk toward remembered crafting_table at [28.0, 64.0, 0.0]: 28 blocks away now")
+
+
+def test_the_step_the_agent_came_down_by_is_neither_mined_nor_cut_under() -> None:
+    step = [{"block": "stone", "position": [1.0, 64.0, 0.0], "support": True}]
+    came_from = scene("stone", step, visited=[[1.0, 65.0, 0.0], [0.0, 64.0, 0.0]])
+    assert not any(c.action_kind == "mine_visible_cluster" for c in generate_resource_candidates(came_from, STONE).candidates)
+    under = scene("dirt", [], visited=[[1.0, 64.0, 0.0], [0.0, 64.0, 0.0]])  # east column's y=63 floors a visited cell
+    stairs = [c for c in generate_resource_candidates(under, STONE).candidates if c.action_kind == "stair_down"]
+    assert stairs and [1, 0] not in [c.params["direction"] for c in stairs]
+
+
+def test_pilot_tick_cost_prices_every_active_tick_and_default_keeps_the_plan_rate() -> None:
+    from mc_diamond.rewards import RewardLedger
+    from mc_diamond.schema import StepResult
+    start = scene("dirt", [], objective_kind="local", active_ticks=0, remaining_ticks=1800)
+    after = start.model_copy(update={"obs_id": "obs-next", "active_ticks": 120, "remaining_ticks": 1680})
+    step = StepResult.model_validate({"observation": after, "actual_ticks": 120, "events": [], "terminated": False,
+        "truncated": False, "invalid": False, "reason": "wait_completed", "clock_mode": "mock", "pause_verified": False,
+        "stable_boundary": True, "wall_seconds": 0.0})
+    craft = Goal(goal_id="pick", kind="craft", target="stone_pickaxe", quantity=1)
+    priced = RewardLedger(start, pilot_signal=True, tick_cost=1 / 1200).compute(start, craft, step, goal_completed=False)
+    plain = RewardLedger(start, pilot_signal=True).compute(start, craft, step, goal_completed=False)
+    assert abs(priced.components["time"] + 0.1) < 1e-9 and abs(plain.components["time"] + 0.1 * 120 / 1800) < 1e-9

@@ -6,7 +6,8 @@ from typing import Literal
 from pydantic import JsonValue
 
 from .navigation import (
-    ORE_TOP, PICKS, fresh_movement_candidates, observed_routes, ore_search_choices, stone_search_choices, toward_path,
+    ORE_TOP, PICKS, fresh_movement_candidates, observed_routes, ore_search_choices, stone_search_choices, supports_way_back,
+    toward_path,
 )
 from .schema import Candidate, CandidateSet, Goal, Observation, allocate
 
@@ -91,6 +92,8 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
         if target in used:
             continue
         if close(target):
+            if supports_way_back(observation, target):
+                continue  # the step the agent came down by stays (nothing digs back up)
             tools = (["netherite_axe", "diamond_axe", "iron_axe", "stone_axe", "wooden_axe", "golden_axe"] if block.endswith("_log")
                      else PICKS[:3] if block == "diamond_ore" else PICKS[:4] if block == "iron_ore" else PICKS)
             carried = [name for name in tools if observation.inventory.get(name, 0)]
@@ -102,7 +105,8 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
             cluster = [target]
             for point in cluster:
                 for other in targets:
-                    if (other not in cluster and close(other) and math.dist(point, other) == 1
+                    if (other not in cluster and close(other) and not supports_way_back(observation, other)
+                            and math.dist(point, other) == 1
                             and len(cluster) < min(8, remaining)):
                         cluster.append(other)
             used.update(cluster)

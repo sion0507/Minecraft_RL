@@ -138,6 +138,7 @@ def main() -> int:
             while collected < args.train and failures < 3:
                 path, config = tasks[episode % len(tasks)]
                 bounded = config.model_copy(update={"max_decisions": min(config.max_decisions, args.train - collected)})
+                learner.tick_cost = config.pilot_tick_cost
                 row = run_one(bounded, path, args.output, f"train-t{episode % len(tasks)}-{episode + 1}", 1,
                               learner.select, learner)
                 episode += 1

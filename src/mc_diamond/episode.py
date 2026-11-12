@@ -168,7 +168,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             actor_before = learning.actor_transitions
         elif config.discovery_reward or config.pilot_signal:
             from .rewards import RewardLedger
-            evaluation_rewards = RewardLedger(initial, discovery_reward=config.discovery_reward, pilot_signal=config.pilot_signal)
+            evaluation_rewards = RewardLedger(initial, discovery_reward=config.discovery_reward, pilot_signal=config.pilot_signal,
+                                              tick_cost=config.pilot_tick_cost)
         start = initial
         emit("reset", initial)
         observation = environment.observe()

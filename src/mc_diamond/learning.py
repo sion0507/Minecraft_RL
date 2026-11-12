@@ -200,6 +200,7 @@ class EpisodeLearner:
         self.flush_on_finish = flush_on_finish
         self.discovery_reward = discovery_reward
         self.pilot_signal = pilot_signal
+        self.tick_cost: float | None = None  # pilot option, set by the experiment runner per task
         self.update_reports: list[dict[str, Any]] = []
 
     @property
@@ -209,7 +210,8 @@ class EpisodeLearner:
     def reset(self, observation: Observation) -> None:
         if self.pending is not None:
             raise ValueError("Finish the previous episode before resetting the reward ledger")
-        self.ledger = RewardLedger(observation, discovery_reward=self.discovery_reward, pilot_signal=self.pilot_signal)
+        self.ledger = RewardLedger(observation, discovery_reward=self.discovery_reward, pilot_signal=self.pilot_signal,
+                                   tick_cost=self.tick_cost)
         self.reward_kind = observation.objective_kind
         self.current = None
 
