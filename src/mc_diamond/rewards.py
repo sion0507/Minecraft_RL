@@ -29,10 +29,14 @@ class Reward:
 
 
 class RewardLedger:
-    def __init__(self, initial: Observation, *, discovery_reward: float = 0.) -> None:
+    def __init__(self, initial: Observation, *, discovery_reward: float = 0., pilot_signal: bool = False) -> None:
         if not math.isfinite(discovery_reward) or discovery_reward < 0:
             raise ValueError("Discovery reward must be finite and nonnegative")
         self.discovery_reward = discovery_reward
+        self.pilot_signal = pilot_signal and initial.objective_kind == "local"
+        self.goal_stock: dict[str, int] = {}
+        self.collect_paid: dict[str, int] = {}
+        self.local_goals: set[str] = set()
         self.seen_blocks = {cell.block for cell in initial.observed_map if cell.visible}
         self.objective = initial.objective_kind
         self.max_ticks = initial.active_ticks + initial.remaining_ticks
@@ -89,7 +93,18 @@ class RewardLedger:
             self.seen_blocks.update(visible)
             if self.discovery_reward and discovered:
                 components["discovery"] = self.discovery_reward * len(discovered)
-            if success and not self.local_paid:
+            if self.pilot_signal and goal.kind == "collect" and not step.invalid and not dead:
+                stock = self.goal_stock.setdefault(goal.goal_id, before.inventory.get(goal.target, 0))
+                paid = self.collect_paid.get(goal.goal_id, 0)
+                direct = sum(e.quantity for e in events if e.kind == "acquired" and e.item == goal.target)
+                units = min(direct, max(0, goal.quantity - stock - paid))
+                if units:
+                    components["collect"] = units / goal.quantity
+                    self.collect_paid[goal.goal_id] = paid + units
+            elif self.pilot_signal and success and goal.goal_id not in self.local_goals:
+                components["success"] = 1.
+                self.local_goals.add(goal.goal_id)
+            elif not self.pilot_signal and success and not self.local_paid:
                 components["success"], self.local_paid = 1., True
         else:
             if diamond and not self.diamond_paid:
@@ -109,9 +124,21 @@ class RewardLedger:
                 self.goal_total += .5
                 components["goal"] = .5
         boundary = sum(value for kind, value in components.items() if kind != "time")
+        terminal = dead or step.observation.remaining_ticks == 0 or (
+            (goal_completed if self.pilot_signal else self.local_paid) if self.objective == "local" else self.diamond_paid)
+        shaping = 0.
+        if self.pilot_signal and goal.kind == "collect" and not step.invalid:
+            shaping = self.gamma ** n * (0. if terminal else potential(step.observation, goal)) - potential(before, goal)
+            components["approach"] = shaping
         # expm1 keeps long task budgets accurate when gamma is close to one.
         time_sum = rate * math.expm1(n * math.log(self.gamma)) / math.expm1(math.log(self.gamma))
-        return Reward(total=sum(components.values()), discounted=time_sum + self.gamma ** (n - 1) * boundary,
+        return Reward(total=sum(components.values()), discounted=time_sum + self.gamma ** (n - 1) * boundary + shaping,
                       discount=self.gamma ** n,
-                      terminal=dead or step.observation.remaining_ticks == 0 or (
-                          self.local_paid if self.objective == "local" else self.diamond_paid), components=components)
+                      terminal=terminal, components=components)
+
+
+def potential(observation: Observation, goal: Goal) -> float:
+    source = {"cobblestone": "stone", "iron_ore": "iron_ore"}.get(goal.target, goal.target)
+    distance = min((math.dist(observation.position, cell.position) for cell in observation.observed_map
+                    if cell.visible and cell.block == source), default=32.)
+    return -(.3 / 32) * min(distance, 32.)

@@ -108,8 +108,12 @@ class PPO:
                         int(state.mask.nonzero()[0]))
         return self.model.evaluate_actions(state.features, state.mask, state.context, state.observation.objective_kind, selected)
 
-    def update(self, rows: list[Transition]) -> dict[str, Any]:
+    def update(self, rows: list[Transition], *, mc_targets: list[float] | None = None) -> dict[str, Any]:
         adv, targets = advantages(rows, self.config.gae_lambda)
+        if mc_targets is not None:
+            if not self.config.critic_only or len(mc_targets) != len(rows) or not all(map(math.isfinite, mc_targets)):
+                raise ValueError("Explicit MC targets require critic-only learning and finite aligned targets")
+            targets = mc_targets
         indices = [i for i, row in enumerate(rows) if row.valid]
         actors = [i for i in indices if rows[i].actor_valid and not self.config.critic_only]
         initial_choice = parameter_hash(self.model.choice)
@@ -130,7 +134,19 @@ class PPO:
             for offset in range(0, len(order), self.config.minibatch):
                 batch = order[offset:offset + self.config.minibatch]
                 critic_losses, actor_losses, entropies = [], [], []
-                for i in batch:
+                if mc_targets is not None:
+                    # MC warmup replays frozen features: batch the critic without evaluating the unchanged Choice head.
+                    for objective in ("local", "full"):
+                        group = [i for i in batch if rows[i].state.observation.objective_kind == objective]
+                        if group:
+                            states = [rows[i].state for i in group]
+                            pooled = torch.stack([torch.cat([s.features[s.mask].mean(0), s.context.to(s.features.dtype)])
+                                                  for s in states])
+                            with torch.autocast(pooled.device.type, dtype=torch.bfloat16, enabled=self.model.bf16):
+                                predictions = self.model.critics[objective](pooled).squeeze(-1).float()
+                            expected = torch.tensor([targets[i] for i in group], device=pooled.device)
+                            critic_losses.extend((predictions - expected).square().unbind())
+                for i in ([] if mc_targets is not None else batch):
                     row = rows[i]
                     logprob, entropy, value, _ = self.evaluate(row)
                     critic_losses.append((value - targets[i]).square())
@@ -169,7 +185,7 @@ class PPO:
 
 class EpisodeLearner:
     def __init__(self, model: NanoJevAdapter, config: PPOConfig, seed: int, *, flush_on_finish: bool = True,
-                 critic_warmup: int = 0, discovery_reward: float = 0.) -> None:
+                 critic_warmup: int = 0, discovery_reward: float = 0., pilot_signal: bool = False) -> None:
         # The first `critic_warmup` rollouts train the value head only: the new critic's first targets are far off.
         self.model, self.actor_config, self.critic_warmup = model, config, critic_warmup
         self.config = config.model_copy(update={"critic_only": True}) if critic_warmup else config
@@ -183,6 +199,7 @@ class EpisodeLearner:
         self.actor_transitions = self.valid_transitions = self.excluded_transitions = self.updates = 0
         self.flush_on_finish = flush_on_finish
         self.discovery_reward = discovery_reward
+        self.pilot_signal = pilot_signal
         self.update_reports: list[dict[str, Any]] = []
 
     @property
@@ -192,7 +209,7 @@ class EpisodeLearner:
     def reset(self, observation: Observation) -> None:
         if self.pending is not None:
             raise ValueError("Finish the previous episode before resetting the reward ledger")
-        self.ledger = RewardLedger(observation, discovery_reward=self.discovery_reward)
+        self.ledger = RewardLedger(observation, discovery_reward=self.discovery_reward, pilot_signal=self.pilot_signal)
         self.reward_kind = observation.objective_kind
         self.current = None
 
@@ -312,7 +329,8 @@ def smoke_ppo(config: EpisodeConfig, config_path: Path) -> int:
         emit("learning_loaded", {"model": "C-Tianyu/NanoJev", "revision": REVISION,
             "initial_weights_sha256": WEIGHTS_SHA256, "input_hash": INPUT_HASH, "seed": settings.seed,
             "ppo": config.ppo.model_dump(), "environment_backend": config.backend})
-        learner = EpisodeLearner(model, config.ppo, settings.seed, discovery_reward=config.discovery_reward)
+        learner = EpisodeLearner(model, config.ppo, settings.seed, discovery_reward=config.discovery_reward,
+                                 pilot_signal=config.pilot_signal)
         command = config.command
         if config.backend == "mock":
             assert config.fixture is not None
