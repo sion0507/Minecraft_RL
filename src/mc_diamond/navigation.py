@@ -9,6 +9,8 @@ from .schema import Candidate, CandidateSet, Observation, Surface, allocate
 PICKS = ["netherite_pickaxe", "diamond_pickaxe", "iron_pickaxe", "stone_pickaxe", "wooden_pickaxe", "golden_pickaxe"]
 DIRECTIONS = ((1, 0), (0, 1), (-1, 0), (0, -1))
 SAFE_BAND = (5, 12)  # PLAN 5.1 descend: y=5-12.
+COMPASS = {(1, 0): "east", (-1, 0): "west", (0, 1): "south", (0, -1): "north",
+           (1, 1): "southeast", (1, -1): "northeast", (-1, 1): "southwest", (-1, -1): "northwest"}
 BOUNCY = {"slime_block"}  # A landing bounces: a height change from or onto it overruns the 16-block cap (#37).
 
 
@@ -69,6 +71,14 @@ def observed_routes(observation: Observation) -> dict[tuple[int, int, int], list
     return routes
 
 
+def walk_summary(observation: Observation, route: list[list[float]]) -> str:
+    """The walk in words a reader needs: length, compass direction and height change (same observed route, no new facts)."""
+    dx, dy, dz = (route[-1][axis] - math.floor(observation.position[axis]) - (0.5 if axis != 1 else 0) for axis in range(3))
+    heading = COMPASS.get(((dx > 0.5) - (dx < -0.5), (dz > 0.5) - (dz < -0.5)), "in place")
+    height = "level" if abs(dy) < 1 else f"{abs(round(dy))} {'up' if dy > 0 else 'down'}"
+    return f"{len(route)} steps {heading}, {height},"
+
+
 def generate_movement_candidates(observation: Observation) -> CandidateSet:
     sx, _, sz = map(math.floor, observation.position)
     visited = {tuple(point) for point in observation.visited}
@@ -95,8 +105,8 @@ def generate_movement_candidates(observation: Observation) -> CandidateSet:
             candidate_id=f"{observation.obs_id}:move:{index}", action_kind="move_observed",
             params={"path": [[value for value in point] for point in route], "map_version": observation.map_version},
             max_ticks=min(400, observation.remaining_ticks), stop_rule_id="observed_path_or_hazard",
-            source_obs_id=observation.obs_id, description=f"Walk over observed cells to {route[-1]}; "
-                f"currently visible within 16 blocks of it: {nearby or 'none'}"))
+            source_obs_id=observation.obs_id, description=f"Walk {walk_summary(observation, route)} over observed cells "
+                f"to {route[-1]}; currently visible within 16 blocks of it: {nearby or 'none'}"))
     return allocate(candidates)
 
 
@@ -173,7 +183,8 @@ def _stairs(observation: Observation, stop_blocks: list[str], stairs: int) -> tu
             params={"direction": list(direction), "stairs": count, "stop_blocks": list(stop_blocks),
                     "map_version": observation.map_version},
             max_ticks=min(400, observation.remaining_ticks), stop_rule_id="stair_ore_or_hazard",
-            source_obs_id=observation.obs_id, description=f"Cut {count} stairs down toward {list(direction)}")
+            source_obs_id=observation.obs_id, description=f"Cut {count} stairs down toward {COMPASS[direction]} {list(direction)}: "
+                f"dig from y={y} to y={y - count}, collecting what the cut blocks drop")
 
     broad = [stair(index, direction, stairs) for index, direction in enumerate(directions)]
     narrow = [stair(len(broad) + index, direction, 1) for index, direction in enumerate(directions)] if stairs > 1 else []
@@ -197,7 +208,9 @@ def _tunnels(observation: Observation, stop_blocks: list[str], durability: int) 
                 params={"direction": list(direction), "cells": cells, "height": height, "stop_blocks": list(stop_blocks),
                         "map_version": observation.map_version},
                 max_ticks=min(400, observation.remaining_ticks), stop_rule_id="tunnel_ore_or_hazard",
-                source_obs_id=observation.obs_id, description=f"Tunnel {cells} cells 1x{height} toward {list(direction)}"))
+                source_obs_id=observation.obs_id,
+                description=f"Tunnel {cells} cells 1x{height} toward {COMPASS[direction]} {list(direction)} at y={y}, "
+                            f"collecting what the cut blocks drop"))
     return found
 
 
@@ -229,6 +242,21 @@ def ore_search_choices(observation: Observation, target: str, reserve: int) -> l
     if y > ORE_TOP[target]:
         return [*broad, *tunnels, *walking, *narrow]
     return [*walking[:4], *tunnels, *broad, *walking[4:], *narrow]  # Cutting stays a choice in open ground.
+
+
+def stone_search_choices(observation: Observation, reserve: int) -> list[Candidate]:
+    """No exposed stone within reach: stairs down through the ground are a choice next to walking new ground.
+
+    Same macro and observed-cell vetoes as the ore search; the cut never spends the durability the goal still needs.
+    """
+    walking = fresh_movement_candidates(observation)
+    early = _ready(observation, walking)
+    if early is not None:
+        return early
+    y = math.floor(observation.position[1])
+    durability = (observation.tool_durability or 0) - reserve
+    broad, narrow = _stairs(observation, ["diamond_ore"], min(4, y - SAFE_BAND[0], durability // 3))
+    return [*broad, *walking, *narrow]
 
 
 def hold_candidate(observation: Observation) -> Candidate:

@@ -393,14 +393,19 @@ class EpisodeConfig(Contract):
     ppo: PPOConfig = Field(default_factory=PPOConfig)
     discovery_reward: float = Field(default=0., ge=0)  # pilot opt-in; PLAN §8.1 defaults are unchanged
     pilot_signal: bool = False  # T14B only: per-unit reward, fixed subgoals and visible potential
+    chain: list[Goal] = Field(default_factory=list)  # exp/candidate-structure: the fixed subgoals, ending in `goal`
 
     jev: JevConfig | None = None
 
     @model_validator(mode="after")
     def configured_backend(self) -> Self:
+        last = self.chain[-1] if self.chain else None
         if self.pilot_signal and (self.planner is not None or self.discovery_reward or self.goal.source != "fixed"
-                or (self.goal.kind, self.goal.target, self.goal.quantity) != ("collect", "cobblestone", 3)):
-            raise ValueError("T14B requires fixed cobblestone3 without planner or discovery reward")
+                or (last is None and (self.goal.kind, self.goal.target, self.goal.quantity) != ("collect", "cobblestone", 3))
+                or (last is not None and (last.kind, last.target, last.quantity) != (self.goal.kind, self.goal.target, self.goal.quantity))):
+            raise ValueError("Pilot needs a fixed goal without planner or discovery reward: cobblestone3 or a chain ending in it")
+        if self.chain and (not self.pilot_signal or len({g.goal_id for g in self.chain}) != len(self.chain)):
+            raise ValueError("A fixed chain is a pilot option with distinct goal IDs")
         if self.backend == "mock" and (not self.fixture or self.command is not None):
             raise ValueError("mock needs fixture only")
         if self.backend == "rpc" and (not self.command or self.fixture is not None):

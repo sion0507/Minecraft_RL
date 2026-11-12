@@ -1,0 +1,14 @@
+# exp/candidate-structure P2: one step past stone on the same empty G1 start (3600 ticks): ... -> 3 cobblestone -> stone pickaxe.
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G1, --budget-ticks, "3600"]
+rpc_timeout_seconds: 180.0
+max_decisions: 3600
+wall_limit_seconds: 1800.0
+pilot_signal: true
+goal: {goal_id: "pilot:stone_pick", kind: craft, target: stone_pickaxe, quantity: 1}
+chain:
+  - {goal_id: "pilot:logs", kind: collect, target: oak_log, quantity: 3}
+  - {goal_id: "pilot:pick", kind: craft, target: wooden_pickaxe, quantity: 1}
+  - {goal_id: "pilot:stone", kind: collect, target: cobblestone, quantity: 3}
+  - {goal_id: "pilot:stone_pick", kind: craft, target: stone_pickaxe, quantity: 1}
+model: {checkpoint: ../../checkpoints/nanojev, mode: sampling, seed: 11015}

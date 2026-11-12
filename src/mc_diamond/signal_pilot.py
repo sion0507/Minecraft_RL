@@ -27,8 +27,9 @@ from .rpc import EpisodeError
 
 
 class SignalLearner(EpisodeLearner):
-    def __init__(self, model: NanoJevAdapter, seed: int, directory: Path, validation: list[State]) -> None:
-        super().__init__(model,PPOConfig(choice_lr=3e-4),seed,flush_on_finish=False,critic_warmup=8,pilot_signal=True)
+    def __init__(self, model: NanoJevAdapter, seed: int, directory: Path, validation: list[State],
+                 config: PPOConfig | None = None) -> None:
+        super().__init__(model,config or PPOConfig(choice_lr=3e-4),seed,flush_on_finish=False,critic_warmup=8,pilot_signal=True)
         self.directory,self.validation=directory,validation
         self.history: list[Transition]=[]
         self.fixed_reports: list[dict[str,Any]]=[]

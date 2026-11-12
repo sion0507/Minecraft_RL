@@ -59,7 +59,8 @@ def generate_production_candidates(observation: Observation, goal: Goal) -> Cand
                 route = min(routes, key=lambda p: (len(p), p))
                 return choice("move_observed", {"path": [[v for v in p] for p in route],
                     "map_version": observation.map_version}, f"Approach observed {item}")
-            return allocate([])
+            # Remembered but beyond every observed route: making another one is the way on, not a dead end of forced waits
+            # (exp/candidate-structure; the facility is left behind after digging down or walking far).
         return resolve(item, 1)
 
     def resolve(item: str, quantity: int) -> CandidateSet:
