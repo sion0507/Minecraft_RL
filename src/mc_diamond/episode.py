@@ -146,6 +146,10 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     stalled = 0
     terminated = truncated = invalid = done = False
     planning = Planning(config.goal, config.planner, planner)
+    chain = [config.goal.model_copy(update={"goal_id": "pilot:logs", "target": "oak_log", "quantity": 3}),
+             config.goal.model_copy(update={"goal_id": "pilot:pick", "kind": "craft", "target": "wooden_pickaxe", "quantity": 1}),
+             config.goal.model_copy(update={"goal_id": "pilot:stone"})] if config.pilot_signal else []
+    chain_index = 0
     active: ActiveGoal | None = None
     trigger = "episode_start"
     outcomes: list[GoalOutcome] = []
@@ -161,9 +165,9 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
         if learning is not None:
             learning.reset(initial)
             actor_before = learning.actor_transitions
-        elif config.discovery_reward:
+        elif config.discovery_reward or config.pilot_signal:
             from .rewards import RewardLedger
-            evaluation_rewards = RewardLedger(initial, discovery_reward=config.discovery_reward)
+            evaluation_rewards = RewardLedger(initial, discovery_reward=config.discovery_reward, pilot_signal=config.pilot_signal)
         start = initial
         emit("reset", initial)
         observation = environment.observe()
@@ -183,6 +187,9 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             if active is None:
                 retries = planning.counts["planner_regeneration_requests"]
                 adopted, decision = planning.decide(observation, trigger)
+                if chain:
+                    adopted = chain[chain_index]
+                    decision.update(goal=adopted.model_dump(mode="json"))
                 emit("goal_decision", decision)
                 active = ActiveGoal(adopted, observation, planner_retries=planning.counts["planner_regeneration_requests"] - retries)
             goal = active.goal
@@ -288,6 +295,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                                    if event.kind == task_event and event.item == config.goal.target)
             done = completed(config.goal, start, step, acquired_target)
             trigger = active.record(step) or ""
+            if chain and not active.done:
+                trigger = ""  # A fixed stage keeps its direct-event counter until completion, without replanning.
             if learning is not None:
                 reward_record = learning.record(selection, step, goal_completed=active.done)
             elif evaluation_rewards is not None:
@@ -297,11 +306,15 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                     task_terminal=reward.terminal)
             reward_total += float(reward_record["value"])
             emit("reward", reward_record)
+            subgoal_completed = bool(chain and active.done)
+            if subgoal_completed:
+                chain_index += 1
             if trigger:
                 outcomes.append(active.outcome(step.observation.active_ticks, trigger))
                 active = None
             terminated, truncated, invalid, reason = step.terminated, step.truncated, step.invalid, step.reason
-            if learning is not None and reward_record["task_terminal"] and not invalid:
+            if learning is not None and reward_record["task_terminal"] and not invalid and not (
+                    subgoal_completed and chain_index < len(chain)):
                 terminated, truncated = True, False
                 reason = ("death" if step.observation.health <= 0 else "active_tick_limit" if step.observation.remaining_ticks == 0
                           else "goal_completed" if observation.objective_kind == "local" else "diamond_success")

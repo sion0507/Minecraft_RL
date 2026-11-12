@@ -52,13 +52,19 @@ def trace_diagnostics(trace: Path, discovery_reward: float) -> dict[str, Any]:
                 transitions.append({k: data[k] for k in ("reward", "discount", "old_value", "valid", "bootstrap")})
     transitions = transitions or evaluated
     # A truncated/incomplete return needs an unknown future: it is not a Monte Carlo target.
-    if transitions and not transitions[-1]["bootstrap"] and all(t["valid"] for t in transitions):
-        total = 0.
-        for transition in reversed(transitions):
+    total = None
+    complete = []
+    for transition in reversed(transitions):
+        if not transition["valid"]:
+            total = None
+        elif not transition["bootstrap"]:
+            total = transition["reward"]
+        elif total is not None:
             total = transition["reward"] + transition["discount"] * total
-            result["mc_returns"].append(total)
-        result["mc_returns"].reverse()
-        result["mc_values"] = [t["old_value"] for t in transitions]
+        if total is not None:
+            complete.append((total, transition["old_value"]))
+    result["mc_returns"] = [t for t, _ in reversed(complete)]
+    result["mc_values"] = [v for _, v in reversed(complete)]
     return result
 
 

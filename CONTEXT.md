@@ -1,3 +1,53 @@
+# #51 T14B — 결과 기록·게시/병합/종료 승인, 게시 진행 중 (2026-11-12)
+
+사용자가 현재 구현·파일럿·7B·후속critic평가까지 기록해 commit/push/PR/merge/#51종료를 명시 승인했다. 이전 게시·종료 금지는 이 요청으로 대체되며 연구설정 채택은 승인한 것이 아니다. 새 게임·GPU/모델·API·학습·PDF 생성은 하지 않는다. #51 기존보고서/코드가이드 PDF2개는 삭제했고 다른37개 PDF와 raw artifacts는 보존했다.
+
+**현재 결과:** 실제예외4096/32update·고정96좋은후보확률0.412993→0.450757(+0.037764),등록판정“판정 보류”,보조초기4/10→후5/10. 원래gate=false/mine_oak_log good7 bad0 유지,초기head복원true. 고정7B확인24응답중검증6/거부18·타당한선행5. critic진단은원본4096특징+경계1상태로복구완료:36checkpoint/24online/768rollout EV검산,원래실측EV0.184019/pooled0.213676재현. 현재입력MC2000step주검증0.447,스칼라0.486;온라인최신GAE/최신MC/누적동일step/누적4epoch는현재입력0.206/0.173/0.241/0.329,스칼라0.209/0.229/0.235/0.387。①MC목표값·②동일계산재사용은일관개선미확인,③추가계산은두입력모두기준통과,스칼라의양쪽분할견고함기준미통과。모든설정채택/본학습/새월드일반화는미실행이다.
+
+**게시 자료:** docs/results/issue-51.md와issue-51-critic-summary.json에실제/실패/미실행·방법·seed별/rollout별수치·원자료hash·비용·한계를기록했다。원시trace/특징/가중치/실행스크립트는ignored artifacts에남긴다。개발최종검사전체pytest316/234.93초·strictmypy54통과,독립read-only검토Critical/Important0。source기준f63ed87+현재#51구현;원격main/merge-base1c3408f이며기존승인문서커밋도PR에포함한다。
+
+**다음 단계(이미 승인됨):** 문서/코드최종검사→현재featurebranch커밋·push→main대상PR생성·머지→#51종료확인→로컬main fast-forward와최종게시상태기록。실제PR번호/mergeSHA/이슈상태는완료후갱신한다。아래승인대기·실행중·PDF작성문구는과거이력이다。
+
+# #51 T14B — 사용자 예외 학습4096 완료, 판정 보류 (2026-11-12)
+
+**최신 상태:** exception-20261112-024101 완료(exit0, 30,794.9초). 고정96 좋은 후보 확률 0.4130→0.4508(+0.0378) = 사전 등록 "판정 보류". 2,048값 +0.0238. 후10 5/10(초기 4/10, 보조). 초기 head 복원 true. 상세는 PROGRESS 2026-11-12 절. 다음: 판정 후 결정과 commit/push/merge/이슈 종료를 사용자에게 묻는다. 아래는 이전 이력이다.
+
+# #51 T14B — 원래 gate 불통과 보존·사용자 예외 학습4096 승인 (2026-11-11)
+
+**주의/최신상태:** 사용량제한동안다른Claude세션이사용자예외를실제로실행했다! artifacts/issue-51/exception-20261111-184420는현재failed/exit130/KeyboardInterrupt,4292.948초. 원시선택581/반환580/완료19episode/partial20,4update(512사용+68미반영),후10미실행,최종head복원미확인. 원래D초기10/감사/96상태/falsegate는불변. 코드추가메모리보완(history지도/next_state제거)은외부세션의변경으로보존·검토했고316pytest/217.19s·mypy54·독립리뷰중요미해결0. 초기head사전저장순서수정으로잘못된참조거절시에도복원가능. 현재새게임/학습은시작하지않았다.
+
+**사용자질문대기:** async입력으로“기존실패/비용보존·메모리보완후공개초기에서새4096재실행승인/현재결과만보고”를물었다. 정확한optimizer/RNG중간재개가없어기존580을이어붙이지않는다. 승인전새실제학습/평가/감사는금지. 승인되면기존정보감사/초기10/고정96를재사용하고원래falsegate/mineoak판정불가를유지,새독점폴더에서4096+후10+초기복원·완료이벤트1회,중간모델polling없음. PDF는결과후,Git행동금지. 원시감사 artifacts/issue-51/exception-interrupted-audit.json,검사 reference-final-{pytest,mypy}.txt,리뷰 docs/reviews/issue-51.md.
+
+최신사용자지시:PDF는뒤로미루고기존정보감사/초기10/96고정상태/사전기준을보존·중복초기평가없이4096학습→후10→초기actor복원. mine_oak_log는good7/bad0초기판정불가로유지,원래gate=false와이번사용자예외승인학습을분리한다. 다른신호/보상/기준/수량은그대로. safe reference경로를구현/개발검사후background실행·완료이벤트1회. 결과후PDF2개갱신. commit/push/merge/종료금지.
+
+원래D는완료: artifacts/issue-51/real-20261111-171623/background-status.json failed/phasepilot(exit1)이지만servererror/crash없음,정보감사통과·초기4/10·gate표본부족·훈련0/후10미실행·restored_initialtrue. 최종오프라인감사 final-audit.json passed. 전체3024.896초/API0,291결정. 제품소스변경없이audit/문서/PDF만시도했고PDF갱신은도구online조회실패/사용자중단으로미완료(이전승인전PDF보존). /tmp/issue51-results-pdfs.py는준비됨/아직최신실제결과PDF아님.
+
+아래D실행중/승인대기는과거이력이다.
+
+**실행:** artifacts/issue-51/real-20261111-171623/, supervisorPID521977, 2026-11-11 17:16:23KST시작. d-launch.json과실행폴더launch.json/run-manifest.json에실제PID/시간/코드·설정·snapshothash/명령을기록했다. 최초기동확인에서information단계running. 이후모델polling금지·완료이벤트대기. 실행중제품소스/설정/snapshot변경금지. 정보감사후초기10→신호양수일때만4096학습→후10. callback은현재thread01a1c981-68cf-7ae2-8e72-9a842ce73d75, child.wait()뒤1회codex queue --resume. commit/push/merge/이슈종료금지.
+
+**완료 후:** background-status.json·각stdout/stderr·rpc-errors-new.log·pilot/signal/{summary,signal-check,manifest}.json을읽고실제/실패/미실행·분모20·warmup EV/상한·4096/32·고정확률/엔트로피/2048/최종판정·보조critic·첫선택쏠림·분기원인·공개hash/복원·전체시간/API0을감사한다. 신호미통과면재학습/보상조정/재파일럿없이수치를보고하고사용자결정을받는다. PROGRESS/CONTEXT및보고서3쪽/가이드2쪽의승인전PDF를실제결과최신2개로교체·한글/폰트/전체페이지검수한다. 기존PDF생성기/tmp/issue51-pdfs.py는승인전내용이므로실제결과에맞게수정한다. 보고서때문에게임을추가실행하지않는다. 다른변경/추가게임·학습/API/판정후결정도자동진행하지않는다.
+
+**최신 사용자 승인:** D를 정보감사→초기10→신호통과 시에만4096학습→후10 순으로 백그라운드에서 실행한다. 이전 승인대기 문구는 이 승인 전의 이력이다. commit·push·merge·이슈종료는 별도승인전 금지. 소스manifest동일성/호스트자원·중복실행확인 후 새 real-*에서1회 시작하고 완료이벤트로 감사/한국어PDF갱신을 재개한다. 중간 모델 polling/자동보상조정/추가게임·학습/API 금지. 실제run폴더/PID는 launch.json 및 새착수기록을 따른다.
+
+**최신 상태:** E 실제7BGPU12상태24응답 완료(유효6/거부18·전체44.537초/API게임학습0), A/B/C구현·최종pytest313/175.83초·mypy54·diff통과·독립리뷰중요미해결0. 아래E진행중/기준검사중문구는착수당시이력이다. 구현코드는별도브랜치미커밋이며commit/push/merge/이슈종료없음. D/실제정보감사/공개NanoJev게임학습은0·사용자승인전금지.
+
+보고서 reports/issue-051-T14B-report.pdf(3쪽),가이드 reports/issue-051-T14B-code-guide.pdf(2쪽),한글추출/폰트/전체5쪽렌더검수완료·Git제외. 소스기준 artifacts/issue-51/source-manifest.json(현재Python전체+config+test SHA256)과기준HEADf63ed87/branchfeat/issue-51-pilot-signal. 리뷰 docs/reviews/issue-51.md,인계 docs/issue-51-handoff.md. 최종개발검사 artifacts/issue-51/final-{pytest,mypy}.txt, mock4096/32update와update후오류복원검사2개38.21초는full-mock-and-fault.txt. 테스트에서만tiny모델·mock게임을학습했으며연구게임파일럿이아니다.
+
+**다음:** 사용자에게구현/E결과와PDF2개보고·D승인질문. 승인되면 /tmp/issue51-prepare-d.py로준비한 artifacts/issue-51/d-supervisor-template.py를새실행폴더에복사해 detached Python supervisor로실행한다(미실행). 순서는실제audit-information(configs/minecraft.yaml)→pilot-signal(configs/signal_pilot.yaml). bridge/clock/runtime/recipes/snapshot변경없음으로기존63조건인증유지; reset에서fingerprint엄격검사. 새인증/정보감사통과를미리주장하지않는다. supervisor는child.wait() 후현재thread01a1c981-68cf-7ae2-8e72-9a842ce73d75로완료이벤트1회;모델중간polling없음. 소스/설정/snapshothash고정. 기존#49실행/PDF모두보존. 학습전초기10의MC좋은/나쁜신호부재시학습하지않고보고하며자동보상조정/재실행금지. 판정후본학습보상적용·모델교체/A·B축소·push·merge·이슈종료는사용자에게묻는다.
+
+아래는착수당시기록:
+
+기준pytest 첫실행(session52048)은99.32초/144실패153통과: `.venv/bin/python -m pytest`가 자식CLI의PATH를설정하지않아 FileNotFoundError(mc-diamond). uv로고친실행은session80815, `/tmp/issue51-baseline-uv-pytest.txt`에출력중이다. 제품결함으로단정하지않는다. 실제E가끝날때까지반복조회하지않고완료알림으로다음턴에서재개한다.
+
+최신 사용자 지시: #51 구현. #51 제안값 그대로 승인·실행 전 DECISIONS 확정. 순서 E→A/B/C 구현·개발 검사→구현/E 결과 보고·승인→D 게임 파일럿. 판정 후 결정과 push/merge/이슈 종료는 사용자에게 묻는다. 실제 실행은 #49처럼 background 완료이벤트이며 중간 모델 polling 금지.
+
+기준 HEAD f63ed87. 작업 브랜치 feat/issue-51-pilot-signal 생성 완료(원래 main 보존, commit/push 없음). 요구한 #51/#1 본문·댓글(0/3건), 2026-11-11 PROGRESS/DECISIONS, 관련 PLAN/GLOSSARY 확인. 확정값은 DECISIONS 최상단. 계획 docs/superpowers/plans/2026-11-11-issue-51-pilot-signal.md. 기존 #49 이력은 아래 그대로 보존.
+
+E는 artifacts/issue-51/planner-e/에서 supervisor PID502415로 GPU-only 실행. /tmp/issue51-launch-e.py가 #49 /tmp/issue49-background.py를 재사용해 새 supervisor.py 생성; 출력/manifest/status/notification을 새 폴더에 보존. thread01a1c981-68cf-7ae2-8e72-9a842ce73d75로 codex queue --resume 1회 전송. 완료 이벤트가 오면 status/stdout/stderr/planner_probe.jsonl/events.jsonl을 읽고 원문별 validate/실행가능성을 분류한다. 게임/API0·7B가중치/프롬프트불변. E 종료 전 A/B/C 제품코드 구현은 시작하지 않았으며 코드/테스트/설계만 읽었다. 초기 전체pytest는 session52048, /tmp/issue51-baseline-pytest.txt에 출력 중(개발검사·실제게임아님).
+
+구현 방향: EpisodeConfig.pilot_signal 기본false로 세목표사슬/reward opt-in; 기존 RewardLedger/EpisodeLearner 및 public run_episode 재사용. 별도 pilot-signal CLI/runner로 #49 그대로 보존. PPO는 optional explicit MC targets만 확장. 워밍업 누적 완료MC·32epoch·EV≥.3/최대8rollout·local출력bias0. 4096/32update·LR3e-4·initial10/signal gate/train/post10, update별고정평가/heads, 2048보조, 보조criticfit2000step. 신규 테스트는 RED→GREEN 후 전체pytest/mypy. 개발 구현 완료후 한국어PDF2개 생성·한글추출/폰트/전체페이지검수·D승인요청. 사용자 승인 전 실제 게임/정보감사 포함 D는 시작하지 않는다. 계획에 필요한 독립 최종리뷰 외 구현은 이 세션에서 수행.
+
 # #49 — 사용자 승인으로 게시·PR 병합·종료·main 정리 완료 (2026-11-11)
 
 PR **#52 MERGED** (`a96840956c57eca8fb9440d588b36ca9dd006873`, 2026-11-11 16:16:18KST), **#49 CLOSED**(16:16:20KST). 로컬 main을 원격 병합 결과로 fast-forward했고 #49 게시 브랜치만 로컬·원격에서 삭제했다. 게시직전pytest297/138.05초·mypy51/Node/diff통과, 검사커밋5c11c94와병합커밋의전체tree동일을확인했다. 원격CI체크는설정없음. 원시실행/PDF는Git제외로보존했다. 최종상태문서만main에추가커밋/push하고동기화한다.

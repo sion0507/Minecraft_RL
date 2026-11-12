@@ -392,11 +392,15 @@ class EpisodeConfig(Contract):
     model: ModelConfig | None = None
     ppo: PPOConfig = Field(default_factory=PPOConfig)
     discovery_reward: float = Field(default=0., ge=0)  # pilot opt-in; PLAN §8.1 defaults are unchanged
+    pilot_signal: bool = False  # T14B only: per-unit reward, fixed subgoals and visible potential
 
     jev: JevConfig | None = None
 
     @model_validator(mode="after")
     def configured_backend(self) -> Self:
+        if self.pilot_signal and (self.planner is not None or self.discovery_reward or self.goal.source != "fixed"
+                or (self.goal.kind, self.goal.target, self.goal.quantity) != ("collect", "cobblestone", 3)):
+            raise ValueError("T14B requires fixed cobblestone3 without planner or discovery reward")
         if self.backend == "mock" and (not self.fixture or self.command is not None):
             raise ValueError("mock needs fixture only")
         if self.backend == "rpc" and (not self.command or self.fixture is not None):
