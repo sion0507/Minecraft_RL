@@ -79,4 +79,5 @@ def main(directory: Path, policy: bool) -> None:
             for p in phases if cell.get(p)))
 
 
-main(Path(sys.argv[1]), "--policy" in sys.argv)
+if __name__ == "__main__":
+    main(Path(sys.argv[1]), "--policy" in sys.argv)
