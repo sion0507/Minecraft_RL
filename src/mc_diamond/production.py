@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import JsonValue
 
 from .macros import generate_resource_candidates
-from .navigation import PICKS, observed_routes
+from .navigation import PICKS, generate_movement_candidates, observed_routes, toward_path
 from .schema import Candidate, CandidateSet, Goal, Observation, allocate
 
 RECIPES: list[dict[str, Any]] = json.loads(files("mc_diamond").joinpath("recipes.json").read_text())
@@ -59,8 +59,22 @@ def generate_production_candidates(observation: Observation, goal: Goal) -> Cand
                 route = min(routes, key=lambda p: (len(p), p))
                 return choice("move_observed", {"path": [[v for v in p] for p in route],
                     "map_version": observation.map_version}, f"Approach observed {item}")
-            # Remembered but beyond every observed route: making another one is the way on, not a dead end of forced waits
-            # (exp/candidate-structure; the facility is left behind after digging down or walking far).
+            # Remembered but beyond every observed route (left behind after digging down or walking far): walking back
+            # toward it and making another one are both ways on, never a dead end of forced waits (exp/candidate-structure).
+            all_routes = observed_routes(observation)
+            again = resolve(item, 1).candidates
+            for point in facilities(item):
+                centre = [v + 0.5 for v in point]
+                path = toward_path(observation, all_routes, centre)
+                if path is not None:
+                    back = Candidate(candidate_id=f"{observation.obs_id}:production:toward", action_kind="move_observed",
+                        params={"path": [[v for v in p] for p in path], "map_version": observation.map_version},
+                        max_ticks=min(400, observation.remaining_ticks), stop_rule_id="production_or_hazard",
+                        source_obs_id=observation.obs_id,
+                        description=f"Walk toward remembered {item} at {point}: {math.dist(observation.position, centre):.0f} "
+                                    f"blocks away now, {math.dist(path[-1], centre):.0f} after these {len(path)} steps")
+                    return allocate([back, *again])
+            return allocate(again or generate_movement_candidates(observation).candidates)
         return resolve(item, 1)
 
     def resolve(item: str, quantity: int) -> CandidateSet:

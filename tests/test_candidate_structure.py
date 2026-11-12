@@ -43,3 +43,17 @@ def test_standing_on_stone_keeps_mining_from_being_buried_under_approaches() -> 
     kinds = [c.action_kind for c in saved.candidates]
     assert kinds.count("mine_visible_cluster") >= 1
     assert kinds.count("move_observed") <= APPROACHES_WHEN_MINEABLE
+
+
+def test_foot_of_a_shaft_with_only_visited_ground_still_offers_the_walk_back() -> None:
+    visited = [[float(x), 64.0, float(z)] for x in range(-3, 4) for z in range(-3, 4)]
+    saved = generate_resource_candidates(scene("dirt", [], visited=visited, tool_durability=3), STONE)
+    assert saved.candidates and all(c.action_kind == "move_observed" for c in saved.candidates)
+
+
+def test_remembered_crafting_table_beyond_every_route_offers_walking_back_toward_it() -> None:
+    from mc_diamond.production import generate_production_candidates
+    table = [{"block": "crafting_table", "position": [28.0, 64.0, 0.0], "support": True, "visible": False}]
+    observation = scene("dirt", table, inventory={"cobblestone": 3, "stick": 2, "wooden_pickaxe": 1})
+    saved = generate_production_candidates(observation, Goal(goal_id="pick", kind="craft", target="stone_pickaxe", quantity=1))
+    assert saved.candidates[0].description.startswith("Walk toward remembered crafting_table at [28.0, 64.0, 0.0]: 28 blocks away now")

@@ -111,8 +111,19 @@ def generate_movement_candidates(observation: Observation) -> CandidateSet:
 
 
 def fresh_movement_candidates(observation: Observation) -> list[Candidate]:
-    return [candidate for candidate in generate_movement_candidates(observation).candidates
-            if [float(math.floor(v)) for v in candidate.params["path"][-1]] not in observation.visited]  # type: ignore
+    walks = generate_movement_candidates(observation).candidates
+    fresh = [candidate for candidate in walks
+             if [float(math.floor(v)) for v in candidate.params["path"][-1]] not in observation.visited]  # type: ignore
+    # Every walk ends on visited ground (the foot of cut stairs, a pit): walking back out beats no choice at all.
+    return fresh or walks
+
+
+def toward_path(observation: Observation, routes: dict[tuple[int, int, int], list[list[float]]],
+                centre: list[float]) -> list[list[float]] | None:
+    """The observed walk that ends nearest to a point no route reaches, if it gets at least a block closer."""
+    path = min((route for route in routes.values() if route), default=None,
+               key=lambda route: (round(math.dist(route[-1], centre), 3), len(route), route))
+    return path if path is not None and math.dist(path[-1], centre) <= math.dist(observation.position, centre) - 1 else None
 
 
 def safe_ground(observation: Observation) -> bool:

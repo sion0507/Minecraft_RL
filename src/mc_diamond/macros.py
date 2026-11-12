@@ -5,7 +5,9 @@ from typing import Literal
 
 from pydantic import JsonValue
 
-from .navigation import ORE_TOP, PICKS, fresh_movement_candidates, observed_routes, ore_search_choices, stone_search_choices
+from .navigation import (
+    ORE_TOP, PICKS, fresh_movement_candidates, observed_routes, ore_search_choices, stone_search_choices, toward_path,
+)
 from .schema import Candidate, CandidateSet, Goal, Observation, allocate
 
 APPROACHES = 3  # nearest distinct targets offered as walks; more are the same choice again (exp/candidate-structure)
@@ -59,9 +61,8 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
         for target in cells:
             centre = [v + 0.5 for v in target]
             now = math.dist(observation.position, centre)
-            path = min((route for route in routes.values() if route), default=None,
-                       key=lambda route: (round(math.dist(route[-1], centre), 3), len(route), route))
-            if path is None or math.dist(path[-1], centre) > now - 1 or str(path[-1]) in ends:
+            path = toward_path(observation, routes, centre)
+            if path is None or str(path[-1]) in ends:
                 continue
             ends.add(str(path[-1]))
             found.append(walk(path, f"Walk toward {seen} {goal.target} at {list(target)}: {now:.0f} blocks away now, "
