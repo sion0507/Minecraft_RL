@@ -41,11 +41,13 @@ def human_select(observation: Observation, _goal: Goal, saved: CandidateSet, _fa
 def main() -> int:
     parser = argparse.ArgumentParser(prog="mc-diamond")
     parser.add_argument("command", choices=["doctor", "smoke-episode", "smoke-movement", "smoke-macros", "verify-clock", "prepare-world",
-                                            "audit-information", "evaluate", "smoke-model", "smoke-planner", "smoke-ppo", "smoke-jev", "pilot-wood"])
+                                            "audit-information", "evaluate", "smoke-model", "smoke-planner", "smoke-ppo", "smoke-jev", "pilot-wood", "pilot-signal"])
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("runs/wood-pilot"))
     parser.add_argument("--correction-reason")
     parser.add_argument("--correction-lr", type=float)
+    parser.add_argument("--initial-evaluation-reference",type=Path)
+    parser.add_argument("--signal-exception-reason")
     parser.add_argument("--diagnostic-fixture", choices=["wood", "wood_tool", "wood_break", "wood_hazard", "wood_drop", "empty",
         "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron", "diamond", "diamond_given"])
     place = parser.add_mutually_exclusive_group()
@@ -56,6 +58,8 @@ def main() -> int:
     parser.add_argument("--groups", default="A,B,J,F,S", help="evaluate: comma-separated groups of the planned slots to run")
     parser.add_argument("--task", default="C4,G4", help="evaluate: C4, G4 or both")
     args = parser.parse_args()
+    if args.command!="pilot-signal" and (args.initial_evaluation_reference is not None or args.signal_exception_reason is not None):
+        parser.error("Initial signal exceptions apply only to pilot-signal")
     if args.command == "prepare-world" and args.start is None and args.g4 is None:
         parser.error("prepare-world requires --start X Y Z or --g4 X Y Z")
     try:
@@ -72,6 +76,15 @@ def main() -> int:
                 emit("pilot_summary", {"error": "Install mc-diamond[model] for pilot-wood", "restored_initial": False})
                 return 2
             return pilot_wood(config, args.config, args.output, args.correction_reason, args.correction_lr)
+        if args.command == "pilot-signal":
+            if args.select!="fixed" or args.diagnostic_fixture or args.correction_reason or args.correction_lr is not None:
+                raise ValueError("pilot-signal uses one natural G1 campaign without corrections or selector overrides")
+            try:
+                from .signal_pilot import pilot_signal
+            except ImportError:
+                emit("pilot_signal_summary", {"error": "Install mc-diamond[model] for pilot-signal", "restored_initial": False})
+                return 2
+            return pilot_signal(config,args.config,args.output,args.initial_evaluation_reference,args.signal_exception_reason)
         if args.command == "smoke-planner" and config.planner is None:
             config = config.model_copy(update={"planner": LocalPlannerConfig(backend="local_7b")})
         episode_id, attempt_id = str(uuid4()), str(uuid4())

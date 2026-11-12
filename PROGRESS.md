@@ -1,5 +1,121 @@
 # 실행 기록
 
+## 2026-11-12 — #51 후속 critic 오프라인 진단 백그라운드 실행 중(온라인 통제 변형 2개 추가 승인)
+
+**실제 착수·미완료:** `artifacts/issue-51/critic-offline-20261112-141206/`, 시작 2026-11-12T14:25:38.644536+09:00, supervisor PID 89308/자식 89309. 저장된138 trace·4,096결정의 공개NanoJev frozen특징을GPU에서 순차 재인코딩한다. 관측 전체를 누적하지 않고 후보특징·mask·context·스칼라만 남기며 새 실행은 에피소드별 원자checkpoint를 저장한다. 현재 새critic 비교 결과는 아직 미실행·미확정이다.
+
+**사전 등록:** `protocol.json`(원본 `protocol-v1.json` 보존). 주 결정번호<3072/≥3072, 보조episode seed51051의35개검증, head seed11051/22051/33051, static step128/512/2000. 뚜렷함은 평균EV차이≥0.05·세paired seed모두양수, 입력추가견고함은 양쪽분할의512/2000모두통과일때다. 검증값으로 설정/checkpoint를 고르지 않는다. 기존Claude 점검절은 아래원문그대로보존한다.
+
+**온라인 네 변형(입력2종 각각):** 최신GAE4epoch / 최신완료MC4epoch(사용자추가) / 누적완료MC+최신GAE와동일gradient step(사용자추가) / 누적완료MC4epoch. 첫128결정MC32epoch워밍업은공통고정. ①최신MC−최신GAE, ②누적MC동일step−최신MC, ③누적MC4epoch−누적MC동일step의평균·seed최소/최대·개별값을보고한다. MC미완성꼬리제외때문에①에는사용표본차이도섞인다. 기록된행동흐름을고정하며actor를학습하지않는다.
+
+**검사·비용·한계:** MC terminal/취소/무효 및공개decisions·GAE와의작은수치자가검사통과. 선행추론8episode/249결정까지저장critic값재현오차0·첫episodeMC일치,RAMpeak5.57GB. 백그라운드전환을위해선행추론538.38초를의도적으로중단했고비용/로그를`foreground-attempt.json`에보존했다. 선행extractor에episode checkpoint가없어특징을다시계산한다. 최초자가검사필드누락·GPU장치문자열기동실패로그도보존,실험설정변경은아님. 현재속도상전체특징추출약1.5–2시간예상(미실측추정);추가head통제는그뒤실행한다. 최종보고는baseline0.184/후반pooled0.214재현,선형기준,분할/step/seed별EV,네온라인변형및①②③,전체시간/원자료불변감사를포함한다. 같은시작return sd로EV상한을확정하지않는다.
+
+**운영:** supervisor가자식종료를기다려정상/실패완료이벤트를현재대화에1회전송한다. 자동실험재시도없음. 소스변경·새게임·bridge·API·7B·본학습·채택·commit/push/merge/이슈종료·PDF갱신없음. 결과후새절로기록하고사용자에게수치/한계를보고한다.
+
+## 2026-11-12 — #51 사용자 예외 학습 4,096결정 완료·사전 등록 판정 "판정 보류"
+
+**실행(실제):** `artifacts/issue-51/exception-20261112-024101/`, 02:41:01→11:14경 KST, supervisor `completed`/returncode 0, 경과 30,794.9초(8시간 33분), native crash 0, 실행 중 고정 소스·snapshot·시계 인증 불변(`sources_unchanged=true`), 원본 참조 자료 불변(`reference_unchanged=true`). API·7B 계획 호출·본 학습 결정 0. 원래 gate=false와 `mine_oak_log` 초기 신호 판정 불가는 그대로이며 이 학습은 사용자 예외 실행이다.
+
+**학습:** 4,096결정/32 update/미반영0, 학습 에피소드 138(유효 138, 성공 54), 에피소드 합 27,568초. 워밍업은 첫 rollout 사후 EV 0.605로 종료(`ev_threshold`, critic-only 128결정). actor 전이 2,871, 유효 4,073, 제외 23. 백본 불변, Choice·critic 변경. 학습 중 critic EV는 update별 −0.20–0.77로 크게 흔들렸다(마지막 4개 0.718/0.240/0.289/0.326).
+
+**주 판정(고정 96상태, 사전 등록):** 좋은 후보 확률 0.41299→0.45076, **+0.0378 → "판정 보류"**(+0.03 이상 +0.10 미만). 2,048결정(update 16) 보조값 0.43683(+0.0238). 정규화 엔트로피 0.9905→0.9544. 종류별(초기→4,096, 균등 몫): move_oak_log 15상태 0.220→0.276(0.219), mine_oak_log 7상태 0.641→0.716(0.571), move_stone 44상태 0.501→0.523(0.505), mine_cobblestone 30상태 0.327→0.370(0.298). 저장된 initial/update-16/update-32 head를 GPU에서 다시 읽어 고정 96상태로 재계산해 같은 값을 얻었다. 확률은 update 20–26에 0.42 근처에 머물다 update 27–32에 0.428→0.451로 올랐으므로 마지막 값이 학습 길이에 민감할 수 있다(해석, 미검증).
+
+**보조 평가(성공률은 판정에 쓰지 않음):** 후10 성공 5/10(15002·15003·15005·15007·15009), 초기10(원본 재사용) 4/10. 10슬롯 모두 1회 시도·서버 오류 0·재시도 0. 15005는 1,800틱 마지막 결정에서 조약돌3을 채워 성공. 같은 시드 첫 분기: 정책 8, 드롭 시점 2, 지도 차이 0. 정책 분기 지점의 같은 상태 후보 확률 최대 변화는 0.011–0.147이며 sampling 시드가 같아도 작은 확률 변화로 뽑힌 후보가 바뀐 것이다. 4/10 대 5/10은 차이를 주장할 수 없다.
+
+**보조 진단:** 학습 trace 신호 확인은 네 종류 모두 좋은 선택 평균이 높았다(mine_oak_log good147/bad61, 0.670 대 0.624). 첫 결정 분포는 move 0–7에 15–22로 고르며 #49의 move:5 쏠림(23/73)은 재현되지 않았다(move:5 22/138). 별도 critic 적합(학습 3,868/검증 96, 위치·인벤토리 분리) 검증 EV 128 step 0.163, 2,000 step 0.297로, 고정 상태에서도 critic 구조의 적합이 약하다.
+
+**원시 감사:** 학습 trace 138개에서 선택·step·reward 각 4,096, 완료 요약 138, 무효/일시정지 미인증 step 0, 모든 reset 빈 인벤토리·0/1800틱. 후10 trace의 직접 획득·틱·완료 사유가 요약과 일치. update-32 head hash = 최종 hash, 백본 = 공개 백본, 고정 상태 파일 = 원본과 바이트 동일, 종료 시 초기 head 복원 true(공개 가중치를 seed 11015로 읽으면 초기 hash와 일치. critic head는 seed로 새로 초기화되는 부분). `rpc-errors-new.log`에 06:15 KST 서버 기동 시간 초과 1건과 bridge 내부 기동 재시도 1건이 있었고 해당 에피소드 시작 전이라 결과에 영향 없음. 메모리는 학습 프로세스 최대 관측 10.5GB, swap 0.
+
+**추가 오프라인 분석(2026-11-12, 게임 0, GPU 재계산·trace 재읽기):** 고정 96상태별 변화는 69/96 상승, 평균 +0.0378·중앙값 +0.0417·표준편차 0.071, 상태 bootstrap 95% 구간 +0.024–+0.052, 원본 에피소드 10개 단위 bootstrap +0.027–+0.048(+0.10 이상 확률 0, +0.03 미만 확률 0.07). 종류별 상승 수: mine_cobblestone 29/30, mine_oak_log 7/7, move_oak_log 11/15, move_stone 22/44. 초기→최종 분포 거리(TV) 평균 0.099, 최대 후보 확률 평균 0.165→0.218. 이동 후보 자리별 평균 확률은 move:3 0.137→0.162, move:5 0.136→0.166, move:0 0.121→0.136으로 오르고 move:1/2/6은 0.02–0.03 내렸다(설명보다 방향 자리에 실린 변화가 섞여 있음, 고정 월드 적응 가능성). 학습 4,096결정의 on-policy 좋은 후보 초과 확률(균등 몫 대비)은 512결정 구간별 +0.018/+0.013/+0.027/+0.029/+0.043/+0.025/+0.038/+0.075, 네 종류 모두 첫 1,024결정보다 마지막 1,024결정이 +0.03–+0.05 높다. 학습 에피소드 성공은 구간별 8/4/10/7/6/3/8/8(각 17–18개)로 추세가 없다. 해석: 등록 방향의 움직임은 잡음이 아니지만 크기가 작고 행동 성과로는 나타나지 않았다. 등록 판정 "판정 보류"는 바꾸지 않는다.
+
+**critic 오프라인 점검(2026-11-12, trace만 읽음, 게임·GPU 0):** 요약의 update별 critic EV는 그 rollout을 학습한 직후 같은 자료로 잰 값이다. trace의 선택 시점 예측값(그 rollout 학습 전)으로 다시 잰 예측 EV는 update 1에서 0.16(보고값 0.605), update 9–32 rollout별 평균 0.32(보고값 평균 0.395), 1,024–4,095결정 전체를 합쳐 재면 0.214다. 워밍업은 같은 자료 EV로 기준을 넘어 128결정에 끝났다. return 구성: pilot:logs n=1,320 평균 0.712·sd 0.331, pilot:pick n=875 평균 0.998·sd 0.001, pilot:stone n=1,850 평균 0.505·sd 0.336, 전체 sd 0.351, 거리 potential 항 sd 0.127. 항상 같은 에피소드 시작 상태에서의 return도 sd 0.255(0.09–1.04, n=137)로 흩어진다. 앞 3,072결정으로 맞추고 뒤 1,007결정으로 잰 선형 최소제곱 EV: 하위 목표만 0.201, +남은 시간·보유 개수 0.354, +거리 potential 0.493, 같은 구간 실제 critic 0.184. rollout당 에피소드는 약 4.3개다. 해석: critic은 하위 목표 구분 수준에 머물렀고, 관측에서 얻을 수 있는 단순 수치만으로도 더 잘 맞출 여지가 있으나 같은 상태의 결과 분산 때문에 상한은 낮다. critic 변경은 구현·실행하지 않았다.
+
+**PDF:** reports/issue-051-T14B-report.pdf(2쪽)·code-guide.pdf(2쪽)를 최신 실제 결과로 교체했다. 한글 추출·WenQuanYi 글꼴 포함·4쪽 전체 렌더 가독성 확인, reports Git 추적 0. 생성기는 세션 scratchpad에만 있다.
+
+**미실행·남은 일:** 판정 후 결정(PLAN §6.4 다른 행동 모델·A/B 축소·보상 조정·추가 파일럿)은 사용자 결정. 파일럿 head·경험은 본 학습 초기화·30,000결정에 쓰지 않는다. commit/push/merge/이슈 종료 없음.
+
+## 2026-11-12 — #51 사용자 예외 학습 4,096결정 재실행 시작(메모리 수정 후)
+
+사용자가 "시작해"로 공개 초기값에서의 새 4,096결정 재실행을 명시 승인했다. 착수 전 확인: 실행 중 프로세스 없음, RAM 여유 26GB, GPU 476MiB 사용. 다른 세션이 20:11에 수정한 `signal_pilot.py`(이력 지도 제거·참조 head 거절 전 복원 순서)는 `user-exception-source-manifest.json`의 31파일과 모두 일치했다. 그 세션의 전체 pytest(20:07)가 마지막 수정보다 앞서므로 현재 소스로 `tests/test_signal_pilot.py` **19개 통과/80.13초**, strict **mypy 54파일** 통과를 다시 확인했다(`artifacts/issue-51/relaunch-{targeted,mypy}.txt`).
+
+**02:41:01 KST** `artifacts/issue-51/exception-20261112-024101/`에서 detached supervisor **PID 4854**(자식 4856)로 시작했다. 원본 초기10·정보감사·고정96은 재사용하고 재실행하지 않는다. 02:46 확인에서 참조 검증 통과, `fixed-00.json` 기록, `signal-train-1` 진행, 학습 프로세스 RSS 5.15GB였다. 1차 중단 실행(`exception-20261111-184420`)은 폐기 경험으로 보존한다. 메모리 확인: 03:12(약260결정) RSS 8.09→8.03GB(45초), 03:26 update3 직후(약384결정) RSS 8.97GB·swap0·시스템 여유17.7GB. 1차는 같은 결정 수에서 13–16GB 이상으로 선형 증가했으므로 누적 증가는 해소된 것으로 보이며, 남은 변동은 rollout 128건 범위다(최대치는 종료 후 확정). 예상 종료는 약 10:30 KST(추정). commit/push/merge/이슈 종료 없음.
+
+## 2026-11-11 — 외부 세션 예외 학습 중단 확인·재실행 승인 대기
+
+사용량제한후복귀해공유폴더를대조하던중다른Claude세션의실제예외학습을확인했다. `exception-20261111-184420`은18:44:20시작→4292.948초(71분32.948초)뒤exit130/KeyboardInterrupt로종료했다. 원시20attempt에서reset20·선택581·step/reward/transition580·완료summary19·PPO4를확인했다. 마지막20번째attempt는선택1/반환step0으로불완전하다. 580전이중512는4rollout update에사용,68은미반영이다. 수집actor331중update에실제사용된actor281(100+89+92),첫128은critic-only. 학습에피소드완료19중8성공이다. 첫update MC EV0.644로워밍업종료,512결정고정확률0.412489(초기0.412993)이나4096/2048미실행으로최종판정미판정이다. 후10은모두미실행이며on-disk요약은중단전snapshot이라최종초기head복원은미확인이다. 실제OOM kill의근거는없으며직접종료근거는KeyboardInterrupt다. 원본로그/중간head/비용은그대로보존한다(원시감사 artifacts/issue-51/exception-interrupted-audit.json).
+
+다른세션의메모리보완(누적history의관측지도/next_state제거,MC식별자·features/context·위치/인벤토리보존)을보존·검토했다. 공개PPO는원래rollout을사용하며누적critic진단만축약본을쓴다. 독립검토중요미해결0,전체pytest316/217.19초·mypy54·diff통과. 참조head거절전복원파일저장순서결함도RED재현후수정했고잘못된참조/사유누락/다른신호실패거절과전체hash복원검사를통과했다. 현재확정초기고정96과rollout약128지도는유지하므로실제RAM최대치는미측정이다.
+
+초기10/정보감사/원래gate=false·mine_oak_log good7/bad0/초기고정96는불변이다. 자료재사용안전검사는성공했으나**중복학습은시작하지않았다**. 정확한중간재개용optimizer/RNG가없으므로등록4096완료에는공개초기에서새학습이필요하다. 자동재시도없음원칙과기존실패/비용보존을명시해사용자에게새4096재실행승인을질문했고대기한다. PDF는사용자지시대로보류,commit/push/merge/이슈종료없음.
+
+## 2026-11-11 — #51 사용자 예외 학습 1차 중단(메모리 결함)·수정, 재실행은 사용자 결정 대기
+
+**실제 실패:** `exception-20261111-184420` 실행은 **19:55 KST에 580결정/4,096(학습 에피소드 19개 완료, 20번째 진행 중, update 4/32)에서 중단**했다. 판정·2,048 보조값·후10·보조 critic 적합·분기 분석은 모두 **미실행**, 최종 판정은 **미판정**이다. 서버 오류·native crash·API 호출 0, 경과 4,292.9초(학습 에피소드 합 3,955초).
+
+**원인(구현 결함):** `SignalLearner.history`가 MC 정답·critic 진단용으로 모든 결정의 `State`를 보관했는데, 반경32 관측 하나가 메모리에서 약 30MB(지도 24,685칸, JSON 3.0MB)다. 학습 프로세스가 RSS 24.0GB+swap 1.4GB까지 분당 약 450MB씩 늘었고 시스템 여유 2.3GB·swap 3.9GB만 남아, Claude Code가 종료 대기 셸을 메모리 압박으로 회수했다. 4,096결정에는 약 195GB가 필요해 완료할 수 없었으므로 이 세션이 학습 프로세스에 SIGINT를 보내 종료했다(returncode 130). bridge/서버 잔류 프로세스 없음, 고정 소스·snapshot·시계 인증 불변(`sources_unchanged=true`). mock 관측은 작아서 개발 검사와 이 세션의 사전 검토·GPU 점검이 이 결함을 잡지 못했다.
+
+**남긴 부분 자료(폐기 경험, 판정 근거 아님):** 학습 trace 20개(마지막은 미완), `update-01~04` head, `fixed-00~04.json`, 에피소드 19까지의 `summary.json`. 워밍업은 첫 rollout에서 사후 EV 0.644로 종료(`ev_threshold`), 이후 update 2–4의 critic EV 0.320/0.326/0.219, actor 전이 331. 고정 96상태의 좋은 후보 확률은 0.4130→0.4130→0.4113→0.4119→0.4125(update 0–4)로 사실상 변화 없음. 학습 에피소드 성공 8/19. 580결정은 판정 시점(4,096)의 14%이며 등록 판정에 쓰지 않는다.
+
+**수정:** 이력에는 지도를 비운 관측 사본과 `next_state=None`만 남긴다(`signal_pilot.py` `SignalLearner.update`). MC 정답·critic 입력(특징/마스크/context)·위치·인벤토리 키는 그대로다. 보상·후보·PPO·gate·평가·설정은 바꾸지 않았다. RED→GREEN `test_signal_history_drops_observed_maps_but_keeps_mc_and_critic_inputs`, 전체 **pytest 316개/212.22초**, **mypy 54파일** 통과(`artifacts/issue-51/memory-{red,green}.txt`, `memory-fix-{pytest,mypy}.txt`). 실제 GPU 점검(게임 0): 실제 크기 상태로 이력 816건을 쌓는 동안 RSS 5.639→5.645GB(+약 6MB). 예상 상시 사용량은 모델+고정96상태(약 2.9GB)+rollout 128건(약 3.8GB)이다(추정, 실제 4,096결정 미검증).
+
+**미실행·대기:** 같은 등록 설정으로 처음부터 다시 실행할지는 추가 실제 실행이므로 사용자 결정을 기다린다. 자동 재시도하지 않았다. PDF는 실제 결과 최신본이 아니다. commit/push/merge/이슈 종료 없음.
+
+## 2026-11-11 — #51 사용자 예외 학습 4,096결정 백그라운드 시작
+
+Codex 세션이 사용량 한도로 멈춘 뒤 Claude Code 세션이 이어받았다. 이어하기 구현(`--initial-evaluation-reference`+`--signal-exception-reason`, 출력 `signal-user-exception/`)은 Codex가 작성했고 이 세션은 코드를 바꾸지 않았다.
+
+**개발 검사(mock):** 전체 pytest **315개 통과/210.24초**, strict mypy **54파일 통과** (`artifacts/issue-51/exception-{pytest,mypy}.txt`).
+
+**검토:** 별도 하위 에이전트는 쓰지 않았다. 작성자(Codex)와 다른 이 세션이 이어하기 경로·MC 워밍업·보조 critic·참조 검증을 읽기 전용으로 검토했고 실행을 막을 결함은 찾지 못했다. 남은 위험: 학습 중 서버 오류는 등록 설계대로 재시도 없이 학습을 중단하고 후10을 미실행으로 남긴다. 중간 이어하기는 없다.
+
+**실제 GPU 사전 점검(게임·API 0):** 공개 NanoJev로 원본 참조 검증 통과(고정 이후 변경 소스는 cli.py·signal_pilot.py뿐), 고정 96상태 재인코딩이 원본 지표를 1e-6 안에서 재현(좋은 후보 확률 0.4130, 균등 몫 0.4006, 엔트로피 0.9905), 합성 전이 48개로 CUDA 워밍업 critic 적합·보조 critic 2,000 step 경로가 오류 없이 끝나고 초기 head hash가 복원됨을 확인했다. 합성 전이의 수치는 학습 근거가 아니다.
+
+**실제 실행:** **18:44:20 KST** `artifacts/issue-51/exception-20261111-184420/`에서 detached supervisor **PID 551667**(자식 551669)로 시작. 원본 초기10·정보감사·고정96은 재실행하지 않고 재사용한다. 18:49 기동 확인 1회에서 참조 검증 통과·`fixed-00.json` 기록·`signal-train-1` 진행을 확인했다. 예상 소요는 학습 약 7.4시간+후10 약 0.5시간(추정). 원래 gate=false와 `mine_oak_log` 초기 신호 판정 불가는 그대로다. 결과·판정·PDF 갱신은 종료 후 기록한다. commit/push/merge/이슈 종료 없음.
+
+## 2026-11-11 — #51 원래 D 감사 결과·사용자 예외 학습 승인
+
+원래D real-20261111-171623는정보감사exit0(35fixture/23범위),초기10실행4성공/6시간상한실패·291결정·15826틱·후10미실행. 원목/나무곡괭이완료각9/10. gate=false는mine_oak_log good7/bad0표본부족이며나머지3종류평균차양수. 학습/PPO/워밍업0·마지막판정미판정·초기head복원true·서버오류/재시도/nativecrash0·API0. pipeline3024.896초. 저장trace/MC/보상/96고정지표·공개bundle/hash·초기head#49동일/clock불변을오프라인감사통과했다(final-audit.json). 원래실패와후10미실행을고치지않는다.
+
+PDF갱신도구의네트워크조회문제로완료전사용자가작업을전환했다. 현재PDF는이전승인전판본이며실제결과최신본으로표시하지않는다. 사용자최신지시에따라PDF보류·원목채굴초기신호판정불가유지·기존자료무결성확인→사용자예외4096학습/후10/초기복원경로를구현/개발검사한뒤background실행한다. 학습시작여부/PID는후속기록을따른다. commit/push/merge/종료없음.
+
+## 2026-11-11 — #51 D 실제 백그라운드 시작
+
+사용자 승인 후 **2026-11-11 17:16:23KST**, `artifacts/issue-51/real-20261111-171623/`에서 detached supervisor **PID521977**로 시작했다. 검증된source-manifest 일치·GPU/중복실행 사전확인·이전clockcertificate 사본을 보존하고, run-manifest.json에 현재미커밋소스/두설정/uv.lock/snapshotmanifest와 실제명령을 고정했다. 최초status는 **information 단계 running**이다. 이 한 번의 기동 확인 뒤에는 모델 polling을 하지 않는다.
+
+승인된순서: 실제정보감사 → 초기10 → 종류별MC신호통과 시4096학습/32update → 후10·진단. 실제출력은 `pilot/signal/` 아래에 생성한다. 신호부족·정보감사/실행오류·미실행슬롯·server재시도/복원·시간을 보존한다. 종료이벤트가현재대화를재개하면원시결과/분모20/고정상태·2048보조·최종판정·critic/첫선택·분기·초기hash복원/비용을감사하고한국어PDF2개를갱신한다. 자식종료를blocking wait하고완료이벤트1회만보내며알림결과는completion-notification.json이다. **commit/push/merge/이슈종료·판정후연구결정은승인없이고하지않는다.**
+
+## 2026-11-11 — #51 D 백그라운드 실행 승인·착수 준비
+
+사용자가 D의 실제정보감사→초기10→신호통과 시4096학습→후10을 승인했다. source-manifest와 최종313pytest/54mypy의 구현이 동일한지 확인하고 별도 real-* 폴더에서 source/config/snapshot 고정·완료이벤트 방식으로 시작한다. 아직 이 기록은 준비 단계이며 실제 PID/시각/단계는 실행manifest/status와 뒤의 착수기록을 따른다. commit/push/merge/이슈종료는 별도승인전 금지다.
+
+## 2026-11-11 — #51 A/B/C 구현·개발 검사·독립 검토 완료, D 승인 대기
+
+**구현:** 기본false인 `pilot_signal`을 추가했다. 원목3→나무곡괭이1제작→조약돌3 고정 사슬, 개당1/N·중복/제공 제외, 현재visible 원천 블록 potential(D32/k0.3/32), 같은 상태에서 다음 목표·local return 단절을 기존 공개 실행 경로에 연결했다. #49 발견보상/기존설정은 유지하고 새파일럿에서만 끈다. MC 명시정답은 critic-only와 유한/길이를 검사하고 frozen특징을 pooling해 Choice 없이 누적32epoch로 학습한다. 최근rollout 사후EV≥0.3/최대8rollout에서 워밍업을 끝내고 기존GAE/PPO로 복귀한다.
+
+**실행기/진단:** `mc-diamond pilot-signal --config configs/signal_pilot.yaml --output <새폴더>`와 별도 `signal/` 산출물. 초기10→종류별 MC 신호gate→LR3e-4/4096/32update→후10을 구현했다. 신호/비교표본부족은 학습0·후10미실행을 분모20에 유지한다. 초기평가 고유입력과 후보/마스크·frozen특징, update별head/확률·균등몫·엔트로피,2048보조값/4096판정,목표별완료수,첫선택분포,정책/재고·드롭시점/지도/기타 첫분기를 기록한다. 별도critic2000step 적합은 초기평가 위치·인벤토리와 겹치는 학습자료를 제외하고 livehead/RNG를 보존한다. 고정상태 지표를 온라인PPO의 미관측환경 일반화로 해석하지 않는다.
+
+**최종 개발 검사:** 전체 **pytest313개/175.83초**, strict **mypy54파일**, diff공백검사 통과. 이전310개/139.73초는 추가전체경로/오류검사 전 기록이다. tiny모델+scripted 초기평가trace 및 공개mock RPC/PPO로4096/32/2048/33고정지표/32head/20슬롯/초기복원을 검증했다. 실제tinycritic update뒤오류주입도 전체모델hash복원·오류원문·20슬롯/후10미실행을 확인했다(정상/오류2검사38.21초). 새수치검사는1/N·제공/중복·potential부호/telescoping/대상제거·세localterminal·MC꼬리/단절·EV/상한·후보분류/마스크·고정중복·보조critic분할/RNG·분기원인을 포함한다. 실게임/공개가중치 학습 효과로 보고하지 않는다. 원시결과 artifacts/issue-51/{final-pytest.txt,final-mypy.txt,full-mock-and-fault.txt}; RED/중간결과도보존했다.
+
+**독립 검토:** read-only 전체변경 검토와MC배치/오류검사 재검토에서 Critical/Important확정결함0. 리뷰요청의 오류복원 검사공백을 해소했다. docs/reviews/issue-51.md. #16/#17/#18/#20 인계는 docs/issue-51-handoff.md, #49LR선택을성능근거로해석하지않고 Jev요청당약US$0.0003/C4환산US$0.15를추정으로명시했다.
+
+**실제/미실행:** E의 실제7BGPU24응답은 아래실측그대로다. **D Minecraft게임·공개NanoJev게임학습·실제정보감사·최종게임판정은 아직0/미실행**. bridge/runtime/clock.py/recipes/snapshot은변경하지않았고 기존certificate(trials63/pause_verifiedtrue/fingerprint ef3a2eda…15b3)는유지한다. 새정지인증/실제정보감사통과를주장하지않는다. 승인후백그라운드는 정보감사→pilot-signal, pinnedsource/config/snapshothash·child종료대기·완료이벤트1회를사용한다. 준비만한 artifacts/issue-51/d-supervisor-template.py는실행하지않았다.
+
+**상태/산출물:** 작업브랜치 feat/issue-51-pilot-signal, 기준f63ed87+미커밋구현; source-manifest.json에전체Python/설정/신규검사SHA256을고정했다. **commit/push/merge/이슈종료모두미실행**. 판정후보상본학습적용/구조변경/A·B축소도자동결정하지않는다. 한국어PDF최신2개 reports/issue-051-T14B-{report,code-guide}.pdf(보고서3쪽/가이드2쪽) 생성, 한글추출·한글폰트embedding·전체5페이지렌더가독성확인. reports Git추적0·ignore확인. 생성기/중간파일은 /tmp/issue51-pdfs.py 등 /tmp에만있다. PDF때문에게임을재실행하지않았다.
+
+## 2026-11-11 — #51 E 실제 고정 7B 확인 완료
+
+background 정상종료/알림전송 각exit0, 전체44.537초. #49 초기평가 성공 슬롯2의 인벤토리가 달라지는 첫 상태12개에 조약돌3/다이아 과제 각1회, 총24회. Qwen/Qwen2.5-7B-Instruct revision a09a35458c702b33eeacc393d103063234e8bc28, 고정프롬프트SHA256 d3ded20bebe6c5abcbd200792963e3aa1f79aabd7429db913a5b1a8fa547806f, 실제4비트·greedy·가중치불변·GPU만 사용했다. 입력3,706–4,525토큰/합102,706, 응답지연1.120–1.743초/합29.453초. 게임/API/7B학습0.
+
+검증통과6/24·거부18/24(전제조건16, 이미보유2). 조약돌과제는 곡괭이전9상태 모두 조약돌3을바로요구해거부, 곡괭이후3상태는유효했다. 다이아과제는9거부·3통과: 원목1개/판자4개 상태의추가원목은실행가능하나원목16개는필요량과다, 곡괭이·판자3·막대2상태의원목1개는다음단계관점에서불필요했다. 즉시실행가능한타당한선행단계5/24(수량과다1포함)이며검증통과를좋은계획으로동일시하지않는다. 원문별관측/검증/분류는 artifacts/issue-51/planner-e/{planner_probe.jsonl,classified.json,summary.json,events.jsonl}, 소스/실행hash·상태·알림도같은폴더에보존했다. #16/#17입력으로넘기며여섯조건/Astra비교를대체하거나7B학습근거로확대하지않는다.
+
+개발기준검사는 올바른uv실행으로297pytest/138.09초통과. 첫잘못된PATH실행의144실패도아래이력에보존한다. E이후A/B/C구현중이며D게임파일럿은아직미실행/별도승인대기다.
+
+## 2026-11-11 — #51 T14B 착수·승인값 사전 확정
+
+E supervisor PID502415를 artifacts/issue-51/planner-e/에서 시작했고 종료 이벤트를 현재 대화로 보내도록 했다. 중간 결과 polling은 하지 않는다. 기준 개발검사의 첫 명령 `.venv/bin/python -m pytest`는 자식 CLI의 PATH에 mc-diamond가 없어144실패/153통과였으며 제품 결함으로 판정하지 않았다. `UV_CACHE_DIR=.cache/uv .tools/uv run --locked --no-sync pytest`로 환경을 바로잡아 기준 검사를 다시 시작했다(/tmp/issue51-baseline-uv-pytest.txt). 코드 변경·게임 실행은 아직 없다.
+
+#51 본문(댓글0), #1 본문·댓글3건과 PLAN 관련 절, 2026-11-11 PROGRESS/DECISIONS를 확인했다. 사용자가 승인한 제안값·구현상 반복 횟수·최소 원목3개·return 경계·실행/승인 순서를 DECISIONS 최상단에 확정했다. E 저장 상태7B GPU 확인을 먼저 실행하고 A/B/C 구현·개발 검사를 진행한다. D 게임 파일럿은 구현/7B 결과 보고 후 별도 승인 전까지 미실행이다. push/merge/이슈 종료·판정 이후 결정도 보류한다. 기존 #49 자료는 보존한다.
+
 ## 2026-11-11 — #49 게시·PR #52 병합·종료·main 정리 완료
 
 PR #52가2026-11-11 16:16:18KST에병합됐다(merge a96840956c57eca8fb9440d588b36ca9dd006873). #49는16:16:20KST CLOSED. 로컬main=origin/main동기화와#49게시브랜치로컬/원격삭제를확인했다. 검사된5c11c94와병합a968409의전체tree가같아검사결과가동일코드를검증한다. 원격CI체크는설정없음. 최종게시상태문서만추가로커밋/push하고원격/로컬HEAD를다시확인한다.

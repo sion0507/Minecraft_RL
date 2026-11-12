@@ -159,6 +159,18 @@ full 목표 변경은 trace를 이어 가고, task terminal은 bootstrap 0, 유�
 
 ## 목재 파일럿 (#15 / T14, 신호 보강 #49)
 
+후속 **#51 T14B**는 별도 `pilot-signal` 명령과 `configs/signal_pilot.yaml`을 사용합니다. 현재 구현·7B 결과 보고 뒤 사용자의 게임 파일럿 승인을 받아야 실행합니다.
+
+```bash
+PYTHONFAULTHANDLER=1 uv run --extra model mc-diamond pilot-signal --config configs/signal_pilot.yaml --output runs/pilot-signal-51
+```
+
+`pilot_signal: true`에서만 원목3 → 나무 곡괭이1 제작 → 조약돌3 사슬과 개당1/N·목표 완료 보상·visible 원천 블록 거리 potential을 켭니다. D=32, k=0.3/32이며 발견 보상은 끕니다. 하위 목표 완료는 return 경계이고 게임을 reset하지 않습니다. 기본 local/full 보상은 그대로입니다.
+
+T14B는 초기10평가의 종류별 좋은/나쁜 선택 MC return 차이가 양수인지 먼저 확인합니다. 비교 표본이 없거나 차이가 양수가 아니면 학습하지 않고 수치를 남깁니다. 통과하면 LR3e-4로4,096결정/32rollout, MC 누적 critic 워밍업(EV≥0.3 또는 최대1,024결정,32epoch) 후 일반 GAE/PPO를 수행하고 후10평가를 보조 보고합니다. 주 판정은 초기평가에서 고정한 상태의 좋은 후보 확률 증가≥0.10/＜0.03/그 사이이며2,048결정 결과는 보조입니다. 같은 위치·인벤토리의 학습 자료는 보조 critic 적합의 학습 분할에서 제외합니다. 고정 상태 평가를 온라인 PPO가 보지 않은 환경에 대한 일반화로 해석하지 않습니다.
+
+산출물은 `--output`의 `signal/`에만 생성하며 초기heads/매updateheads·고정상태·지표·신호gate·분모20·실패·복원 여부를 보존합니다. 파일럿heads와경험은 본 학습 초기화/30,000결정에서 제외합니다. 게임·학습은 #49처럼 완료 이벤트로 확인하며 중간 모델 polling을 하지 않습니다. #18/#20 인계는 [T14B 인계 문서](docs/issue-51-handoff.md)를 참고합니다.
+
 ```bash
 PYTHONFAULTHANDLER=1 uv run --extra model mc-diamond pilot-wood --config configs/wood_pilot.yaml --output runs/pilot-signal-49
 ```

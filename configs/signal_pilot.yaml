@@ -1,0 +1,16 @@
+# T14B only. Run after reporting implementation/E and obtaining explicit pilot approval.
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G1, --budget-ticks, "1800"]
+rpc_timeout_seconds: 180.0
+max_decisions: 3600
+wall_limit_seconds: 900.0
+pilot_signal: true
+goal:
+  goal_id: pilot-signal
+  kind: collect
+  target: cobblestone
+  quantity: 3
+model:
+  checkpoint: ../checkpoints/nanojev
+  mode: sampling
+  seed: 11015
