@@ -83,6 +83,8 @@ def main() -> int:
     parser.add_argument("--entropy", type=float, default=.01)
     parser.add_argument("--rollout", type=int, default=128)
     parser.add_argument("--seed", type=int, default=11015)
+    parser.add_argument("--gpu-fraction", type=float, default=.75)
+    parser.add_argument("--critic-replay-epochs", type=int, default=0, help="cumulative MC critic fit after each update")
     args = parser.parse_args()
     tasks = [(path, EpisodeConfig.model_validate(yaml.safe_load(path.read_text()))) for path in args.config]
     args.output.mkdir(parents=True, exist_ok=False)
@@ -99,6 +101,8 @@ def main() -> int:
     if args.selector == "nanojev":
         import torch
         from .nanojev import NanoJevAdapter, NanoJevSelector
+        # Leave room for another small GPU job on the shared card; cached blocks are released before this cap fails.
+        torch.cuda.set_per_process_memory_fraction(args.gpu_fraction)
         torch.manual_seed(args.seed)
         model = NanoJevAdapter.load((tasks[0][0].parent / (tasks[0][1].model.checkpoint if tasks[0][1].model else "")).resolve())
         if args.heads:
@@ -127,7 +131,8 @@ def main() -> int:
             from .signal_pilot import SignalLearner
             torch.manual_seed(args.seed)
             learner = SignalLearner(model, args.seed, args.output, [],
-                                    PPOConfig(choice_lr=args.lr, entropy=args.entropy, rollout=args.rollout))
+                                    PPOConfig(choice_lr=args.lr, entropy=args.entropy, rollout=args.rollout),
+                                    replay_epochs=args.critic_replay_epochs)
             summary["updates"] = learner.update_reports
             collected = failures = episode = 0
             while collected < args.train and failures < 3:
