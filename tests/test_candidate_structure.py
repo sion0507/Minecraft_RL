@@ -33,7 +33,7 @@ def test_stone_seen_beyond_every_route_offers_a_walk_toward_it_first() -> None:
     far = [{"block": "stone", "position": [28.0, 64.0, 0.0], "support": True}]
     saved = generate_resource_candidates(scene("dirt", far), STONE)
     assert saved.candidates[0].description.startswith("Walk toward exposed cobblestone at [28.0, 64.0, 0.0]: 28 blocks away now")
-    assert saved.candidates[0].params["path"][-1][0] == 3.5  # the observed walk that ends nearest to it
+    assert saved.candidates[0].params["path"][-1][0] == 3.5  # type: ignore[index]  # the observed walk that ends nearest to it
     assert any(c.action_kind == "stair_down" for c in saved.candidates)
 
 
@@ -66,6 +66,14 @@ def test_the_step_the_agent_came_down_by_is_neither_mined_nor_cut_under() -> Non
     under = scene("dirt", [], visited=[[1.0, 64.0, 0.0], [0.0, 64.0, 0.0]])  # east column's y=63 floors a visited cell
     stairs = [c for c in generate_resource_candidates(under, STONE).candidates if c.action_kind == "stair_down"]
     assert stairs and [1, 0] not in [c.params["direction"] for c in stairs]
+
+
+def test_a_step_that_may_not_be_mined_is_not_walked_up_to_either() -> None:
+    # T evaluation seed 15011: the only stone in view was two of its own steps, offered as approach after approach to the end.
+    step = [{"block": "stone", "position": [2.0, 64.0, 0.0], "support": True}]
+    saved = generate_resource_candidates(scene("dirt", step, visited=[[2.0, 65.0, 0.0]]), STONE)
+    assert not any("[2.0, 64.0, 0.0]" in c.description for c in saved.candidates)
+    assert any(c.action_kind == "stair_down" for c in saved.candidates)
 
 
 def test_pilot_tick_cost_prices_every_active_tick_and_default_keeps_the_plan_rate() -> None:

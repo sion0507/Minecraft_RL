@@ -53,7 +53,11 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
             _, path = min(routes_near_drop, key=lambda pair: (len(pair[1]), pair[0]))
             return allocate(build([walk(path, f"Collect observed {drop.item} drop")] if path
                                   else [("wait", {}, f"Wait for observed {drop.item} pickup")]))
-    targets = sorted({tuple(cell.position) for cell in observation.observed_map if cell.block == block and cell.visible},
+    # A step the agent came down by is never a target (nothing digs back up): not mined, and not walked up to either,
+    # or two such steps are offered as approach after approach to the end of the budget (T evaluation seed 15011).
+    sources = [cell for cell in observation.observed_map
+               if cell.block == block and not supports_way_back(observation, cell.position)]
+    targets = sorted({tuple(cell.position) for cell in sources if cell.visible},
                      key=lambda p: (math.dist(p, observation.position), p))
 
     def toward_walks(cells: list[tuple[float, ...]], seen: str) -> list[Draft]:
@@ -74,7 +78,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
 
     if not targets:
         # Nothing in view: a cell remembered from an earlier observation is still a place to walk back to.
-        remembered = sorted({tuple(cell.position) for cell in observation.observed_map if cell.block == block},
+        remembered = sorted({tuple(cell.position) for cell in sources},
                             key=lambda p: (math.dist(p, observation.position), p))
         return search(toward_walks(remembered, "remembered (seen earlier, may have changed)"))
     mines: list[Draft] = []
@@ -92,8 +96,6 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
         if target in used:
             continue
         if close(target):
-            if supports_way_back(observation, target):
-                continue  # the step the agent came down by stays (nothing digs back up)
             tools = (["netherite_axe", "diamond_axe", "iron_axe", "stone_axe", "wooden_axe", "golden_axe"] if block.endswith("_log")
                      else PICKS[:3] if block == "diamond_ore" else PICKS[:4] if block == "iron_ore" else PICKS)
             carried = [name for name in tools if observation.inventory.get(name, 0)]
@@ -105,8 +107,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
             cluster = [target]
             for point in cluster:
                 for other in targets:
-                    if (other not in cluster and close(other) and not supports_way_back(observation, other)
-                            and math.dist(point, other) == 1
+                    if (other not in cluster and close(other) and math.dist(point, other) == 1
                             and len(cluster) < min(8, remaining)):
                         cluster.append(other)
             used.update(cluster)
