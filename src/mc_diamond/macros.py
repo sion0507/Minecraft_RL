@@ -86,6 +86,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
     equip: Draft | None = None
     seen_paths: set[str] = set()
     used: set[tuple[float, ...]] = set()
+    repeated = False  # an approach ends in a cell the agent already stood in
     eye = [observation.position[0], observation.position[1] + 1.62, observation.position[2]]
 
     def close(p: tuple[float, ...]) -> bool:
@@ -122,6 +123,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
                 path = min(found, key=lambda route: (len(route), route))
                 if str(path) not in seen_paths:
                     seen_paths.add(str(path))
+                    repeated |= [float(math.floor(path[-1][0])), path[-1][1], float(math.floor(path[-1][2]))] in observation.visited
                     approaches.append((len(path), walk(path, f"Approach exposed {goal.target} at {list(target)}: "
                                                              f"{len(path)} steps to stand next to it")))
     if equip is not None:
@@ -130,7 +132,9 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
     nearest = [draft for _, draft in sorted(approaches, key=lambda pair: pair[0])]
     kept = [*mines, *nearest[:APPROACHES_WHEN_MINEABLE if mines else APPROACHES]]
     if kept:
-        return allocate(build(kept))
+        # Having stood at an approach's end without the target coming into reach (it is above, below or out of sight
+        # from there), that walk alone is the same move for ever: the cuts are offered next to it (T iron slots 4, 8).
+        return search(kept) if repeated and not mines else allocate(build(kept))
     # Seen but beyond every observed 16-step route: the walk that ends nearest to it, next to the search choices
     # (ores and stone can be cut toward; a log needs walking).
     return search(toward_walks(targets, "exposed"))

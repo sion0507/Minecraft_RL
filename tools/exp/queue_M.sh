@@ -1,7 +1,7 @@
 #!/bin/bash
 # Arm M: from the arm T heads, train on the stone-pickaxe chain and the iron task in turn (both with the time cost),
 # then evaluate both on slots 1-10. Asks whether the recipe that learned stone also learns the next link of the
-# diamond chain without losing the first. $1 = PID to wait for (0 = start now). One game server at a time.
+# diamond chain without losing the first. $1 = PID to wait for (a finished PID starts it now). One game server at a time.
 cd /home/sion/Documents/projects/RL_projects/Minecraft_learning-exp || exit 1
 export PYTHONPATH=$PWD/src PATH=/home/sion/Documents/projects/RL_projects/Minecraft_learning/.venv/bin:$PATH
 while kill -0 "$1" 2>/dev/null; do sleep 30; done

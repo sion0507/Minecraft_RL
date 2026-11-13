@@ -108,3 +108,15 @@ def test_stone_stair_cap_keeps_the_first_directions_at_full_depth_only(monkeypat
     monkeypatch.setattr(navigation, "STONE_STAIRS", 2)
     capped = [c for c in generate_resource_candidates(scene("dirt", []), STONE).candidates if c.action_kind == "stair_down"]
     assert len(full) > 2 and [c.params["stairs"] for c in capped] == [4, 4]
+
+
+def test_an_approach_that_ends_where_the_agent_already_stood_comes_with_the_cuts() -> None:
+    # T iron evaluation slots 4 and 8: the ore was out of reach from the approach's end, and that walk was the only candidate.
+    iron = Goal(goal_id="iron", kind="collect", target="iron_ore", quantity=3)
+    ore = [{"block": "iron_ore", "position": [2.0, 64.0, 0.0], "support": True}]
+    tools = {"inventory": {"stone_pickaxe": 1}, "tool": "stone_pickaxe"}
+    first = generate_resource_candidates(scene("dirt", ore, **tools), iron)
+    assert {c.action_kind for c in first.candidates} == {"move_observed"}
+    again = generate_resource_candidates(scene("dirt", ore, visited=[[1.0, 64.0, 0.0]], **tools), iron)
+    assert any(c.description.startswith("Approach exposed iron_ore") for c in again.candidates)
+    assert {"stair_down", "tunnel"} & {c.action_kind for c in again.candidates}
