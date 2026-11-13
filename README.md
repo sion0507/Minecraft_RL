@@ -159,7 +159,7 @@ full 목표 변경은 trace를 이어 가고, task terminal은 bootstrap 0, 유�
 
 ## 목재 파일럿 (#15 / T14, 신호 보강 #49)
 
-후속 **#51 T14B**는 별도 `pilot-signal` 명령과 `configs/signal_pilot.yaml`을 사용합니다. 현재 구현·7B 결과 보고 뒤 사용자의 게임 파일럿 승인을 받아야 실행합니다.
+후속 **#51 T14B**는 별도 `pilot-signal` 명령과 `configs/signal_pilot.yaml`을 사용합니다. 승인된 실제 파일럿과 후속 critic 오프라인 진단을 완료했고, 고정96상태 좋은 후보 확률 +0.037764로 등록 판정은 **“판정 보류”**입니다. 초기4/10→후5/10은 보조 결과입니다. [최종 결과와 실패·복구·critic 비교](docs/results/issue-51.md)를 기록했으며 본 학습 설정에는 자동 적용하지 않았습니다. 아래 명령의 추가 실제 실행은 별도 사용자 승인 대상입니다.
 
 ```bash
 PYTHONFAULTHANDLER=1 uv run --extra model mc-diamond pilot-signal --config configs/signal_pilot.yaml --output runs/pilot-signal-51
@@ -169,7 +169,7 @@ PYTHONFAULTHANDLER=1 uv run --extra model mc-diamond pilot-signal --config confi
 
 T14B는 초기10평가의 종류별 좋은/나쁜 선택 MC return 차이가 양수인지 먼저 확인합니다. 비교 표본이 없거나 차이가 양수가 아니면 학습하지 않고 수치를 남깁니다. 통과하면 LR3e-4로4,096결정/32rollout, MC 누적 critic 워밍업(EV≥0.3 또는 최대1,024결정,32epoch) 후 일반 GAE/PPO를 수행하고 후10평가를 보조 보고합니다. 주 판정은 초기평가에서 고정한 상태의 좋은 후보 확률 증가≥0.10/＜0.03/그 사이이며2,048결정 결과는 보조입니다. 같은 위치·인벤토리의 학습 자료는 보조 critic 적합의 학습 분할에서 제외합니다. 고정 상태 평가를 온라인 PPO가 보지 않은 환경에 대한 일반화로 해석하지 않습니다.
 
-산출물은 `--output`의 `signal/`에만 생성하며 초기heads/매updateheads·고정상태·지표·신호gate·분모20·실패·복원 여부를 보존합니다. 파일럿heads와경험은 본 학습 초기화/30,000결정에서 제외합니다. 게임·학습은 #49처럼 완료 이벤트로 확인하며 중간 모델 polling을 하지 않습니다. #18/#20 인계는 [T14B 인계 문서](docs/issue-51-handoff.md)를 참고합니다.
+산출물은 `--output`의 `signal/`에만 생성하며 초기heads/매updateheads·고정상태·지표·신호gate·분모20·실패·복원 여부를 보존합니다. 이번 실행은 원목채굴 good7/bad0로 원래gate=false를 보존한 명시적 사용자 예외였고, 원본 초기10을 재사용해 새4096학습·후10·초기head복원을 완료했습니다. 파일럿heads와경험은 본 학습 초기화/30,000결정에서 제외합니다. 게임·학습은 #49처럼 완료 이벤트로 확인하며 중간 모델 polling을 하지 않습니다. #18/#20 인계는 [T14B 인계 문서](docs/issue-51-handoff.md)를 참고합니다. 사용자 요청으로 #51 PDF두개는 삭제했고 새PDF를 생성하지 않았습니다.
 
 ```bash
 PYTHONFAULTHANDLER=1 uv run --extra model mc-diamond pilot-wood --config configs/wood_pilot.yaml --output runs/pilot-signal-49

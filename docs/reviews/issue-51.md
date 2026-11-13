@@ -1,3 +1,15 @@
+# Publication review — 2026-11-12
+
+Latest user approval supersedes historical pending-publication/closure statements below. Final code remains the existing #51 implementation; this publication adds the measured pilot/7B/offline-critic results and handoff, without adopting critic variants or running new experiments. Current source branch is feat/issue-51-pilot-signal; merge-base with origin/main is 1c3408ff641738c14967078ea4c78bd1b7e4a492, with f63ed87 approval documents followed by the current implementation.
+
+A fresh read-only reviewer traced CLI→pilot_signal→attempt/run_episode→SignalLearner/PPO plus reward, trace/MC boundaries, fixed/gate/divergence/critic diagnostics, direct callers and regression tests against #51/#1/PLAN. Critical/Important findings: **0**. A second pass compared the final summary and result tables/seed differences with saved aggregates. The original D3024.90seconds includes its information audit777.29seconds: supervisor stage timestamps are cumulative, not independent costs. No unresolved material accuracy findings.
+
+Fresh parent verification: full pytest **316 passed /234.93seconds** and strict mypy **54files** passed. Reviewer ran no tests/game/GPU/API and changed no files/Git. Existing residuals remain: same-rollout post-fit EV can end warmup early; fixed96 is not held-out online-PPO/environment generalization; a training backend error stops without retry; offline variants are measured evidence and have not been adopted in src. Actual memory retention caused pressure and an explicit interrupt; no OS OOM-kill claim is made.
+
+The user requested no new PDFs and deletion of the two issue51 PDFs; other issue reports and raw artifacts remain preserved. Historical review status follows.
+
+---
+
 # Issue 51 T14B — independent implementation review
 
 Base: `f63ed87e48e70fa2c20cab38b2048577f5356e2b`; branch `feat/issue-51-pilot-signal`, uncommitted implementation. Review included the new/untracked pilot, diagnostics, config and tests. Spec: #51/#1 body/comments, PLAN, confirmed DECISIONS and 2026-11-11 implementation plan.

@@ -1,5 +1,84 @@
 # 실행 기록
 
+## 2026-11-12 — #51 PR #53 병합·이슈 종료·로컬 main 동기화 완료
+
+사용자의명시적현재결과게시/종료요청을완료했다. 구현/결과커밋 `61dd164d27e959e56772167f85a389f89c36c7c8`를featurebranch에commit/push하고 PR **#53 MERGED**(https://github.com/sion0507/Minecraft_RL/pull/53 ,17:34:54 KST),merge `a656c200d633c1db7d4ed56a54df6f6df759549e`를확인했다. `Closes #51`에따라 **#51 CLOSED/completed**(https://github.com/sion0507/Minecraft_RL/issues/51 ,17:34:56 KST). 종료댓글 https://github.com/sion0507/Minecraft_RL/issues/51#issuecomment-6818897546 에판정/진단/한계/검증을기록했다. 로컬main도origin/main의병합결과로fast-forward했고최종상태문서commit/push를이어수행한다. 초기ff명령은샌드박스의.git/ORIG_HEAD쓰기차단으로실패했으나승인된동일명령으로정상완료,원격상태나자료를되돌리지않았다.
+
+**게시 검증:** pytest316개/234.93초·strictmypy54파일·git diff --check통과,독립코드/결과review Critical/Important0. 검사커밋61dd164와merge커밋a656c20의전체tree hash는모두 `7e138177aaa8befc3bff9e409b01ce950675e5c1`로동일하다. 원격PR은mergeable/CLEAN이었고statusCheckRollup/commitstatus는빈목록으로원격CI설정없음. 최종상태문서변경만추가하므로개발검사/게임을반복하지않았다.
+
+**종료한 범위:** 파일럿전용구현·원래gate중단·사용자예외4096/32update·고정96확률+0.037764/“판정 보류”·보조4/10→5/10·고정7B24응답·critic오프라인36checkpoint/24run/768rollout검산과두실패/복구/비용을전부기록했다. canonical결과는 `docs/results/issue-51.md`,seed/rollout별수치는 `docs/results/issue-51-critic-summary.json`이다. 초기gate=false·불완전표본·원시자료·공개초기head복원과실험한계를보존했고본학습/critic변형적용/새월드검증을완료로표시하지않았다.
+
+**PDF·원자료:** 사용자요청으로#51의기존report/code-guide PDF두개삭제·새PDF생성0,다른이슈37PDF및ignored artifacts/runs/checkpoints/worlds는보존했다. 원시trace/특징/가중치/로그를Git에넣지않았다. 이번마무리에서새게임·GPU/모델·유료API진단·본학습을추가하지않았다. 사용자승인작업완료이며추가연구실행/설정채택은별도결정이다.
+
+## 2026-11-12 — #51 게시·병합·종료 승인, 최종 개발 검사와 기록 정리 완료
+
+사용자가 #51의현재구현·실제파일럿·7B확인·후속critic오프라인평가까지기록해commit/push/PR/merge/이슈종료를명시승인했다. 이전게시금지는이범위에서대체된다. 현재는게시준비완료이며원격PR/merge/이슈상태는다음완료절에서확인한다. 본학습·critic변형채택·새게임/모델/유료API진단은추가하지않았다.
+
+**개발검사(새 실행):** `UV_CACHE_DIR=.cache/uv .tools/uv run --locked --no-sync pytest` 전체316개/234.93초통과,동일uv의strict `mypy .`54파일통과. tiny/mock/fixture 개발검사이며새Minecraft게임이나공개모델학습효과검증이아니다. `artifacts/issue-51/publication-{pytest,mypy}.txt`에보존했다. 독립read-only검토는공개CLI→파일럿→episode/학습/보상/신호/복원및회귀검사를연결해확인했고Critical/Important0,수치문서도원본summary/aggregates와대조했다. 단계별누적시간3024.90초에정보감사777.29초를다시더하지않음을확인했다.
+
+**기록:** `docs/results/issue-51.md`에전체결과/실패/복구/한계를, `docs/results/issue-51-critic-summary.json`에모든등록step·3seed·32rollout별critic수치/원자료hash를기록했다. README/CONTEXT/DECISIONS/#16/#17/#18/#20인계를최신화했다. 실제판정은여전히“판정 보류”이며보조4/10→5/10·원래gate=false·초기복원true·critic추가계산효과와미검증범위를구분했다. 원시trace/특징/가중치/실행로그는Git제외로보존한다.
+
+**PDF(사용자 지시):** reports/issue-051-T14B-report.pdf와code-guide.pdf두개삭제확인,새PDF생성0·다른이슈PDF37개보존. 삭제전hash/크기는 `artifacts/issue-51/publication-pdf-deletion.json`에만기록했다. 아래PDF존재/생성문구는당시이력이다.
+
+## 2026-11-12 — #51 critic 오프라인 복구 완료·등록36checkpoint/24온라인실행 검산 완료
+
+**실제 실행:** `artifacts/issue-51/critic-offline-20261112-141206/recovery-20261112-164118/`, 2026-11-12T16:46:16.626665+09:00→2026-11-12T16:47:48.683774+09:00, background exit0·전체92.06초. 앞선실패의138shard/4096특징을전부재사용하고마지막선택되지않은bootstrap상태1개(후보1개)만새로인코딩했다(모델로드포함10.72초). 수집결정은4096개/완료MC4045개로유지했고경계상태를수집/학습정답에추가하지않았다. 원본실패보고·비용은보존했다.
+
+**수정·검증:** artifacts진단의다음상태연결에외부bootstrap특징인덱스를지원하고,fit입력행렬에그1개특징만별도로붙였다. src는변경하지않았다. 경계회귀검사2개RED→GREEN·기존MC/GAE자가검사통과. 원본summary와32rollout의당시완료/누적MC표본수가모두일치한다. 저장예측으로768개rollout EV/합산EV,24run/36checkpoint/3seed/두분할/모든등록step,592대8404gradient수,동일seed·입력네방식의초기256예측동일,미래MC정답제외·paired차이/등록기준을별도CPU검산했다. protocol원문은바이트동일하고결과를보고설정/checkpoint를고르지않았다.
+
+**기준 재현:** 주검증n1007 저장critic EV0.184019,보조n1037 0.161146,결정1024이후n3055 합산0.213676. 선형기준은주분할목표만0.200509/+시간·보유량0.354391/+거리0.492807,보조는0.342244/0.500093/0.595704다. 주분할학습3038/검증1007은103번째episode가양쪽에걸리고,보조학습3008/검증1037은episode중복0이다.
+
+**고정 MC 적합(실제GPU,3seed 평균±SD):** head seed11051/22051/33051,LR1e-4·batch32·BF16 autocast/FP32파라미터·TF32off,기존구조256/GELU/1. 스칼라는진행도·visible원천거리/32·남은틱/1800이다.
+
+| 분할 | step | 현재 입력 EV | +스칼라 EV |
+|---|---:|---:|---:|
+| 주 시간순 | 128 | 0.331 ± 0.015 | 0.355 ± 0.023 |
+| 주 시간순 | 512 | 0.411 ± 0.011 | 0.446 ± 0.003 |
+| 주 시간순 | 2000 | 0.447 ± 0.009 | 0.486 ± 0.006 |
+| 보조 episode | 128 | 0.378 ± 0.016 | 0.391 ± 0.011 |
+| 보조 episode | 512 | 0.442 ± 0.007 | 0.493 ± 0.009 |
+| 보조 episode | 2000 | 0.491 ± 0.006 | 0.565 ± 0.009 |
+
+**온라인 순차 재현(결정1024이후합산 예측EV,3seed 평균±SD):** 첫128결정MC32epoch워밍업공통,이후미래return없이학습하고각rollout학습전예측을채점했다. actor는학습하지않고기록된행동흐름을고정했다.
+
+| 온라인 방식 | 현재 입력 EV | +스칼라 EV | optimizer step |
+|---|---:|---:|---:|
+| 최신GAE4epoch | 0.206 ± 0.074 | 0.209 ± 0.028 | 592 |
+| 최신MC4epoch | 0.173 ± 0.052 | 0.229 ± 0.031 | 592 |
+| 누적MC동일step | 0.241 ± 0.064 | 0.235 ± 0.005 | 592 |
+| 누적MC4epoch | 0.329 ± 0.066 | 0.387 ± 0.033 | 8404 |
+
+**통제 비교:** 뚜렷함은평균차이≥0.05·세paired seed모두양수로실행전에등록했다.
+
+| 입력 | 비교 | EV 평균 차이 | seed 최소–최대 | 뚜렷함 |
+|---|---|---:|---:|---|
+| 현재 | ①목표값 | -0.032 | -0.144~+0.119 | 미통과 |
+| 현재 | ②재사용 | +0.068 | -0.041~+0.156 | 미통과 |
+| 현재 | ③계산량 | +0.088 | +0.009~+0.157 | 통과 |
+| 스칼라 | ①목표값 | +0.020 | -0.035~+0.095 | 미통과 |
+| 스칼라 | ②재사용 | +0.006 | -0.043~+0.032 | 미통과 |
+| 스칼라 | ③계산량 | +0.152 | +0.112~+0.177 | 통과 |
+
+**해석·미검증:** 현재입력MC적합0.447>저장예측0.184로현재구조/입력에도추가예측력이있고학습방식·자료·계산량을검토할근거가있다. 스칼라추가주분할2000step+0.038은기준미달,보조+0.075는통과해양쪽512/2000모두요구한견고한개선기준은불통과다. ①목표값·②동일gradient재사용은두입력모두일관된개선을확인하지못했고,③누적MC의592→8404step(약14.2배)추가계산은둘다통과했다. MC목표/재사용만으로좋아진다는가설은이번결과로확정하지않는다. ①에는MC미완성꼬리표본차이,②③에는셔플epoch/복원추출방식차이도있다. seed SD는환경표본의신뢰구간이아니며,고정월드·기록정책자료의값예측진단이어서새월드일반화·실제actorPPO효율/성공률개선은미검증이다. EV상한을주장하거나설정을채택하지않았다.
+
+**자원·보존:** 이번GPU계산/감사90.67초·supervisor전체92.06초,선행추론538.38+실패7316.47+복구합계7946.91초(2시간12분26.91초;준비/CPU검산/기록시간별도). RAMpeak5750.6MiB,PyTorch GPU allocated/reserved peak2543.4/2598.0MiB. src·원본trace·summary·파일럿head hash모두불변. 새게임/bridge/API/7B/본학습0,commit/push/merge/이슈종료/PDF갱신없음. GPU작업종료확인. 본학습초기화에진단head/경험을사용하지않는다.
+
+**산출물:** 같은폴더의`report.md`,`results.json`,`aggregates.json`,`online-rollouts.csv`,`online-rollouts-mean.csv`,`results-verification.json`,`final-audit.json`,`encoding-audit.json`,`cache-read-audit.json`,회귀/CPU검사로그와실행로그. 기존Claude기록및앞선실패절은아래에그대로보존했다.
+
+## 2026-11-12 — #51 critic 오프라인 진단 실패·전체 특징 보존·비교 학습 미실행
+
+**실패(실제):** `artifacts/issue-51/critic-offline-20261112-141206/`, background 14:25:38→16:27:35 KST, exit1, elapsed 7316.47초. GPU 특징 추출138episode/4096결정 및138개 원자shard 저장은 완료했지만, 이어진 next-state 연결 assertion에서 멈춰 static checkpoint0/예정36·온라인run0/예정24이다. 결과/집계/최종완료audit는 생성되지 않았다. 새로 만든 `report.md`는 성공 보고가 아닌 실패 보고다.
+
+**확인된 원인:** 진단 스크립트가 모든 valid+bootstrap 전이의 next state를 다음 선택 행에서 찾을 수 있다고 가정했다. 유일한 누락은 마지막 결정번호4095(episode138, pilot:logs)다. 다음상태 obs_id `8c76569a-8525-4264-ac54-d68eb256b0e5:1228`, 남은572틱·후보1개는 원본transition.next_state에 실제 존재하지만,4096결정 상한 뒤라 선택행/추출특징에는 없다. 마지막 bootstrap 상태 특징의 별도 보관을 빠뜨린 진단 코드 결함이며 게임 오류·GPU OOM·원자료 손상이 아니다. 해당 assertion을 삭제하거나 next value를0으로 임의 대체하지 않았다.
+
+**CPU 감사만 추가 실행:** 저장shard138개/4096행의 특징·mask·context·pooling 크기와 유한값·순서를 검사했다. 저장된 critic 예측 재현 최대절대오차는4096개 모두0. 유효완료MC4045개. trace138개·원본summary·파일럿head·src Python의SHA256은 착수 때와 모두일치한다. 마지막next_state의원문과key일치도확인했다. `failure-audit.json`, `cached-rows-audit.json`, `logged-baseline-rollouts.csv`에 근거를 보존했다. 새로운 GPU추론·critic학습·선형재적합·실험재시도는하지않았다.
+
+**기존 저장예측 기준 재현:** 주 시간순검증 n1007 EV0.184019(기존0.184), episode단위보조검증 n1037 EV0.161146, 결정1024이후합산 n3055 EV0.213676(기존0.214). 이 값은 저장예측을다시채점한것이며 새critic의성능이아니다. 과거선형기준0.201/0.354/0.493은참고값으로만유지,이번에는재적합하지않았다.
+
+**미실행:** 양쪽분할·입력2종·seed11051/22051/33051의 static128/512/2000 checkpoint 전부, 온라인 최신GAE4epoch/최신MC4epoch/누적MC동일gradient수/누적MC4epoch 전부 미실행. 따라서①목표값·②재사용·③계산량의차이와seed범위,등록상뚜렷함은전부미측정이다. MC완료꼬리/미래정답유출방지의온라인실행검증도남아있다. 설정채택·EV상한·새월드일반화·실제PPO개선은판단하지않는다.
+
+**비용·운영:** background7316.47초+앞선의도적중단추론538.38초=7854.85초(2시간10분54.85초). 초기장치표기기동실패약2.59초·준비/기록시간은별도다. 최대관측RAM5571.4MiB(약5.44GiB),GPUpeak최종계측미실행. 완료알림queue는returncode0으로1회전송됐다. 게임·bridge·모델API·7B·본학습0,src수정/commit/push/merge/이슈종료/PDF갱신없음. 사용자지시대로자동재시도하지않았다. 향후복구는저장된4096특징을재사용하고마지막경계상태를별도로처리해검사한뒤미실행비교를시작하는별도작업이며,아직수정·실행하지않았다.
+
 ## 2026-11-12 — #51 후속 critic 오프라인 진단 백그라운드 실행 중(온라인 통제 변형 2개 추가 승인)
 
 **실제 착수·미완료:** `artifacts/issue-51/critic-offline-20261112-141206/`, 시작 2026-11-12T14:25:38.644536+09:00, supervisor PID 89308/자식 89309. 저장된138 trace·4,096결정의 공개NanoJev frozen특징을GPU에서 순차 재인코딩한다. 관측 전체를 누적하지 않고 후보특징·mask·context·스칼라만 남기며 새 실행은 에피소드별 원자checkpoint를 저장한다. 현재 새critic 비교 결과는 아직 미실행·미확정이다.
