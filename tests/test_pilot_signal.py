@@ -75,6 +75,7 @@ def test_movement_cli_summarizes_currently_visible_endpoint_radius_without_chang
     assert candidate["candidate_id"] == "obs-0:move:0"
     assert candidate["params"] == {"path": [[1.5, 64., .5], [2.5, 64., .5]], "map_version": 1}
     assert candidate["description"] == ("Walk 2 steps east, level, over observed cells to [2.5, 64.0, 0.5]; "
+                                        "surface exploration, deep/resource/frontier endpoint; "
         "currently visible within 16 blocks of it: birch_log 1, oak_log 1, stone 3")
 
 

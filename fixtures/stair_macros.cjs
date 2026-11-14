@@ -10,7 +10,7 @@ const Block = require('../bridge/node_modules/prismarine-block')('1.16.5')
 const plain = value => JSON.parse(JSON.stringify(value))
 
 // Standing on y=64 at (0,65,0); everything east of x=1 is rock up to y=70.
-function scene ({ blocks = {}, tool = 'iron_pickaxe', durability = 250, digTicks = 3, position = [0.5, 65, 0.5],
+function scene ({ blocks = {}, stock = {}, tool = 'iron_pickaxe', durability = 250, digTicks = 3, position = [0.5, 65, 0.5],
   onGround = true, onDig = null } = {}) {
   const changed = new Map(Object.entries(blocks))
   const name = ({ x, y, z }) => changed.get([x, y, z].join(',')) ?? (y < 65 || (x >= 1 && y <= 70) ? 'stone' : 'air')
@@ -28,7 +28,16 @@ function scene ({ blocks = {}, tool = 'iron_pickaxe', durability = 250, digTicks
       effects: {}, eyeHeight: 1.62, metadata: { 0: 0, 1: 300 } },
     jumpTicks: 0, jumpQueued: false, fireworkRocketDuration: 0, version: '1.16.5', health: 20, entities: {}, physicsEnabled: false,
     heldItem: tool ? { name: tool, maxDurability: 250, durabilityUsed: 250 - durability } : null,
-    inventory: { slots: [], items: () => bot.heldItem ? [{ name: bot.heldItem.name, count: 1 }] : [] },
+    inventory: { slots: [], items: () => [...Object.entries(stock).filter(([, count]) => count > 0).map(([name, count]) => ({ name, count })),
+      ...(bot.heldItem && !Object.hasOwn(stock, bot.heldItem.name) ? [{ ...bot.heldItem, count: 1 }] : [])] },
+    async equip (item) { bot.heldItem = item },
+    async placeBlock (reference, face) {
+      const point = reference.position.plus(face)
+      const item = bot.heldItem.name
+      if (world.getBlock(point).name !== 'air' || stock[item] < 1) throw Error('invalid placement')
+      changed.set(point.toArray().join(','), item)
+      stock[item]--
+    },
     blockAt (point) { reads.add(point.toArray().join(',')); return world.getBlock(point) },
     digTime: () => digTicks * 50, swingArm () {},
     setControlState (key, value) { control[key] = value },
@@ -219,8 +228,8 @@ async function main () {
     const s = scene({ digTicks: 6 })
     s.c.afterTick = () => { if (s.dug.length === 2 && ++ticks === 2) s.changed.set('1,65,0', 'gravel') }
     const step = await s.stair({ stairs: 1 })
-    assert.equal(step.reason, 'stairs_completed')
-    assert.deepEqual(s.dug, [[1, 66, 0], [1, 65, 0], [1, 65, 0], [1, 64, 0]], 'the refilled cell is cut again first')
+    assert.equal(step.reason, 'unsafe_cut')
+    assert.deepEqual(s.dug, [[1, 66, 0], [1, 65, 0]], 'new gravel above the active cut aborts that cut')
   }
   for (const [label, maxTicks, start] of [['macro cap', 10, null], ['active budget', 400, 'budget - 10']]) {
     // A refill seen on the cap's last tick ends the macro there; re-judging must not buy one more tick.
@@ -385,4 +394,5 @@ async function main () {
   process.stdout.write(JSON.stringify({ passed: true }) + '\n')
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1 })
+module.exports = scene
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })

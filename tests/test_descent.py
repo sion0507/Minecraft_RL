@@ -1,8 +1,10 @@
 """T06 behavior through the public smoke-macros boundary and the shipping bridge."""
 
 import json
+import gzip
 import math
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -65,11 +67,36 @@ def test_cli_offers_each_direction_facing_first_with_two_workloads_and_saves_the
     _, output = run(tmp_path, surface(), [stop_step()])
     candidates = first_candidates(output)
     assert directions(candidates)[0] == [0, 1], "yaw pi faces south, so continuing is the first choice"
-    assert sorted(map(tuple, directions(candidates))) == [(-1, 0), (0, -1), (0, 1), (1, 0)]
-    assert len(candidates) == 8
+    assert directions(candidates) == [[0, 1], [-1, 0]], "C1 keeps forward and a consistent clockwise turn"
+    assert len(candidates) == 4
     assert {c["params"]["stairs"] for c in candidates} == {1, 4}
     assert all(c["params"]["stop_blocks"] == ["diamond_ore"] and c["max_ticks"] == 400 for c in candidates)
     assert all(c["params"]["map_version"] == 0 for c in candidates)
+    assert "estimated 188 ticks assuming stone" in candidates[0]["description"]
+    assert output[-1]["data"]["stair_length_choices"] == {"descend:safe_mining_zone:y64:iron_pickaxe": {"4": 1}}
+
+
+@pytest.mark.parametrize("yaw,expected", [(0.0, [[0, -1], [1, 0]]), (-math.pi / 2, [[1, 0], [0, 1]]),
+    (math.pi, [[0, 1], [-1, 0]]), (math.pi / 2, [[-1, 0], [0, -1]])])
+def test_representative_cuts_can_turn_through_all_four_headings(tmp_path: Path, yaw: float, expected: list[list[int]]) -> None:
+    _, output = run(tmp_path, surface(yaw=yaw), [stop_step()])
+    assert directions(first_candidates(output)) == expected
+
+
+def test_length_evaluation_control_logs_fixed_four_input_without_training(tmp_path: Path) -> None:
+    run(tmp_path, surface(), [stop_step()])
+    output = tmp_path / "length-control"
+    process = subprocess.run([sys.executable, "tools/exp/evaluate_lengths.py", "--config", str(tmp_path / "descent.yaml"),
+        "--output", str(output), "--selector", "uniform", "--mode", "fixed4", "--slots", "1"],
+        capture_output=True, text=True, timeout=15)
+    assert process.returncode == 0, process.stderr
+    summary = json.loads((output / "summary.json").read_text())
+    assert summary["training"] is False and summary["episodes"][0]["seed"] == 15000
+    with gzip.open(output / "task0-slot1-1.jsonl.gz", "rt") as trace:
+        rows = [json.loads(line) for line in trace]
+    effective = next(row["data"] for row in rows if row["type"] == "execution_length_input")
+    assert {c["params"]["stairs"] for c in effective["candidates"]["candidates"]} == {4}
+    assert rows[-1]["data"]["stair_length_choices"] == {"descend:safe_mining_zone:y64:iron_pickaxe": {"4": 1}}
 
 
 @pytest.mark.parametrize("veto", [
@@ -174,6 +201,12 @@ def test_shipping_bridge_stair_contract() -> None:
     assert json.loads(result.stdout) == {"passed": True}
 
 
+def test_shipping_bridge_ascent_contract() -> None:
+    result = subprocess.run(["node", "fixtures/ascent_macros.cjs"], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"passed": True}
+
+
 # T07: level tunnels and the diamond/iron ore search through the same public smoke-macros boundary.
 DIAMOND = {"goal_id": "g4", "kind": "mine_diamond", "target": "diamond", "quantity": 1}
 
@@ -191,8 +224,8 @@ def test_cli_g4_offers_level_tunnels_in_each_direction_with_a_taller_section(tmp
     _, output = run(tmp_path, chamber(), [stop_step()], goal=DIAMOND)
     found = tunnels(first_candidates(output))
     assert [c["params"]["direction"] for c in found][0] == [0, 1], "yaw pi faces south, so continuing is the first choice"
-    assert sorted(tuple(c["params"]["direction"]) for c in found if c["params"]["height"] == 2) == [(-1, 0), (0, -1), (0, 1), (1, 0)]
-    assert [c["params"]["height"] for c in found] == [2, 2, 2, 2, 3]
+    assert [c["params"]["direction"] for c in found if c["params"]["height"] == 2] == [[0, 1], [-1, 0]]
+    assert [c["params"]["height"] for c in found] == [2, 2, 3]
     assert all(c["params"]["cells"] == 8 and c["params"]["stop_blocks"] == ["diamond_ore"] and c["max_ticks"] == 400
                and c["stop_rule_id"] == "tunnel_ore_or_hazard" for c in found)
 
@@ -222,7 +255,7 @@ def test_cli_g2_still_descends_first_above_the_iron_layers(tmp_path: Path) -> No
     state = surface(inventory={"stone_pickaxe": 1}, tool="stone_pickaxe", tool_durability=131, remaining_ticks=12000)
     _, output = run(tmp_path, state, [stop_step()], goal=IRON)
     kinds = [c["action_kind"] for c in first_candidates(output)]
-    assert kinds[:4] == ["stair_down"] * 4 and "tunnel" in kinds
+    assert kinds[:2] == ["stair_down"] * 2 and "tunnel" in kinds
 
 
 # T07C (#38): one shared cap of 16 with slots per kind (walk 6, tunnel 5, stair 4, any other kind 1).
@@ -243,12 +276,11 @@ def test_cli_cuts_ore_search_to_sixteen_by_kind_slots_and_records_the_cut(tmp_pa
     step = stop_step(observation={"active_ticks": 40, "remaining_ticks": 11960})
     _, output = run(tmp_path, state, [step], goal=IRON)
     saved = saved_set(output)
-    # Generated above the iron layers: 4 full stairs, 5 tunnels, 8 walks, 4 single stairs (21). Slots keep 15; the free
-    # 16th goes to the first cut candidate in generation order, the seventh walk. Kept candidates stay in that order.
-    assert [c["action_kind"] for c in saved["candidates"]] == ["stair_down"] * 4 + ["tunnel"] * 5 + ["move_observed"] * 7
-    assert {c["params"]["stairs"] for c in saved["candidates"] if c["action_kind"] == "stair_down"} == {4}
-    assert saved["mask"] == [True] * 16
-    assert saved["generated"] == 21 and saved["truncated"] == {"move_observed": 1, "stair_down": 4}
+    # C1: two broad stairs, three tunnels, eight walks and two short stairs fit without filling meaningless slots.
+    assert [c["action_kind"] for c in saved["candidates"]] == ["stair_down"] * 2 + ["tunnel"] * 3 + ["move_observed"] * 8 + ["stair_down"] * 2
+    assert {c["params"]["stairs"] for c in saved["candidates"] if c["action_kind"] == "stair_down"} == {1, 4}
+    assert saved["mask"] == [True] * 15
+    assert saved["generated"] == 15 and saved["truncated"] == {}
     selection = next(row["data"] for row in output if row["type"] == "selection")
     executed = output[-1]["data"]["macro_steps"][0]
     assert selection["candidate_id"] == executed["candidate_id"] == saved["candidates"][0]["candidate_id"]
@@ -260,8 +292,23 @@ def test_cli_cuts_ore_search_to_sixteen_by_kind_slots_and_records_the_cut(tmp_pa
 def test_cli_keeps_every_candidate_up_to_the_cap(tmp_path: Path) -> None:
     _, output = run(tmp_path, chamber(), [stop_step()], goal=DIAMOND)
     saved = saved_set(output)
-    assert len(saved["candidates"]) == saved["generated"] == 13, "4 full and 4 single stairs, 5 tunnels"
+    assert len(saved["candidates"]) == saved["generated"] == 7, "two broad and two short stairs, three tunnels"
     assert saved["truncated"] == {}
+
+
+def test_shared_cap_counts_walks_before_combining_them_with_cuts(tmp_path: Path) -> None:
+    span = range(-5, 6)
+    room = [cell("dirt", x, 63, z, support=True) for x in span for z in span]
+    room += [cell("air", x, y, z, passable=True) for x in span for y in range(64, 71) for z in span]
+    room += [cell("stone", x, y, z, support=True) for x in span for z in span if max(abs(x), abs(z)) == 4 for y in (64, 65)]
+    room += [cell("stone", 2, 64, 0, support=True)]
+    initial = surface(observed_map=room, inventory={"stone_pickaxe": 1, "dirt": 4}, tool="stone_pickaxe", tool_durability=131,
+                      remaining_ticks=12000)
+    _, output = run(tmp_path, initial, [stop_step(observation={"active_ticks": 40, "remaining_ticks": 11960})], goal=IRON)
+    saved = saved_set(output)
+    assert len(saved["candidates"]) == 16
+    assert saved["generated"] == 24, "17 distinct walks plus four stairs and three tunnels, capped once"
+    assert sum(saved["truncated"].values()) == 8
 
 
 @pytest.mark.parametrize("veto", [

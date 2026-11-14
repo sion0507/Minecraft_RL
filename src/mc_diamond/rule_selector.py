@@ -23,7 +23,7 @@ from .navigation import hazard_distance
 from .schema import Candidate, CandidateSet, Goal, Observation, SelectionResult
 from .selectors import result, signature
 
-RULE_VERSION = "s-rules-v1"
+RULE_VERSION = "s-rules-v2-issue54"
 RULE_HASH = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 BLOCK = {"cobblestone": "stone", "diamond": "diamond_ore"}  # goal target -> the block that drops it
 FACILITY = {"craft": "crafting_table", "smelt": "furnace"}
@@ -40,13 +40,16 @@ def reach(candidate: Candidate, observation: Observation) -> list[list[float]]:
     path = cast(list[list[float]], params.get("path") or [])
     if path:
         return [path[-1]]
-    if "blocks" in params:
+    if candidate.action_kind == "mine_visible_cluster":
         return [[v + 0.5 for v in block] for block in cast(list[list[float]], params["blocks"])]
     if "direction" in params:
         dx, dz = cast(list[int], params["direction"])
-        if candidate.action_kind == "stair_down":
-            return [[x + dx * k + 0.5, y - k, z + dz * k + 0.5] for k in range(1, _number(candidate, "stairs") + 1)]
+        if candidate.action_kind in {"stair_down", "stair_up"}:
+            rise = 1 if candidate.action_kind == "stair_up" else -1
+            return [[x + dx * k + 0.5, y + rise * k, z + dz * k + 0.5] for k in range(1, _number(candidate, "stairs") + 1)]
         return [[x + dx * k + 0.5, y, z + dz * k + 0.5] for k in range(1, _number(candidate, "cells") + 1)]
+    if candidate.action_kind == "pillar_up":
+        return [[x + 0.5, y + k, z + 0.5] for k in range(1, _number(candidate, "blocks") + 1)]
     return [list(observation.position)]
 
 
@@ -56,7 +59,7 @@ def workload(candidate: Candidate) -> float:
         return float(len(cast(list[object], candidate.params["path" if kind == "move_observed" else "blocks"])))
     if kind == "tunnel":
         return float(_number(candidate, "cells") * _number(candidate, "height"))
-    return float(_number(candidate, "stairs" if kind == "stair_down" else "quantity"))
+    return float(_number(candidate, "blocks" if kind == "pillar_up" else "stairs" if kind in {"stair_down", "stair_up"} else "quantity"))
 
 
 def relevance(candidate: Candidate, observation: Observation, goal: Goal) -> int:

@@ -60,7 +60,8 @@ def public_state(observation: Observation) -> dict[str, Any]:
     observation = Observation.model_validate(observation.model_dump())
     state = observation.model_dump(exclude={"episode_id", "attempt_id", "obs_id", "observed_map", "visited", "history"})
     state.update(memory=memory_summary(observation), visited_count=len(observation.visited),
-                 recent_visited=observation.visited[-32:], recent_results=observation.history[-8:])
+                 recent_visited=observation.visited[-32:], recent_results=observation.history[-8:],
+                 cut_entrances=observation.cut_entrances[-8:])
     return state
 
 

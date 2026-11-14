@@ -161,14 +161,15 @@ STONE = {"block": "stone", "passable": False, "support": True}
     (1, {}, [1.5, 65.0, 0.5]),
     (-1, {}, [1.5, 63.0, 0.5]),
     (1, {(0, 67): STONE, (1, 67): STONE}, [1.5, 65.0, 0.5]),  # A 3-high climb: the ceiling is one over the jump's head.
-    (2, {}, None), (-2, {}, None),
+    (2, {}, None), (-2, {}, [1.5, 62.0, 0.5]), (-3, {}, [1.5, 61.0, 0.5]), (-4, {}, None),
+    (-3, {(1, 63): None}, None), (-3, {(1, 63): STONE}, [1.5, 64.0, 0.5]),
     (1, {(0, 66): None}, None),  # The jump's head cell over the start column is unobserved ...
     (1, {(0, 66): STONE}, None),  # ... or solid.
     (-1, {(1, 65): STONE}, None),  # The drop's front head cell at the start height.
     (-1, {(1, 62): {"block": "magma_block", "hazard": True}}, None),
     (1, {(0, 63): {"block": "slime_block"}}, None), (-1, {(1, 62): {"block": "slime_block"}}, None),
 ])
-def test_movement_cli_offers_only_observed_one_block_steps(tmp_path: Path, rise: int, changes: dict[tuple[int, int], Any],
+def test_movement_cli_offers_observed_steps_and_safe_drops(tmp_path: Path, rise: int, changes: dict[tuple[int, int], Any],
                                                            end: list[float] | None) -> None:
     fixture = mock_fixture()
     fixture["initial"].update(position=[0.5, 64.0, 0.5], observed_map=step_cells(rise, changes), map_version=1)
@@ -195,6 +196,17 @@ def test_movement_cli_never_offers_a_walk_back_into_the_start_column(tmp_path: P
                             text=True, capture_output=True, timeout=15)
     ends = [c["params"]["path"][-1] for c in next(r["data"] for r in records(result) if r["type"] == "candidates")["candidates"]]
     assert ends and all((e[0] // 1, e[2] // 1) != (0, 0) for e in ends), ends
+
+
+def test_deep_endpoint_preference_keeps_a_short_climb_beyond_flat_ground(tmp_path: Path) -> None:
+    fixture = mock_fixture()
+    cells = step_cells(0, {}) + [{"block": "stone" if y <= 64 else "air", "position": [2.0, float(y), 0.0],
+        "support": y <= 64, "passable": y > 64} for y in range(60, 68)]
+    fixture["initial"].update(position=[0.5, 64.0, 0.5], observed_map=cells, map_version=1)
+    result = subprocess.run(["mc-diamond", "smoke-movement", "--config", str(fixture_config(tmp_path, fixture))],
+                            text=True, capture_output=True, timeout=15)
+    saved = next(row["data"] for row in records(result) if row["type"] == "candidates")
+    assert any(c["params"]["path"][-1] == [2.5, 65.0, 0.5] for c in saved["candidates"])
 
 
 def test_far_scan_reaches_radius_32_diagonals_keeps_occlusion_and_near_scans_only_refresh_the_near_view() -> None:
@@ -307,13 +319,14 @@ def test_shipping_movement_climbs_and_drops_one_observed_block_within_the_caps()
     rows = {row["floorName"]: row for row in json.loads(result.stdout)}
     for row in rows.values():
         assert 1 <= row["actual_ticks"] <= 400 and row["distance_moved"] <= 16, row
-    for name, end in [("step_up", [2, 65, 0]), ("step_down", [2, 63, 0])]:
+    for name, end in [("step_up", [2, 65, 0]), ("step_down", [2, 63, 0]),
+                      ("step_two_down", [2, 62, 0]), ("step_three_down", [2, 61, 0])]:
         assert rows[name]["reason"] == "path_completed" and rows[name]["stable_boundary"], rows[name]
         assert [v // 1 for v in rows[name]["position"]] == end and rows[name]["position"][1] == end[1], rows[name]
     assert rows["step_low"]["reason"] == "path_completed" and rows["step_low"]["position"][1] == 65, rows["step_low"]
     for name in ["step_escape", "step_overhang"]:  # Walks out of the hazard radius, and back off a ledge it overhangs.
         assert rows[name]["reason"] == "path_completed" and rows[name]["stable_boundary"], rows[name]
-    for name in ["step_two_up", "step_two_down", "step_unknown", "step_blocked", "step_magma", "step_slime", "step_hazard",
+    for name in ["step_two_up", "step_four_down", "step_drop_unknown", "step_drop_blocked", "step_unknown", "step_blocked", "step_magma", "step_slime", "step_hazard",
                  "step_closer"]:
         assert rows[name]["reason"] == "invalid_path" and rows[name]["actual_ticks"] == 1, rows[name]
     assert rows["step_pit"]["reason"] == "observed_hazard" and not rows["step_pit"]["stable_boundary"], rows["step_pit"]
@@ -415,6 +428,12 @@ for line in admin:
  if p.get('scope')=='steps':
   o['observed_map']=[{'block':'stone' if y<=63+(x>0) else 'air','position':[float(x),float(y),0.0],'passable':y>63+(x>0),
      'support':y<=63+(x>0),'hazard':False} for x in range(3) for y in range(60,68)]
+ if p.get('scope') in ['ascent_pillar','ascent_ledge','ascent_stair','safe_drop','recover_table','unsafe_cut']:
+  o.update(inventory={'iron_pickaxe':1,'dirt':4},tool='iron_pickaxe',tool_durability=250,on_ground=True)
+  if p['scope'] in ['ascent_ledge','safe_drop']:
+   rise=2 if p['scope']=='ascent_ledge' else -3
+   o['observed_map']=[{'block':'stone' if y<=63+(rise if x else 0) else 'air','position':[float(x),float(y),0.],
+      'passable':y>63+(rise if x else 0),'support':y<=63+(rise if x else 0)} for x in range(2) for y in range(60,70)]
  r=json.loads(sys.stdin.readline());reply(r,o)
  if not p['exposed']:
   r=json.loads(sys.stdin.readline());c=r['payload']['candidate'];ticks=int(sys.argv[1])
@@ -440,6 +459,10 @@ for line in admin:
     n.update(inventory={'oak_log':1},drops=[])
     result['events'].append({'kind':'acquired','item':'oak_log','quantity':1,'source':'minecraft'})
   if p.get('scope')=='empty' and sys.argv[2]=='1': result['events']=[]
+  if p.get('scope') in ['ascent_pillar','ascent_ledge','ascent_stair','safe_drop','recover_table','unsafe_cut']:
+   reason={'ascent_pillar':'pillar_completed','ascent_ledge':'path_completed','ascent_stair':'stairs_completed',
+      'safe_drop':'path_completed','recover_table':'cluster_completed','unsafe_cut':'unsafe_cut'}[p['scope']]
+   result.update(reason=reason,stop_evidence=['obs-1',reason])
   if str(p.get('scope')).startswith(('stair','tunnel')):
    tunnel=p['scope'].startswith('tunnel')
    for index in range(2 if p['scope'] in ('stair_exposed','stair_iron','tunnel','tunnel_iron') else 1):

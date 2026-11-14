@@ -344,7 +344,7 @@ def test_s_returns_one_offered_id_from_a_capped_set_with_its_rule_record() -> No
     assert chosen.candidate_id in [c.candidate_id for c in saved.candidates]
     assert (chosen.selector_mode, chosen.probabilities, chosen.provider, chosen.model, chosen.usage) == (
         "rule_deterministic", None, None, None, None)
-    assert chosen.rule_version == "s-rules-v1"
+    assert chosen.rule_version == "s-rules-v2-issue54"
     assert chosen.rule_hash == RULE_HASH == hashlib.sha256(Path("src/mc_diamond/rule_selector.py").read_bytes()).hexdigest()
     assert chosen.rule_keys is not None and set(chosen.rule_keys) == {c.candidate_id for c in saved.candidates}
     masked = saved.model_copy(update={"mask": [c.candidate_id != chosen.candidate_id for c in saved.candidates]})

@@ -120,3 +120,110 @@ def test_an_approach_that_ends_where_the_agent_already_stood_comes_with_the_cuts
     again = generate_resource_candidates(scene("dirt", ore, visited=[[1.0, 64.0, 0.0]], **tools), iron)
     assert any(c.description.startswith("Approach exposed iron_ore") for c in again.candidates)
     assert {"stair_down", "tunnel"} & {c.action_kind for c in again.candidates}
+
+
+def test_two_block_ledge_has_a_scaffold_walk_and_pit_has_bounded_ascent() -> None:
+    from mc_diamond.episode import policy_candidates
+    ledge = [{"block": "stone", "position": [1.0, float(y), 0.0], "support": True} for y in (64, 65)]
+    ledge += [{"block": "air", "position": [float(x), float(y), 0.0], "passable": True}
+              for x in (0, 1) for y in range(66, 71)]
+    observation = scene("dirt", ledge, inventory={"wooden_pickaxe": 1, "dirt": 4})
+    saved = policy_candidates(observation, STONE, movement=True)
+    walks = [c for c in saved.candidates if c.params.get("scaffold")]
+    assert any(c.params["path"][-1] == [1.5, 66.0, 0.5] for c in walks)  # type: ignore[index]
+    for c in walks:
+        assert c.params["scaffold"] == {"item": "dirt", "reserve": 0}
+        assert "block" in c.description
+    ascent = policy_candidates(observation, STONE, macros=True)
+    pillars = [c for c in ascent.candidates if c.action_kind == "pillar_up"]
+    assert pillars and all(1 <= c.params["blocks"] <= 4 for c in pillars)  # type: ignore[operator]
+    from mc_diamond.rule_selector import rule_select
+    assert rule_select(observation, STONE, ascent, []).candidate_id in [c.candidate_id for c in ascent.candidates]
+
+
+def test_visible_unreachable_ore_offers_one_targeted_cut_but_walkable_ore_never_does() -> None:
+    iron = Goal(goal_id="iron", kind="collect", target="iron_ore", quantity=3)
+    ore = [{"block": "iron_ore", "position": [4.0, 64.0, 0.0], "support": True}]
+    wall = [{"block": "stone", "position": [1.0, float(y), float(z)], "support": True}
+            for y in range(64, 69) for z in range(-3, 4)]
+    o = scene("dirt", [*ore, *wall], inventory={"stone_pickaxe": 1}, tool="stone_pickaxe", tool_durability=131)
+    choices = generate_resource_candidates(o, iron).candidates
+    cuts = [c for c in choices if "target_position" in c.params]
+    assert len(cuts) == 1 and cuts[0].params["direction"] == [1, 0]
+    assert cuts[0].params["walking_path_available"] is False
+    assert any(c.action_kind == "move_observed" for c in choices)
+    clear = scene("dirt", ore, inventory={"stone_pickaxe": 1}, tool="stone_pickaxe", tool_durability=131)
+    assert not any("target_position" in c.params for c in generate_resource_candidates(clear, iron).candidates)
+
+
+def test_descent_offers_explicit_crafting_table_recovery_and_remembered_return() -> None:
+    from mc_diamond.episode import policy_candidates
+    table = [{"block": "crafting_table", "position": [1.0, 64.0, 0.0], "support": True}]
+    observation = scene("dirt", table, cut_entrances=[[-2.0, 64.0, 0.0]], visited=[[-2.0, 64.0, 0.0]])
+    saved = policy_candidates(observation, STONE, macros=True)
+    assert any(c.action_kind == "mine_visible_cluster" and c.params.get("block") == "crafting_table" for c in saved.candidates)
+    assert any(c.description.startswith("Return toward") for c in saved.candidates)
+
+
+def test_ascent_keeps_crafting_stock_and_shares_saved_ids_with_models_and_s() -> None:
+    from mc_diamond.episode import policy_candidates
+    from mc_diamond.model_input import choice_input
+    from mc_diamond.rule_selector import rule_select
+    wall = [{"block": "stone", "position": [1.0, float(y), 0.0], "support": True} for y in (64, 65)]
+    air = [{"block": "air", "position": [0.0, float(y), 0.0], "passable": True} for y in range(66, 71)]
+    o = scene("dirt", wall + air, inventory={"wooden_pickaxe": 1, "cobblestone": 3})
+    saved = policy_candidates(o, STONE, macros=True)
+    assert not any(c.action_kind == "pillar_up" or "scaffold" in c.params for c in saved.candidates)
+    assert any(c.action_kind == "stair_up" for c in saved.candidates)
+    shared = choice_input(o, STONE, saved)
+    assert shared.candidate_ids == [c.candidate_id for c in saved.candidates]
+    assert rule_select(o, STONE, saved, []).candidate_id in shared.candidate_ids
+    assert saved.generated == len(saved.candidates) + sum(saved.truncated.values())
+
+
+def test_continuation_is_explicit_without_increasing_the_cut_limit() -> None:
+    o = scene("dirt", [], remaining_ticks=3600, last_cut={"kind": "stair_down", "direction": [1, 0], "position": [0, 64, 0]})
+    saved = generate_resource_candidates(o, STONE)
+    first = saved.candidates[0]
+    assert first.description.startswith("Continue:") and first.params["direction"] == [1, 0]
+    assert first.params["stairs"] == 4 and first.max_ticks == 400
+
+
+def test_target_cut_never_spends_durability_reserved_for_the_ore() -> None:
+    ore = [{"block": "iron_ore", "position": [4.0, 64.0, 0.0], "support": True}]
+    wall = [{"block": "stone", "position": [1.0, float(y), float(z)], "support": True}
+            for y in range(64, 69) for z in range(-3, 4)]
+    o = scene("dirt", ore + wall, inventory={"stone_pickaxe": 1}, tool="stone_pickaxe", tool_durability=1)
+    saved = generate_resource_candidates(o, Goal(goal_id="iron", kind="collect", target="iron_ore", quantity=3))
+    assert not any("target_position" in c.params for c in saved.candidates)
+
+
+def test_targeted_cut_replaces_the_same_generic_execution_choice() -> None:
+    wall = [{"block": "stone", "position": [1.0, float(y), float(z)], "support": True}
+            for y in range(64, 69) for z in range(-3, 4)]
+    ore = [{"block": "iron_ore", "position": [5.0, 60.0, 0.0], "support": True}]
+    o = scene("dirt", wall + ore, inventory={"stone_pickaxe": 1}, tool="stone_pickaxe", tool_durability=131)
+    saved = generate_resource_candidates(o, Goal(goal_id="iron", kind="collect", target="iron_ore", quantity=3))
+    signatures = [json.dumps([c.action_kind, {k: v for k, v in c.params.items()
+        if k not in {"target_position", "walking_path_available"}}, c.max_ticks], sort_keys=True) for c in saved.candidates]
+    assert len(signatures) == len(set(signatures))
+
+
+def test_targeted_descent_preserves_the_lowest_safe_band() -> None:
+    wall = [{"block": "stone", "position": [1.0, float(y), float(z)], "support": True}
+            for y in range(64, 69) for z in range(-3, 4)]
+    ore = [{"block": "diamond_ore", "position": [5.0, 60.0, 0.0], "support": True}]
+    o = scene("dirt", wall + ore, inventory={"iron_pickaxe": 1}, tool="iron_pickaxe", tool_durability=250)
+    o = o.model_copy(update={"position": [0.5, 6.0, 0.5], "observed_map": [
+        c.model_copy(update={"position": [c.position[0], c.position[1] - 58, c.position[2]]}) for c in o.observed_map]})
+    saved = generate_resource_candidates(o, Goal(goal_id="diamond", kind="mine_diamond", target="diamond", quantity=1))
+    cuts = [c for c in saved.candidates if "target_position" in c.params]
+    assert cuts and all(c.params["stairs"] == 1 for c in cuts), "from y6 no cut may descend below y5"
+
+
+def test_walkable_high_or_diagonal_ore_is_approached_without_cutting() -> None:
+    for target in ([4.0, 68.0, 0.0], [4.0, 64.0, 4.0]):
+        ore = [{"block": "iron_ore", "position": target, "support": True}]
+        o = scene("dirt", ore, inventory={"stone_pickaxe": 1}, tool="stone_pickaxe", tool_durability=131)
+        saved = generate_resource_candidates(o, Goal(goal_id="iron", kind="collect", target="iron_ore", quantity=3))
+        assert saved.candidates and all(c.action_kind == "move_observed" for c in saved.candidates), target

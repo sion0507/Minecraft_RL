@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import JsonValue
 
 from .macros import generate_resource_candidates
-from .navigation import PICKS, generate_movement_candidates, observed_routes, toward_path
+from .navigation import PICKS, generate_movement_candidates, observed_routes, toward_path, walk_params
 from .schema import Candidate, CandidateSet, Goal, Observation, allocate
 
 RECIPES: list[dict[str, Any]] = json.loads(files("mc_diamond").joinpath("recipes.json").read_text())
@@ -52,25 +52,24 @@ def generate_production_candidates(observation: Observation, goal: Goal) -> Cand
                     "map_version": observation.map_version}, f"Place {item} on observed support")
             # Carried but no free cell to put it on (the foot of a cut staircase): walking on is the way to one,
             # never forced waits to the end of the budget (exp/candidate-structure, arm T training episode 49).
-            return generate_movement_candidates(observation)
+            return generate_movement_candidates(observation, goal)
         if facilities(item):
-            routes = [path for point, path in observed_routes(observation).items() if path and
+            routes = [path for point, path in observed_routes(observation, goal).items() if path and
                       any(math.dist([v + 0.5 for v in p], [point[0] + 0.5, point[1] + 1.62, point[2] + 0.5]) <= 2
                           for p in facilities(item))]
             if routes:
                 route = min(routes, key=lambda p: (len(p), p))
-                return choice("move_observed", {"path": [[v for v in p] for p in route],
-                    "map_version": observation.map_version}, f"Approach observed {item}")
+                return choice("move_observed", walk_params(observation, route, goal), f"Approach observed {item}")
             # Remembered but beyond every observed route (left behind after digging down or walking far): walking back
             # toward it and making another one are both ways on, never a dead end of forced waits (exp/candidate-structure).
-            all_routes = observed_routes(observation)
+            all_routes = observed_routes(observation, goal)
             again = resolve(item, 1).candidates
             for point in facilities(item):
                 centre = [v + 0.5 for v in point]
                 path = toward_path(observation, all_routes, centre)
                 if path is not None:
                     back = Candidate(candidate_id=f"{observation.obs_id}:production:toward", action_kind="move_observed",
-                        params={"path": [[v for v in p] for p in path], "map_version": observation.map_version},
+                        params=walk_params(observation, path, goal),
                         max_ticks=min(400, observation.remaining_ticks), stop_rule_id="production_or_hazard",
                         source_obs_id=observation.obs_id,
                         description=f"Walk toward remembered {item} at {point}: {math.dist(observation.position, centre):.0f} "

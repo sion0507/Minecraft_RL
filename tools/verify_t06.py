@@ -26,7 +26,7 @@ SCENES = [("stair", "ore", 4, 400, "stairs_completed"), ("stair_exposed", "ore",
           ("stair_floor", "lava", 2, 400, "observed_hazard"), ("stair_gap", "ore", 1, 400, "unsafe_floor"),
           ("stair_break", "ore", 2, 400, "tool_broken"), ("stair_limit", "ore", 4, 400, "macro_tick_limit"),
           ("stair_budget", "ore", 4, 30, "active_tick_limit"), ("stair_no_tool", "ore", 1, 400, "invalid_stair"),
-          ("stair_gravel", "ore", 1, 400, "stairs_completed"), ("stair_hold", "ore", 1, 20, "observed_hazard")]
+          ("stair_gravel", "ore", 1, 400, "unsafe_cut"), ("stair_hold", "ore", 1, 20, "observed_hazard")]
 
 
 def prefer(direction: list[int]) -> Selector:

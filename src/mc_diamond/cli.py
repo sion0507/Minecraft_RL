@@ -49,7 +49,8 @@ def main() -> int:
     parser.add_argument("--initial-evaluation-reference",type=Path)
     parser.add_argument("--signal-exception-reason")
     parser.add_argument("--diagnostic-fixture", choices=["wood", "wood_tool", "wood_break", "wood_hazard", "wood_drop", "empty",
-        "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron", "diamond", "diamond_given"])
+        "production", "production_no_tool", "production_no_fuel", "production_hazard", "iron", "diamond", "diamond_given",
+        "ascent_pillar", "ascent_ledge", "ascent_stair", "safe_drop", "recover_table", "unsafe_cut"])
     place = parser.add_mutually_exclusive_group()
     place.add_argument("--start", type=int, nargs=3, metavar=("X", "Y", "Z"), help="prepare-world: C4-G3 surface start block")
     place.add_argument("--g4", type=int, nargs=3, metavar=("X", "Y", "Z"), help="prepare-world: user-confirmed G4 start block")
