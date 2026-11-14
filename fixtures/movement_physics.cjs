@@ -11,6 +11,9 @@ const Block = require('../bridge/node_modules/prismarine-block')('1.16.5')
 const STEPS = {
   step_up: { rise: 1, edge: 1, cells: 2 }, step_down: { rise: -1, edge: 1, cells: 2 },
   step_two_up: { rise: 2, edge: 1, cells: 2 }, step_two_down: { rise: -2, edge: 1, cells: 2 },
+  step_three_down: { rise: -3, edge: 1, cells: 2 }, step_four_down: { rise: -4, edge: 1, cells: 2 },
+  step_drop_unknown: { rise: -3, edge: 1, cells: 2, forget: '1,63,0' },
+  step_drop_blocked: { rise: -3, edge: 1, cells: 2, blocks: { '1,63,0': 'stone' } },
   step_unknown: { rise: 1, edge: 1, cells: 2, forget: '0,66,0' }, // The jump's head cell over the start is unseen.
   step_blocked: { rise: 1, edge: 1, cells: 2, blocks: { '0,66,0': 'stone' } }, // ... or seen solid.
   step_low: { rise: 1, edge: 1, cells: 2, blocks: { '0,67,0': 'stone', '1,67,0': 'stone', '2,67,0': 'stone' } }, // 3-high climb.
@@ -58,7 +61,7 @@ async function run (floorName, invalid = false) {
   const terrain = vm.runInContext('terrain', context)
   // Remember only cells seen during earlier visits along this flat corridor (near scans: the step physics does not
   // depend on the far radius, and 75k sky cells per far scan would only slow every scene).
-  for (const x of [0.5, 8.5, 16.5]) terrain.scan({ entity: { position: new Vec3(x, height(x), 0.5), eyeHeight: 1.62 }, blockAt: bot.blockAt }, 8)
+  for (const x of [0.5, 4.5, 8.5, 16.5]) terrain.scan({ entity: { position: new Vec3(x, height(x), 0.5), eyeHeight: 1.62 }, blockAt: bot.blockAt }, 8)
   if (step.forget) terrain.memory.delete(step.forget)
   changed = step.later ?? {}
   vm.runInContext('bot = fixtureBot; pauseVerified = true; pause = async () => {}', context)

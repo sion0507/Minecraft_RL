@@ -7,7 +7,7 @@ from pydantic import JsonValue
 
 from .navigation import (
     ORE_TOP, PICKS, fresh_movement_candidates, observed_routes, ore_search_choices, stone_search_choices, supports_way_back,
-    toward_path,
+    target_cut, toward_path, walk_params,
 )
 from .schema import Candidate, CandidateSet, Goal, Observation, allocate
 
@@ -35,15 +35,29 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
         ) for index, (kind, params, description) in enumerate(drafts)]
 
     def walk(path: list[list[float]], description: str) -> Draft:
-        return "move_observed", {"path": [[v for v in p] for p in path], "map_version": observation.map_version}, description
+        return "move_observed", walk_params(observation, path, goal), description
 
     def search(toward: list[Draft]) -> CandidateSet:
-        found = (ore_search_choices(observation, block, remaining) if block in ORE_TOP
-                 else stone_search_choices(observation, remaining) if block == "stone"
-                 else fresh_movement_candidates(observation))
-        return allocate([*build(toward), *found])
+        found = (ore_search_choices(observation, block, remaining, goal) if block in ORE_TOP
+                 else stone_search_choices(observation, remaining, goal) if block == "stone"
+                 else fresh_movement_candidates(observation, goal))
+        directed: list[Candidate] = []
+        if block in {"stone", *ORE_TOP} and (observation.tool or "").endswith("_pickaxe"):
+            for target in targets:
+                if math.dist(target, observation.position) > 8 or close(target):
+                    continue
+                walking = any(close(target, path[-1] if path else observation.position) for path in routes.values())
+                if walking:
+                    continue
+                cut = target_cut(observation, goal, target, remaining)
+                if cut is not None:
+                    directed = [cut]
+                    execution = {k: v for k, v in cut.params.items() if k not in {"target_position", "walking_path_available"}}
+                    found = [c for c in found if c.action_kind != cut.action_kind or c.params != execution or c.max_ticks != cut.max_ticks]
+                    break
+        return allocate([*build(toward), *directed, *found])
 
-    routes = observed_routes(observation)
+    routes = observed_routes(observation, goal)
     for drop in observation.drops:
         if drop.item != goal.target:
             continue
@@ -53,7 +67,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
             _, path = min(routes_near_drop, key=lambda pair: (len(pair[1]), pair[0]))
             return allocate(build([walk(path, f"Collect observed {drop.item} drop")] if path
                                   else [("wait", {}, f"Wait for observed {drop.item} pickup")]))
-    # A step the agent came down by is never a target (nothing digs back up): not mined, and not walked up to either,
+    # Preserve the existing return steps even with ascent choices: neither mine them nor repeatedly approach them,
     # or two such steps are offered as approach after approach to the end of the budget (T evaluation seed 15011).
     sources = [cell for cell in observation.observed_map
                if cell.block == block and not supports_way_back(observation, cell.position)]
@@ -87,11 +101,11 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
     seen_paths: set[str] = set()
     used: set[tuple[float, ...]] = set()
     repeated = False  # an approach ends in a cell the agent already stood in
-    eye = [observation.position[0], observation.position[1] + 1.62, observation.position[2]]
-
-    def close(p: tuple[float, ...]) -> bool:
-        return (math.hypot(p[0] + 0.5 - observation.position[0], p[2] + 0.5 - observation.position[2]) <= 1.8
-                and math.dist([v + 0.5 for v in p], eye) <= 4.5 and p[1] >= math.floor(observation.position[1]))
+    def close(p: tuple[float, ...], position: list[float] | None = None) -> bool:
+        position = observation.position if position is None else position
+        eye = [position[0], position[1] + 1.62, position[2]]
+        return (math.hypot(p[0] + 0.5 - position[0], p[2] + 0.5 - position[2]) <= 1.8
+                and math.dist([v + 0.5 for v in p], eye) <= 4.5 and p[1] >= math.floor(position[1]))
 
     for target in targets:
         if target in used:
@@ -117,8 +131,7 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
                                                        "map_version": observation.map_version},
                               f"Mine {count} exposed {goal.target} at {list(target)} within reach now and collect its drops"))
         else:
-            found = [path for (x, y, z), path in routes.items() if path and
-                     math.hypot(x - target[0], z - target[2]) <= 1.01 and y <= target[1] <= y + 3]
+            found = [path for path in routes.values() if path and close(target, path[-1])]
             if found:
                 path = min(found, key=lambda route: (len(route), route))
                 if str(path) not in seen_paths:

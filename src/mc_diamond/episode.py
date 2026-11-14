@@ -1,6 +1,7 @@
 """Shared smoke execution flow. Research rewards and actors are subsequent work."""
 
 import json
+import math
 import time
 from collections import deque
 from collections.abc import Callable
@@ -12,7 +13,7 @@ from .rpc import EpisodeError, PolicyEnvironment
 from .goals import COMPLETION_EVENT, ESCAPE_DISTANCE, ActiveGoal, Ask, Planning, completed, failed, tally
 from .navigation import (
     ORE_TOP, PICKS, escape_candidates, fresh_movement_candidates, generate_descent_candidates, generate_movement_candidates,
-    hazard_distance, hold_candidate, ore_search_choices, safe_ground,
+    ascent_choices, hazard_distance, hold_candidate, ore_search_choices, safe_ground,
 )
 from .macros import generate_wood_candidates
 from .production import generate_production_candidates
@@ -47,6 +48,33 @@ def generate_candidates(observation: Observation, goal: Goal) -> CandidateSet:
 
 
 def policy_candidates(observation: Observation, goal: Goal, *, movement: bool = False, macros: bool = False) -> CandidateSet:
+    saved = _policy_candidates(observation, goal, movement=movement, macros=macros)
+    up = ascent_choices(observation, goal) if macros and escape_candidates(observation) is None else []
+    if macros and any(c.action_kind in {"stair_down", "tunnel"} for c in saved.candidates):
+        for cell in observation.observed_map:
+            if cell.block not in {"crafting_table", "furnace"} or observation.inventory.get(cell.block) or not cell.visible:
+                continue
+            if cell.block == "furnace" and (not (observation.tool or "").endswith("_pickaxe") or not any(
+                    f.position == cell.position and f.input_count == f.output_count == f.fuel_count == 0 for f in observation.furnaces)):
+                continue
+            if (cell.position[1] < math.floor(observation.position[1]) or
+                    math.hypot(cell.position[0] + 0.5 - observation.position[0], cell.position[2] + 0.5 - observation.position[2]) > 1.8 or
+                    math.dist([v + 0.5 for v in cell.position], [observation.position[0], observation.position[1] + 1.62, observation.position[2]]) > 4.5):
+                continue
+            up.append(Candidate(candidate_id=f"{observation.obs_id}:recover:{cell.block}", action_kind="mine_visible_cluster",
+                params={"block": cell.block, "blocks": [[v for v in cell.position]], "map_version": observation.map_version},
+                max_ticks=min(400, observation.remaining_ticks), source_obs_id=observation.obs_id, stop_rule_id="facility_recovery",
+                description=f"Recover observed {cell.block} before leaving it behind, at most 400 ticks"))
+            break
+    if not up:
+        return saved
+    extended = allocate([*saved.candidates, *up])
+    return extended.model_copy(update={"generated": saved.generated + len(up),
+        "truncated": {k: saved.truncated.get(k, 0) + extended.truncated.get(k, 0)
+                      for k in saved.truncated.keys() | extended.truncated.keys()}})
+
+
+def _policy_candidates(observation: Observation, goal: Goal, *, movement: bool = False, macros: bool = False) -> CandidateSet:
     """The generator the episode uses for this goal; inside an observed hazard radius only escape walks."""
     escape = escape_candidates(observation) if macros else None
     if escape is not None:
@@ -135,6 +163,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     movement_completed = False
     movement_steps: list[MacroEvidence] = []
     macro_steps: list[MacroEvidence] = []
+    stair_length_choices: dict[str, dict[str, int]] = {}
     pause_verified = False
     acquired_target = 0
     provided_inventory: dict[str, int] = {}
@@ -259,16 +288,23 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
                         or not any(event.kind == ("moved" if step.distance_moved > 0 else "stopped") for event in step.events)):
                     raise EpisodeError(ErrorInfo(code="invalid_step", message="Inconsistent movement evidence"))
             if macros or moving:
-                evidence = MacroEvidence(
-                    candidate_id=candidate.candidate_id, source_obs_id=observation.obs_id,
-                    goal_id=goal.goal_id, goal_source=goal.source,
+                evidence = MacroEvidence.model_validate({
+                    "candidate_id": candidate.candidate_id, "source_obs_id": observation.obs_id,
+                    "goal_id": goal.goal_id, "goal_source": goal.source,
+                    "target_position": candidate.params.get("target_position"),
+                    "walking_path_available": candidate.params.get("walking_path_available"),
                     **step.model_dump(include={"map_version", "events", "reason", "actual_ticks", "wall_seconds",
-                                               "path", "stop_evidence", "stable_boundary", "distance_moved", "cancelled"}),
-                )
+                                               "path", "stop_evidence", "stable_boundary", "distance_moved", "cancelled", "dig_ticks"}),
+                })
                 if macros:
                     macro_steps.append(evidence)
                 if moving:
                     movement_steps.append(evidence)
+            if candidate.action_kind == "stair_down" and not step.cancelled and not step.invalid:
+                state_key = f"{goal.kind}:{goal.target}:y{16 * (math.floor(observation.position[1]) // 16)}:{observation.tool}"
+                lengths = stair_length_choices.setdefault(state_key, {})
+                chosen_length = str(candidate.params["stairs"])
+                lengths[chosen_length] = lengths.get(chosen_length, 0) + 1
             distance_moved += step.distance_moved
             movement_completed |= (candidate.action_kind == "move_observed" and step.reason == "path_completed"
                                    and step.stable_boundary and 0 < step.distance_moved <= 16 and not step.invalid
@@ -370,7 +406,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             initial.objective_kind if evaluation_rewards is not None else "smoke_acquisition_count"),
         actor_transitions=learning.actor_transitions - actor_before if learning is not None else 0,
         movement_completed=movement_completed, distance_moved=distance_moved,
-        macro_steps=macro_steps, selection_requests=selection_requests, cancelled_selections=cancelled_selections,
+        macro_steps=macro_steps, stair_length_choices=stair_length_choices,
+        selection_requests=selection_requests, cancelled_selections=cancelled_selections,
         provided_inventory=provided_inventory, direct_crafted=direct_crafted,
         direct_smelted=direct_smelted, direct_acquired=direct_acquired, admin_verified=verified,
         diamond_success=config.goal.kind == "mine_diamond" and done and verified.get("diamond", 0) >= 1,

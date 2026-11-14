@@ -68,6 +68,8 @@ class Observation(Contract):
     hidden_hazard_peek: Literal[False] = False
     drops: list[ObservedDrop] = Field(default_factory=list)
     furnaces: list[FurnaceState] = Field(default_factory=list)
+    cut_entrances: list[list[float]] = Field(default_factory=list)
+    last_cut: dict[str, JsonValue] | None = None
 
 
 GoalSource = Literal["fixed", "planner", "regenerated", "rule_recovery"]
@@ -144,7 +146,7 @@ class GoalOutcome(Contract):
 class Candidate(Contract):
     candidate_id: Identifier
     action_kind: Literal[
-        "move_observed", "mine_visible_cluster", "tunnel", "stair_down", "craft_batch",
+        "move_observed", "mine_visible_cluster", "tunnel", "stair_down", "stair_up", "pillar_up", "craft_batch",
         "furnace_load", "furnace_collect", "place_or_equip", "wait",
     ]
     params: dict[str, JsonValue]
@@ -156,7 +158,7 @@ class Candidate(Contract):
 
 MAX_CANDIDATES = 16  # PLAN §2 (#38, was 8)
 # Slots per kind before the cap; every other kind shares the last one (#38).
-SLOTS = {"move_observed": 6, "tunnel": 5, "stair_down": 4, "other": 1}
+SLOTS = {"move_observed": 6, "tunnel": 4, "stair_down": 3, "ascent": 2, "other": 1}
 assert sum(SLOTS.values()) == MAX_CANDIDATES
 
 
@@ -182,7 +184,8 @@ def allocate(found: list[Candidate]) -> CandidateSet:
     used: dict[str, int] = {}
     keep: list[bool] = []
     for candidate in found:
-        kind = candidate.action_kind if candidate.action_kind in SLOTS else "other"
+        kind = ("ascent" if candidate.action_kind in {"pillar_up", "stair_up"}
+                else candidate.action_kind if candidate.action_kind in SLOTS else "other")
         keep.append(used.get(kind, 0) < SLOTS[kind])
         used[kind] = used.get(kind, 0) + 1
     free = MAX_CANDIDATES - sum(keep)
@@ -243,6 +246,7 @@ class Event(Contract):
 class StepResult(Contract):
     observation: Observation
     actual_ticks: Count
+    dig_ticks: Count = 0
     events: list[Event]
     terminated: bool
     truncated: bool
@@ -261,6 +265,8 @@ class StepResult(Contract):
 
     @model_validator(mode="after")
     def validate_outcome(self) -> Self:
+        if self.dig_ticks > self.actual_ticks:
+            raise ValueError("dig ticks cannot exceed active step ticks")
         if sum([self.terminated, self.truncated, self.invalid]) > 1:
             raise ValueError("terminal/truncation/invalid must be distinct")
         if self.pause_verified != (self.clock_mode == "paused"):
@@ -275,6 +281,9 @@ class MacroEvidence(Contract):
     events: list[Event]
     reason: Identifier
     actual_ticks: Positive
+    dig_ticks: Count = 0
+    target_position: list[float] | None = None
+    walking_path_available: bool | None = None
     wall_seconds: float = Field(ge=0)
     path: list[list[float]]
     stop_evidence: list[str]
@@ -294,6 +303,7 @@ class EpisodeSummary(Contract):
     pause_verified: bool = False
     movement_steps: list[MacroEvidence] = Field(default_factory=list)
     macro_steps: list[MacroEvidence] = Field(default_factory=list)
+    stair_length_choices: dict[str, dict[str, Count]] = Field(default_factory=dict)  # goal/target/16-high band/tool -> chosen cap
     selection_requests: Count = 0
     cancelled_selections: Count = 0
     movement_completed: bool = False

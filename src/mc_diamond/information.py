@@ -7,7 +7,7 @@ import time
 from typing import Any, cast
 
 from .episode import emit
-from .navigation import generate_descent_candidates, generate_movement_candidates, ore_search_choices
+from .navigation import generate_descent_candidates, generate_movement_candidates, ore_search_choices, observed_routes, walk_params
 from .macros import generate_wood_candidates
 from .production import generate_production_candidates
 from .rpc import EpisodeError, RpcSession
@@ -51,6 +51,60 @@ def stair_signature(value: dict[str, Any]) -> dict[str, Any]:
                 clean(child)
     clean(result)
     return result
+
+
+ASCENT_SCENES = ["ascent_pillar", "ascent_ledge", "ascent_stair", "safe_drop", "recover_table", "unsafe_cut"]
+
+
+def ascent_candidate(scene: str, o: Observation) -> Candidate:
+    x, y, z = map(math.floor, o.position)
+    kind: str
+    params: dict[str, Any]
+    if scene == "ascent_pillar":
+        kind, params = "pillar_up", {"blocks": 4, "item": "dirt", "reserve": 0}
+    elif scene in {"ascent_ledge", "safe_drop"}:
+        kind = "move_observed"
+        rise = 2 if scene == "ascent_ledge" else -3
+        route = observed_routes(o).get((x + 1, y + rise, z))
+        assert route, (scene, "no observed route")
+        params = walk_params(o, route)
+    elif scene == "recover_table":
+        kind, params = "mine_visible_cluster", {"block": "crafting_table", "blocks": [[x + 1, y, z]]}
+    else:
+        kind = "stair_up" if scene == "ascent_stair" else "tunnel"
+        params = {"direction": [1, 0], "stop_blocks": ["diamond_ore"]}
+        params.update({"stairs": 2} if kind == "stair_up" else {"cells": 1, "height": 2})
+    return Candidate.model_validate({"candidate_id": scene, "action_kind": kind,
+        "params": {**params, "map_version": o.map_version}, "max_ticks": 400, "source_obs_id": o.obs_id,
+        "stop_rule_id": "ascent_or_hazard", "description": scene})
+
+
+
+def audit_ascent(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
+    for scope in ASCENT_SCENES:
+        pair = []
+        for variant in ("ore", "lava"):
+            prepared = session._call("information_fixture", {"variant": variant, "exposed": False, "scope": scope}, admin=True)
+            if prepared.get("fixture_ready") is not True:
+                raise ValueError("Ascent fixture not ready")
+            observation = session.policy().observe()
+            selected = ascent_candidate(scope, observation)
+            step = session.policy().step(selected)
+            emit("information_observation", observation)
+            emit("information_step", step)
+            expected = {"ascent_pillar": "pillar_completed", "ascent_ledge": "path_completed", "ascent_stair": "stairs_completed",
+                        "safe_drop": "path_completed", "recover_table": "cluster_completed", "unsafe_cut": "unsafe_cut"}[scope]
+            if (step.invalid or not step.stable_boundary or step.reason != expected or not step.events or
+                    not 1 <= step.actual_ticks <= selected.max_ticks or step.source_obs_id != observation.obs_id or
+                    step.observation.active_ticks != observation.active_ticks + step.actual_ticks):
+                raise ValueError(f"Invalid ascent fixture: {scope}")
+            signature = stair_signature({"observation": observation.model_dump(mode="json"),
+                "candidate": selected.model_dump(mode="json"), "step": step.model_dump(mode="json")})
+            pair.append(signature)
+            evidence.append({"scope": scope, "variant": variant, "actual_ticks": step.actual_ticks,
+                "input_sha256": hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()})
+        if pair[0] != pair[1]:
+            raise ValueError(f"Hidden variant changed {scope}")
 
 
 def audit_stairs(session: RpcSession, evidence: list[dict[str, Any]]) -> None:
@@ -363,6 +417,7 @@ def audit_information(session: RpcSession) -> bool:
                 raise ValueError(f"Hidden variant changed {scope} policy evidence")
         audit_steps(session, evidence)
         audit_stairs(session, evidence)
+        audit_ascent(session, evidence)
     except ValueError:
         error = ErrorInfo(code="invalid_step", message="Information audit evidence mismatch")
     except EpisodeError as failure:
@@ -371,7 +426,7 @@ def audit_information(session: RpcSession) -> bool:
          "scope": ["observation", "move_observed", "move_observed_steps", "mine_visible_cluster", "place_or_equip", "wait20", "wait100", "wait200",
                    "drop_pickup", "independent_drop_wait", "zero_candidates", "craft_batch", "facility_place",
                    "furnace_load", "furnace_collect", "iron_mining", "diamond_mining", "stair_down", "stair_exposure",
-                   "stair_iron_exposure", "tunnel", "tunnel_exposure", "tunnel_iron_exposure"], "hidden_hazard_peek": False,
+                   "stair_iron_exposure", "tunnel", "tunnel_exposure", "tunnel_iron_exposure", *ASCENT_SCENES], "hidden_hazard_peek": False,
          "trials": evidence, "error": error.model_dump(mode="json") if error else None,
          "wall_seconds": time.monotonic() - started})
     return error is None

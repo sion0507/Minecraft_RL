@@ -16,6 +16,7 @@ const fuels = { coal: 1600, charcoal: 1600, ...Object.fromEntries(recipes.filter
 const furnaces = new Map()
 // Block → its own drop (no Fortune/Silk Touch). Unlisted blocks drop themselves.
 const dropOf = block => ({ stone: 'cobblestone', diamond_ore: 'diamond', coal_ore: 'coal', grass_block: 'dirt' })[block] ?? block
+const scaffoldReserve = stock => (['stone_pickaxe', 'iron_pickaxe', 'diamond_pickaxe', 'netherite_pickaxe'].some(p => stock[p]) ? 0 : 3) + (stock.furnace ? 0 : 8)
 // Ores whose direct mining is verified for the administrator log, with the pickaxes that yield their drop.
 const verifiedOres = { diamond_ore: /^(iron|diamond|netherite)_pickaxe$/, iron_ore: /^(stone|iron|diamond|netherite)_pickaxe$/ }
 const furnaceInputs = new Map()
@@ -217,6 +218,7 @@ async function observation (near = false) {
     tool_durability: bot.heldItem && bot.heldItem.maxDurability ? bot.heldItem.maxDurability - (bot.heldItem.durabilityUsed || 0) : null,
     yaw: bot.entity.yaw, pitch: bot.entity.pitch, map_version: terrain.version,
     hidden_hazard_peek: false, visited: terrain.visited, discovered_open: terrain.discoveredOpen,
+    cut_entrances: terrain.cutEntrances, last_cut: terrain.lastCut,
     ...(!near && { observed_map: terrain.cells(self.position) }), drops: observedDrops, history,
     furnaces: [...furnaces.values()].filter(f => terrain.visible.has(f.position.join(',')) &&
       terrain.memory.get(f.position.join(','))?.block === 'furnace') }
@@ -283,8 +285,17 @@ async function moveObserved (candidate, near = false) {
   const started = performance.now()
   const initial = await observation(near)
   const route = candidate.params.path
-  const allowed = exactKeys(candidate.params, ['path', 'map_version']) &&
-    candidate.params.map_version === initial.map_version && terrain.validPath(initial.position, route)
+  const scaffold = candidate.params.scaffold
+  const columns = Array.isArray(route) && route.every(p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite)) ? route.filter((p, i) =>
+    p[0] === (i ? route[i - 1][0] : Math.floor(initial.position[0]) + 0.5) &&
+    p[2] === (i ? route[i - 1][2] : Math.floor(initial.position[2]) + 0.5) &&
+    p[1] === (i ? route[i - 1][1] : Math.floor(initial.position[1])) + 1).length : 0
+  const stock = inventory()
+  const allowed = exactKeys(candidate.params, scaffold ? ['path', 'map_version', 'scaffold'] : ['path', 'map_version']) &&
+    (!scaffold || (exactKeys(scaffold, ['item', 'reserve']) && ['dirt', 'cobblestone'].includes(scaffold.item) &&
+      Number.isInteger(scaffold.reserve) && scaffold.reserve >= (scaffold.item === 'cobblestone' ? scaffoldReserve(stock) : 0) &&
+      columns > 0 && (stock[scaffold.item] || 0) >= columns + scaffold.reserve)) &&
+    candidate.params.map_version === initial.map_version && terrain.validPath(initial.position, route, !!scaffold)
   const limit = Math.min(candidate.max_ticks, budget - activeTicks)
   let ticks = 0
   let index = 0
@@ -293,6 +304,7 @@ async function moveObserved (candidate, near = false) {
   let reason = allowed ? 'path_completed' : 'invalid_path'
   let state = initial
   let interrupted = false
+  const placedEvents = []
   const from = () => index ? route[index - 1] : initial.position
   const heightChange = () => route[index][1] - Math.floor(from()[1]) // +1 climb, -1 drop, 0 level, for route[index].
   const across = point => Math.hypot(point[0] - state.position[0], point[2] - state.position[2])
@@ -307,6 +319,28 @@ async function moveObserved (candidate, near = false) {
         (!heightChange() || (state.on_ground && Math.abs(route[index][1] - state.position[1]) < 0.15))) index++
     const target = route[index]
     const rise = target ? heightChange() : 0
+    if (target && rise === 1 && Math.floor(target[0]) === Math.floor(from()[0]) && Math.floor(target[2]) === Math.floor(from()[2])) {
+      // Walking reaches a waypoint with inertia; a pillar must start settled on that column.
+      if (!terrain.stable(state)) {
+        const previous = state.position
+        ticks += await advance(1, true)
+        observationIndex++
+        state = await observation(true)
+        distance += Math.hypot(...state.position.map((v, i) => v - previous[i]))
+        continue
+      }
+      if (distance >= 12) { reason = 'distance_limit'; break }
+      state = await observation(true)
+      const result = await executeMacro({ ...candidate, action_kind: 'pillar_up', source_obs_id: state.obs_id,
+        max_ticks: limit - ticks, params: { blocks: 1, ...scaffold, map_version: state.map_version } }, false, true)
+      ticks += result.actual_ticks
+      distance += Math.hypot(...result.observation.position.map((v, i) => v - state.position[i]))
+      state = result.observation
+      placedEvents.push(...result.events)
+      if (result.reason !== 'pillar_completed') { reason = result.reason; interrupted = true; break }
+      index++
+      continue
+    }
     // No step is begun after 12 blocks, so the jump or drop and its landing stay inside the 16-block cap. A step already
     // begun (the bot left the start column or its floor) is finished: stopping on an edge would never become stable.
     const before = rise && state.on_ground && Math.abs(state.position[1] - from()[1]) < 0.15 &&
@@ -339,13 +373,13 @@ async function moveObserved (candidate, near = false) {
   history = [...history.slice(-15), 'move_observed:' + reason]
   state = await observation(near)
   return stepResult(candidate, started, ticks, state,
-    [event(distance > 0 ? 'moved' : 'stopped'), ...drainEvents()], reason,
+    [event(distance > 0 ? 'moved' : 'stopped'), ...placedEvents, ...drainEvents()], reason,
     { invalid: !allowed, stableBoundary: !interrupted && terrain.stable(state), path: allowed ? route : [], distanceMoved: distance })
 }
 
 function stepResult (candidate, started, ticks, state, events, reason,
-  { invalid = false, stableBoundary = terrain.stable(state) && !terrain.danger(state), path = [], distanceMoved = 0 } = {}) {
-  return { observation: state, actual_ticks: ticks, events,
+  { invalid = false, stableBoundary = terrain.stable(state) && !terrain.danger(state), path = [], distanceMoved = 0, digTicks = 0 } = {}) {
+  return { observation: state, actual_ticks: ticks, dig_ticks: digTicks, events,
     terminated: state.health <= 0, truncated: state.health > 0 && !invalid && activeTicks >= budget,
     invalid: invalid && state.health > 0, reason, clock_mode: pauseVerified ? 'paused' : 'unverified', pause_verified: pauseVerified,
     stable_boundary: stableBoundary, wall_seconds: (performance.now() - started) / 1000,
@@ -415,14 +449,16 @@ function interruptReason (state, initial, transit = null) {
   return null
 }
 
-async function executeMacro (candidate, recoveryWait = false) {
+async function executeMacro (candidate, recoveryWait = false, near = false) {
   const started = performance.now()
-  const initial = await observation()
+  const initial = await observation(near)
   const limit = Math.min(candidate.max_ticks, budget - activeTicks)
   let state = initial
   let ticks = 0
+  let digging = false
+  let digTicks = 0
   // Only a stair/tunnel may start buried: it cuts the refilled own cell out before anything else.
-  const buried = ['stair_down', 'tunnel'].includes(candidate.action_kind) ? terrain.buried(initial.position) : []
+  const buried = ['stair_down', 'stair_up', 'tunnel'].includes(candidate.action_kind) ? terrain.buried(initial.position) : []
   let transit = buried.length ? initial.position.map(Math.floor).join(',') : null
   let reason = interruptReason(state, initial, transit)
   let invalid = false
@@ -431,13 +467,16 @@ async function executeMacro (candidate, recoveryWait = false) {
   let watch = () => null
   const events = []
   const tick = async () => {
-    ticks += await advance(1, true)
+    const elapsed = await advance(1, true)
+    ticks += elapsed
+    if (digging) digTicks += elapsed
     observationIndex++
     state = await observation(true)
-    reason = interruptReason(state, ['place_or_equip', 'craft_batch', 'furnace_load', 'furnace_collect'].includes(candidate.action_kind)
+    reason = interruptReason(state, ['pillar_up', 'place_or_equip', 'craft_batch', 'furnace_load', 'furnace_collect'].includes(candidate.action_kind)
       ? { ...initial, tool: null } : initial, transit) || watch()
   }
   const dig = async (point, block, valid) => {
+    if (terrain.unsafeCut(point)) { reason = 'unsafe_cut'; return false }
     // Only the selected, currently exposed cell is read. No Mineflayer raycast/neighbour search.
     const target = bot.blockAt(new Vec3(...point), false)
     if (!target || target.name !== block) { reason = 'block_changed'; return false }
@@ -454,10 +493,12 @@ async function executeMacro (candidate, recoveryWait = false) {
     await bot.lookAt(new Vec3(...point).offset(0.5, 0.5, 0.5), true)
     const packet = { location: new Vec3(...point), face: 1 }
     bot._client.write('block_dig', { ...packet, status: 0 })
+    digging = true
     try {
       for (let elapsed = 0; elapsed < required && ticks < limit && !reason; elapsed++) {
         bot.swingArm()
         await tick()
+        if (!reason && terrain.unsafeCut(point)) reason = 'unsafe_cut'
         if (!reason && !valid()) reason = 'block_changed'
       }
       if (reason || ticks >= limit) return false
@@ -475,10 +516,11 @@ async function executeMacro (candidate, recoveryWait = false) {
       if (!reason) reason = 'dig_failed'
       return false
     } finally {
+      digging = false
       bot._client.write('block_dig', { ...packet, status: 1 })
     }
   }
-  const operation = async (action, confirmed = () => true) => {
+  const operation = async (action, confirmed = () => true, activeConfirmation = false) => {
     if (ticks >= limit) return false
     let settled = false
     let failed = false
@@ -486,7 +528,10 @@ async function executeMacro (candidate, recoveryWait = false) {
     await tick()
     // Inventory RPC needs frozen I/O time, not additional simulation ticks.
     const deadline = performance.now() + 5500
-    while ((!settled || (!failed && !confirmed())) && !reason && performance.now() < deadline) await sleep(1)
+    while ((!settled || (!failed && !confirmed())) && !reason && performance.now() < deadline) {
+      if (activeConfirmation && settled && !failed && !confirmed() && ticks < limit) await tick()
+      else await sleep(1)
+    }
     if (!settled) {
       if (bot.currentWindow) bot.closeWindow(bot.currentWindow)
       await Promise.race([pending, sleep(5500)])
@@ -499,7 +544,47 @@ async function executeMacro (candidate, recoveryWait = false) {
     if (!failed && !confirmed() && !reason) reason = 'operation_unconfirmed'
     return !failed && confirmed()
   }
-  if (candidate.action_kind === 'wait') {
+  if (candidate.action_kind === 'pillar_up') {
+    const { blocks, item, reserve, map_version: mapVersion } = candidate.params
+    const allowed = exactKeys(candidate.params, ['blocks', 'item', 'reserve', 'map_version']) &&
+      Number.isInteger(blocks) && blocks >= 1 && blocks <= 4 && ['dirt', 'cobblestone'].includes(item) &&
+      Number.isInteger(reserve) && reserve >= (item === 'cobblestone' ? scaffoldReserve(inventory()) : 0) &&
+      (inventory()[item] || 0) >= blocks + reserve &&
+      mapVersion === initial.map_version && terrain.stable(initial)
+    if (!reason && !allowed) { invalid = true; reason = 'invalid_pillar' }
+    let placed = 0
+    while (allowed && !reason && placed < blocks && ticks < limit) {
+      const [x, y, z] = state.position.map(Math.floor)
+      const point = [x, y, z]
+      const floor = [x, y - 1, z]
+      if (![0, 1, 2].every(h => terrain.clear([x, y + h, z])) ||
+          !terrain.visible.has(point.join(',')) || !terrain.visible.has(floor.join(',')) ||
+          !terrain.memory.get(floor.join(','))?.support || terrain.hazardNear([point, [x, y + 2, z]])) {
+        reason = 'ascent_blocked'; break
+      }
+      const material = bot.inventory.items().find(held => held.name === item && held.count > reserve)
+      if (!material || !await operation(() => bot.equip(material, 'hand'))) break
+      transit = [point.join(','), [x, y + 1, z].join(',')]
+      for (let n = 0; n < 8 && !reason && ticks < limit && state.position[1] < y + 1.01; n++) {
+        bot.setControlState('jump', true)
+        await tick()
+      }
+      if (!reason && ticks < limit && state.position[1] >= y + 1.01) {
+        const before = inventory()[item] || 0
+        // The whole player box is above the known empty cell before placing beneath the feet.
+        const success = await operation(() => bot.placeBlock(bot.blockAt(new Vec3(...floor), false), new Vec3(0, 1, 0)),
+          () => before - (inventory()[item] || 0) === 1, true)
+        if (success && terrain.memory.get(point.join(','))?.block === item) {
+          recordConsumption({ [item]: 1 })
+          events.push(event('placed', { item, quantity: 1, position: point }))
+          placed++
+        } else if (!reason) reason = 'place_unconfirmed'
+      } else if (!reason) reason = 'ascent_not_clear'
+      for (let n = 0; n < 20 && !reason && ticks < limit && !terrain.stable(state); n++) await tick()
+      transit = null
+    }
+    if (!reason) reason = placed === blocks && terrain.stable(state) ? 'pillar_completed' : 'macro_tick_limit'
+  } else if (candidate.action_kind === 'wait') {
     const allowed = exactKeys(candidate.params, []) && ([20, 100, 200].includes(candidate.max_ticks) ||
       candidate.max_ticks === Math.min(20, budget - activeTicks) || (recoveryWait && candidate.max_ticks <= 20))
     invalid = !allowed
@@ -663,10 +748,16 @@ async function executeMacro (candidate, recoveryWait = false) {
       Math.hypot(point[0] + 0.5 - state.position[0], point[2] + 0.5 - state.position[2]) <= 1.8 &&
       Math.hypot(point[0] + 0.5 - state.position[0], point[1] + 0.5 - state.position[1] - 1.62, point[2] + 0.5 - state.position[2]) <= 4.5
     const pick = bot.heldItem?.name
-    const toolAllowed = /_log$/.test(block) || (block === 'stone' && /^(wooden|stone|iron|golden|diamond|netherite)_pickaxe$/.test(pick)) ||
+    const emptyFurnace = block === 'furnace' && Array.isArray(blocks) && blocks.every(p => {
+      if (!Array.isArray(p)) return false
+      const known = furnaces.get(p.join(','))
+      return known && !known.input_count && !known.output_count && !known.fuel_count
+    })
+    const toolAllowed = /_log$/.test(block) || block === 'crafting_table' ||
+      ((block === 'stone' || emptyFurnace) && /^(wooden|stone|iron|golden|diamond|netherite)_pickaxe$/.test(pick)) ||
       (Object.hasOwn(verifiedOres, block) && verifiedOres[block].test(pick))
     const allowed = exactKeys(candidate.params, ['blocks', 'block', 'map_version']) && typeof block === 'string' &&
-      (/_log$/.test(block) || block === 'stone' || Object.hasOwn(verifiedOres, block)) && toolAllowed &&
+      (/_log$/.test(block) || ['stone', 'crafting_table'].includes(block) || emptyFurnace || Object.hasOwn(verifiedOres, block)) && toolAllowed &&
       mapVersion === initial.map_version && Array.isArray(blocks) && blocks.length >= 1 && blocks.length <= 8 &&
       new Set(blocks.map(p => JSON.stringify(p))).size === blocks.length && blocks.every(reachable) &&
       blocks.every((p, i) => i === 0 || blocks.slice(0, i).some(q => p.reduce((sum, v, axis) => sum + Math.abs(v - q[axis]), 0) === 1))
@@ -696,15 +787,21 @@ async function executeMacro (candidate, recoveryWait = false) {
       for (let n = 0; n < 20 && !reason && ticks < limit; n++) await tick()
     }
     if (!reason) reason = 'cluster_completed'
-  } else if (['stair_down', 'tunnel'].includes(candidate.action_kind)) {
+  } else if (['stair_down', 'stair_up', 'tunnel'].includes(candidate.action_kind)) {
     // A stair cuts a 3-high column one lower each step; a tunnel cuts a 2/3-high section level. Same loop and stops.
-    const stairway = candidate.action_kind === 'stair_down'
+    const stairway = candidate.action_kind !== 'tunnel'
+    const ascending = candidate.action_kind === 'stair_up'
     const { direction, stop_blocks: stopBlocks } = candidate.params
     const count = stairway ? candidate.params.stairs : candidate.params.cells
     const height = stairway ? 3 : candidate.params.height
-    const descent = stairway ? 1 : 0
-    const allowed = exactKeys(candidate.params, stairway ? ['direction', 'stairs', 'stop_blocks', 'map_version']
-      : ['direction', 'cells', 'height', 'stop_blocks', 'map_version']) &&
+    const descent = stairway ? (ascending ? -1 : 1) : 0
+    const target = candidate.params.target_position
+    const extra = target ? ['target_position', 'walking_path_available'] : []
+    const allowed = exactKeys(candidate.params, [...(stairway ? ['direction', 'stairs', 'stop_blocks', 'map_version']
+      : ['direction', 'cells', 'height', 'stop_blocks', 'map_version']), ...extra]) &&
+      (!target || (Array.isArray(target) && target.length === 3 && target.every(Number.isInteger) &&
+        terrain.visible.has(target.join(',')) && Math.hypot(...target.map((v, i) => v - initial.position[i])) <= 8 &&
+        candidate.params.walking_path_available === false)) &&
       Array.isArray(direction) && direction.length === 2 && direction.every(Number.isInteger) &&
       Math.abs(direction[0]) + Math.abs(direction[1]) === 1 &&
       (stairway ? [1, 2, 3, 4].includes(count) : Number.isInteger(count) && count >= 1 && count <= 8 && [2, 3].includes(height)) &&
@@ -735,7 +832,7 @@ async function executeMacro (candidate, recoveryWait = false) {
     const settle = async () => { for (let n = 0; n < 12 && !reason && ticks < limit && !terrain.stable(state); n++) await tick() }
     const landed = () => {
       if (!pending || Math.floor(state.position[1]) !== pending[1] || !terrain.stable(state)) return false
-      events.push(event(stairway ? 'descended' : 'tunneled', { quantity: 1, position: pending }))
+      events.push(event(stairway ? (ascending ? 'moved' : 'descended') : 'tunneled', { quantity: 1, position: pending }))
       pathTaken.push(pending)
       completed++
       pending = transit = null
@@ -747,6 +844,9 @@ async function executeMacro (candidate, recoveryWait = false) {
       const [x, y, z] = state.position.map(Math.floor)
       const [nextX, nextZ] = [x + direction[0], z + direction[1]]
       const column = Array.from({ length: height }, (_, n) => [nextX, y + height - 1 - descent - n, nextZ])
+      // From below a wall, its lower face can hide its top: expose ascent cells bottom-up, never guess the top.
+      if (ascending) column.reverse()
+      if (ascending && !terrain.clear([x, y + 2, z])) column.unshift([x, y + 2, z])
       const floor = [nextX, y - 1 - descent, nextZ]
       planned = [...column, floor]
       reason = watch()
@@ -784,13 +884,14 @@ async function executeMacro (candidate, recoveryWait = false) {
         if (!pending) {
           if (!below.support) { reason = 'unsafe_floor'; break }
           pending = target
-          transit = [nextX, y, nextZ].join(',')
+          transit = ascending ? [x, y + 1, z].join(',') : [nextX, y, nextZ].join(',')
         }
         arrived ||= Math.hypot(target[0] - state.position[0], target[2] - state.position[2]) < 0.15
         if (arrived && landed()) break
         if (!arrived) {
           await bot.lookAt(new Vec3(target[0], state.position[1] + bot.entity.eyeHeight, target[2]), true)
           bot.setControlState('forward', true)
+          if (ascending && state.position[1] < target[1] - 0.05) bot.setControlState('jump', true)
         }
         const previous = state.position
         await tick()
@@ -810,6 +911,15 @@ async function executeMacro (candidate, recoveryWait = false) {
       }
       landed()
       if (!reason) reason = completed === count ? (stairway ? 'stairs_completed' : 'tunnel_completed') : 'macro_tick_limit'
+      if (completed || events.some(e => e.kind === 'mined')) {
+        const start = initial.position.map(Math.floor)
+        const last = terrain.lastCut
+        if (!last || last.kind !== candidate.action_kind || !isDeepStrictEqual(last.direction, direction) ||
+            !isDeepStrictEqual(last.position, start)) {
+          if (!terrain.cutEntrances.some(p => isDeepStrictEqual(p, start))) terrain.cutEntrances.push(start)
+        }
+        terrain.lastCut = { kind: candidate.action_kind, direction, position: state.position.map(Math.floor) }
+      }
     }
   } else {
     invalid = true
@@ -823,12 +933,12 @@ async function executeMacro (candidate, recoveryWait = false) {
   if (!reason || activeTicks >= budget) reason = 'active_tick_limit'
   await pause()
   history = [...history.slice(-15), candidate.action_kind + ':' + reason]
-  state = await observation()
+  state = await observation(near)
   events.push(...drainEvents())
   if (invalid || ['output_not_ready', 'operation_failed', 'operation_unconfirmed', 'craft_unconfirmed', 'collect_unconfirmed', 'place_unconfirmed'].includes(reason)) events.push(event('failed'))
   if (!events.length || !['cluster_completed', 'equip_completed', 'wait_completed', 'craft_completed', 'place_completed', 'furnace_loaded', 'furnace_collected', 'stairs_completed', 'tunnel_completed'].includes(reason)) events.push(event('stopped'))
   return stepResult(candidate, started, ticks, state, events, reason,
-    { invalid, path: pathTaken, distanceMoved: distance })
+    { invalid, path: pathTaken, distanceMoved: distance, digTicks })
 }
 
 async function cancelSelection (candidate) {
@@ -962,7 +1072,8 @@ async function informationFixture (payload) {
       'production', 'production_no_tool', 'production_no_fuel', 'production_hazard', 'iron',
       'production_craft', 'production_place', 'production_furnace', 'stair', 'stair_exposed', 'stair_coal', 'stair_floor',
       'stair_gap', 'stair_break', 'stair_limit', 'stair_budget', 'stair_no_tool', 'stair_gravel', 'stair_hold', 'stair_iron',
-      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'tunnel_sand', 'diamond', 'diamond_given', 'steps', 'escape'].includes(payload.scope)) ||
+      'tunnel', 'tunnel_iron', 'tunnel_long', 'tunnel_break', 'tunnel_budget', 'tunnel_no_tool', 'tunnel_sand', 'diamond', 'diamond_given', 'steps', 'escape',
+      'ascent_pillar', 'ascent_ledge', 'ascent_stair', 'safe_drop', 'recover_table', 'unsafe_cut'].includes(payload.scope)) ||
     (Object.hasOwn(payload, 'episode_id') && (!identifier(payload.episode_id) || !identifier(payload.attempt_id)))) fail('invalid_request')
   await reset({ episode_id: payload.episode_id || 'information-audit', attempt_id: payload.attempt_id || 'fixture' })
   natural = false
@@ -1065,7 +1176,27 @@ async function informationFixture (payload) {
     // Water reaches the bot only after the hold has begun: a real hazard a calm wait must not hide.
     if (payload.scope === 'stair_hold') await server.command(`setblock ${x - 4} ${y} ${z} minecraft:water`)
   }
-  await server.command(`tp ResearchBot ${x + 0.5} ${y} ${z + 0.5}`)
+  if (['ascent_pillar', 'ascent_ledge', 'ascent_stair', 'safe_drop', 'recover_table', 'unsafe_cut'].includes(payload.scope)) {
+    await server.command('clear ResearchBot')
+    await server.command('replaceitem entity ResearchBot weapon.mainhand minecraft:iron_pickaxe')
+    await server.command('give ResearchBot minecraft:dirt 4')
+    if (payload.scope === 'ascent_pillar') {
+      await server.command(`fill ${x - 1} ${y} ${z - 1} ${x + 1} ${y + 3} ${z + 1} minecraft:stone`)
+      await server.command(`fill ${x} ${y} ${z} ${x} ${y + 4} ${z} minecraft:air`)
+    }
+    if (payload.scope === 'ascent_ledge') await server.command(`fill ${x + 1} ${y} ${z} ${x + 1} ${y + 1} ${z} minecraft:stone`)
+    if (payload.scope === 'ascent_stair' || payload.scope === 'unsafe_cut') {
+      await server.command(`fill ${x + 1} ${y} ${z - 1} ${x + 7} ${y + 5} ${z + 1} minecraft:stone`)
+      if (payload.scope === 'unsafe_cut') await server.command(`setblock ${x + 1} ${y + 2} ${z} minecraft:gravel`)
+    }
+    if (payload.scope === 'recover_table') await server.command(`setblock ${x + 1} ${y} ${z} minecraft:crafting_table`)
+    if (payload.scope === 'safe_drop') {
+      await server.command(`fill ${x + 1} ${y - 4} ${z - 1} ${x + 2} ${y - 4} ${z + 1} minecraft:stone`)
+      await server.command(`fill ${x + 1} ${y - 3} ${z - 1} ${x + 2} ${y - 1} ${z + 1} minecraft:air`)
+    }
+    await server.command(`setblock ${cell} minecraft:${target}`)
+  }
+  await server.command(`tp ResearchBot ${x + (payload.scope === 'safe_drop' ? 0.9 : 0.5)} ${y} ${z + 0.5}`)
   await sleep(150)
   await bot.look(0, 0, true)
   let setupTicks = await advance(5, true)
