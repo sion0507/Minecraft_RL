@@ -8,7 +8,7 @@
 
 **실패·미실행:** T2 head의 철 과제 평가는 실행하지 않았다. T2가 T(1,205틱)보다 더 빠른 이유는 학습 시드와 막다른 길 수정 3건이 섞여 분리하지 못했다. M·critic 표 기준값 학습·계단 후보 수 제한 변형·critic 재학습을 끈 대조군은 그대로 미실행이다. 시간 비용 설정의 학습 시드는 2개, 월드는 고정 하나다. 중단됐던 이전 T2 실행(1,379결정)은 `artifacts/exp/T2-interrupted-train-stone_pick/`에 보존했고 결과에 쓰지 않았다.
 
-**검증·발행:** `tools/exp/paired.py`에 T2 팔만 추가했다(`src`·`configs`·`bridge` 변경 없음, 실행 시 dirty 0). 실험 브랜치 `exp/candidate-structure`를 origin에 올리고(bbb1f27) 결과 기록 이슈 #57 [T14C]과 critic 기준값 평가 이슈 #56 [T14D]을 발행했다(둘 다 Open). main 병합 PR은 만들지 않았다.
+**검증·발행:** `tools/exp/paired.py`에 T2 팔만 추가했다(`src`·`configs`·`bridge` 변경 없음, 실행 시 dirty 0). 실험 브랜치 `exp/candidate-structure`를 origin에 올리고(bbb1f27) 결과 기록 이슈 #57 [T14C]과 critic 기준값 평가 이슈 #56 [T14D]을 발행했다(둘 다 Open). 이후 사용자 지시로 PR #58을 만들어 main에 병합했고(merge commit 177c997, 병합 대상 0ebd201에서 pytest 328개·`mypy .` 통과) #57을 종료했다. #56은 후속 작업이라 Open이다. 로컬 main은 origin/main과 같다. 원시 trace·head는 실험 worktree(`Minecraft_learning-exp/artifacts/exp/`)에 그대로 있다.
 
 ## 2026-11-13 — 후보 구조·시간 비용 실험 종료(실험 브랜치 exp/candidate-structure), T 재현은 미검증
 
