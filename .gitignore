@@ -49,3 +49,7 @@ node_modules/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Worktree links to the main checkout
+/bridge/node_modules
+/checkpoints

@@ -8,6 +8,7 @@ import time
 import sys
 import gzip
 import hashlib
+import statistics
 import json
 import math
 import shutil
@@ -27,8 +28,12 @@ from .rpc import EpisodeError
 
 
 class SignalLearner(EpisodeLearner):
-    def __init__(self, model: NanoJevAdapter, seed: int, directory: Path, validation: list[State]) -> None:
-        super().__init__(model,PPOConfig(choice_lr=3e-4),seed,flush_on_finish=False,critic_warmup=8,pilot_signal=True)
+    def __init__(self, model: NanoJevAdapter, seed: int, directory: Path, validation: list[State],
+                 config: PPOConfig | None = None, replay_epochs: int = 0) -> None:
+        super().__init__(model,config or PPOConfig(choice_lr=3e-4),seed,flush_on_finish=False,critic_warmup=8,pilot_signal=True)
+        # exp/candidate-structure: after every actor update, fit the critic on all completed MC returns so far
+        # (critic-offline diagnostic 2026-11-12: cumulative MC with more head steps raised predictive EV 0.21 -> 0.33).
+        self.replay_epochs=replay_epochs
         self.directory,self.validation=directory,validation
         self.history: list[Transition]=[]
         self.fixed_reports: list[dict[str,Any]]=[]
@@ -58,8 +63,20 @@ class SignalLearner(EpisodeLearner):
         else:
             self.ppo.config=self.actor_config
             report=self.ppo.update(self.rows)
+            if self.replay_epochs:
+                # The next rollout's values come from this fit, which has not seen that rollout: an unbiased baseline.
+                fitting=[row for row,target in zip(self.history,targets) if target is not None]
+                self.ppo.config=self.actor_config.model_copy(update={"critic_only":True,"epochs":self.replay_epochs})
+                replay=self.ppo.update(fitting,mc_targets=[float(t) for t in targets if t is not None])
+                self.ppo.config=self.actor_config
+                report["critic_replay"]={"samples":len(fitting),"steps":len(replay["losses"]),
+                                         "loss_first":replay["losses"][0],"loss_last":replay["losses"][-1]}
         current=[(row,float(target)) for row,target in zip(self.history[offset:],targets[offset:]) if target is not None]
         metrics=critic_metrics(self.model,[r for r,_ in current],[t for _,t in current])
+        # Predictive EV: the values recorded at selection time, before this rollout was learned (the honest number).
+        errors=[t-r.old_value for r,t in current]
+        spread=statistics.pvariance([t for _,t in current]) if len(current)>1 else 0.
+        metrics["predictive_ev"]=1-statistics.pvariance(errors)/spread if spread>0 else None
         self.updates+=1
         if warmup and metrics["critic_ev"] is not None and metrics["critic_ev"]>=.3:
             self.warmup_reason="ev_threshold"

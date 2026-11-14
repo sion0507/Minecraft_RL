@@ -1,12 +1,20 @@
-"""Wood candidates derived only from the saved public observation."""
+"""Resource candidates derived only from the saved public observation."""
 
 import math
 from typing import Literal
 
 from pydantic import JsonValue
 
-from .navigation import ORE_TOP, PICKS, fresh_movement_candidates, observed_routes, ore_search_choices
+from .navigation import (
+    ORE_TOP, PICKS, fresh_movement_candidates, observed_routes, ore_search_choices, stone_search_choices, supports_way_back,
+    toward_path,
+)
 from .schema import Candidate, CandidateSet, Goal, Observation, allocate
+
+APPROACHES = 3  # nearest distinct targets offered as walks; more are the same choice again (exp/candidate-structure)
+APPROACHES_WHEN_MINEABLE = 2
+TOWARD = 2  # walks toward a visible target that no observed 16-step route reaches yet
+Draft = tuple[Literal["place_or_equip", "mine_visible_cluster", "move_observed", "wait"], dict[str, JsonValue], str]
 
 
 def generate_wood_candidates(observation: Observation, goal: Goal) -> CandidateSet:
@@ -14,23 +22,26 @@ def generate_wood_candidates(observation: Observation, goal: Goal) -> CandidateS
 
 
 def generate_resource_candidates(observation: Observation, goal: Goal) -> CandidateSet:
-    candidates: list[Candidate] = []
     remaining = goal.quantity - observation.inventory.get(goal.target, 0)
     block = {"cobblestone": "stone", "diamond": "diamond_ore"}.get(goal.target, goal.target)
     if not observation.remaining_ticks or remaining <= 0 or not (block.endswith("_log") or block in {"stone", *ORE_TOP}):
         return allocate([])
 
-    def search() -> CandidateSet:
-        return allocate(ore_search_choices(observation, block, remaining) if block in ORE_TOP
-                        else fresh_movement_candidates(observation))
-
-    def add(kind: Literal["place_or_equip", "mine_visible_cluster", "move_observed", "wait"],
-            params: dict[str, JsonValue], description: str) -> None:
-        candidates.append(Candidate(
-            candidate_id=f"{observation.obs_id}:wood:{len(candidates)}", action_kind=kind,
+    def build(drafts: list[Draft]) -> list[Candidate]:
+        return [Candidate(
+            candidate_id=f"{observation.obs_id}:wood:{index}", action_kind=kind,
             params=params, max_ticks=min(20 if kind == "wait" else 400, observation.remaining_ticks),
             stop_rule_id="wood_or_hazard", source_obs_id=observation.obs_id, description=description,
-        ))
+        ) for index, (kind, params, description) in enumerate(drafts)]
+
+    def walk(path: list[list[float]], description: str) -> Draft:
+        return "move_observed", {"path": [[v for v in p] for p in path], "map_version": observation.map_version}, description
+
+    def search(toward: list[Draft]) -> CandidateSet:
+        found = (ore_search_choices(observation, block, remaining) if block in ORE_TOP
+                 else stone_search_choices(observation, remaining) if block == "stone"
+                 else fresh_movement_candidates(observation))
+        return allocate([*build(toward), *found])
 
     routes = observed_routes(observation)
     for drop in observation.drops:
@@ -40,59 +51,90 @@ def generate_resource_candidates(observation: Observation, goal: Goal) -> Candid
                             if math.dist(path[-1] if path else observation.position, drop.position) <= 1.0]
         if routes_near_drop:
             _, path = min(routes_near_drop, key=lambda pair: (len(pair[1]), pair[0]))
-            if path:
-                add("move_observed", {"path": [[v for v in p] for p in path], "map_version": observation.map_version},
-                    f"Collect observed {drop.item} drop")
-            else:
-                add("wait", {}, f"Wait for observed {drop.item} pickup")
-            return allocate(candidates)
-    logs = sorted({tuple(cell.position) for cell in observation.observed_map if cell.block == block and cell.visible},
-                  key=lambda p: (math.dist(p, observation.position), p))
-    if not logs:
-        return search()
+            return allocate(build([walk(path, f"Collect observed {drop.item} drop")] if path
+                                  else [("wait", {}, f"Wait for observed {drop.item} pickup")]))
+    # A step the agent came down by is never a target (nothing digs back up): not mined, and not walked up to either,
+    # or two such steps are offered as approach after approach to the end of the budget (T evaluation seed 15011).
+    sources = [cell for cell in observation.observed_map
+               if cell.block == block and not supports_way_back(observation, cell.position)]
+    targets = sorted({tuple(cell.position) for cell in sources if cell.visible},
+                     key=lambda p: (math.dist(p, observation.position), p))
+
+    def toward_walks(cells: list[tuple[float, ...]], seen: str) -> list[Draft]:
+        found: list[Draft] = []
+        ends: set[str] = set()
+        for target in cells:
+            centre = [v + 0.5 for v in target]
+            now = math.dist(observation.position, centre)
+            path = toward_path(observation, routes, centre)
+            if path is None or str(path[-1]) in ends:
+                continue
+            ends.add(str(path[-1]))
+            found.append(walk(path, f"Walk toward {seen} {goal.target} at {list(target)}: {now:.0f} blocks away now, "
+                                    f"{math.dist(path[-1], centre):.0f} after these {len(path)} steps"))
+            if len(found) == TOWARD:
+                break
+        return found
+
+    if not targets:
+        # Nothing in view: a cell remembered from an earlier observation is still a place to walk back to.
+        remembered = sorted({tuple(cell.position) for cell in sources},
+                            key=lambda p: (math.dist(p, observation.position), p))
+        return search(toward_walks(remembered, "remembered (seen earlier, may have changed)"))
+    mines: list[Draft] = []
+    approaches: list[tuple[int, Draft]] = []
+    equip: Draft | None = None
     seen_paths: set[str] = set()
     used: set[tuple[float, ...]] = set()
+    repeated = False  # an approach ends in a cell the agent already stood in
     eye = [observation.position[0], observation.position[1] + 1.62, observation.position[2]]
-    for target in logs:
+
+    def close(p: tuple[float, ...]) -> bool:
+        return (math.hypot(p[0] + 0.5 - observation.position[0], p[2] + 0.5 - observation.position[2]) <= 1.8
+                and math.dist([v + 0.5 for v in p], eye) <= 4.5 and p[1] >= math.floor(observation.position[1]))
+
+    for target in targets:
         if target in used:
             continue
-        def close(p: tuple[float, ...]) -> bool:
-            return (math.hypot(p[0] + 0.5 - observation.position[0],
-                               p[2] + 0.5 - observation.position[2]) <= 1.8
-                    and math.dist([v + 0.5 for v in p], eye) <= 4.5
-                    and p[1] >= math.floor(observation.position[1]))
         if close(target):
             tools = (["netherite_axe", "diamond_axe", "iron_axe", "stone_axe", "wooden_axe", "golden_axe"] if block.endswith("_log")
                      else PICKS[:3] if block == "diamond_ore" else PICKS[:4] if block == "iron_ore" else PICKS)
-            axes = [name for name in tools
-                    if observation.inventory.get(name, 0)]
-            if not block.endswith("_log") and not axes:
+            carried = [name for name in tools if observation.inventory.get(name, 0)]
+            if not block.endswith("_log") and not carried:
                 continue
-            if axes and observation.tool != axes[0]:
-                add("place_or_equip", {"item": axes[0]}, f"Equip {axes[0]}")
+            if carried and observation.tool != carried[0]:
+                equip = ("place_or_equip", {"item": carried[0]}, f"Equip {carried[0]}")
                 break
             cluster = [target]
             for point in cluster:
-                for other in logs:
+                for other in targets:
                     if (other not in cluster and close(other) and math.dist(point, other) == 1
                             and len(cluster) < min(8, remaining)):
                         cluster.append(other)
             used.update(cluster)
             for count in sorted({1, len(cluster)}):
-                add("mine_visible_cluster", {"block": block, "blocks": [list(p) for p in cluster[:count]],
-                                             "map_version": observation.map_version},
-                    f"Mine {count} exposed {goal.target} at {list(target)} and collect its drops")
+                mines.append(("mine_visible_cluster", {"block": block, "blocks": [list(p) for p in cluster[:count]],
+                                                       "map_version": observation.map_version},
+                              f"Mine {count} exposed {goal.target} at {list(target)} within reach now and collect its drops"))
         else:
-            approaches = [path for (x, y, z), path in routes.items() if path and
-                          math.hypot(x - target[0], z - target[2]) <= 1.01 and y <= target[1] <= y + 3]
-            if approaches:
-                path = min(approaches, key=lambda route: (len(route), route))
-                signature = str(path)
-                if signature not in seen_paths:
-                    seen_paths.add(signature)
-                    add("move_observed", {"path": [[v for v in p] for p in path], "map_version": observation.map_version},
-                        f"Approach exposed {goal.target} at {list(target)}")
-    if not candidates:
-        # Seen but unreachable: ores need cutting; a log seen beyond every 16-step route (radius 32, #44) needs walking.
-        return search()
-    return allocate(candidates)
+            found = [path for (x, y, z), path in routes.items() if path and
+                     math.hypot(x - target[0], z - target[2]) <= 1.01 and y <= target[1] <= y + 3]
+            if found:
+                path = min(found, key=lambda route: (len(route), route))
+                if str(path) not in seen_paths:
+                    seen_paths.add(str(path))
+                    repeated |= [float(math.floor(path[-1][0])), path[-1][1], float(math.floor(path[-1][2]))] in observation.visited
+                    approaches.append((len(path), walk(path, f"Approach exposed {goal.target} at {list(target)}: "
+                                                             f"{len(path)} steps to stand next to it")))
+    if equip is not None:
+        return allocate(build([*(draft for _, draft in approaches[:APPROACHES_WHEN_MINEABLE]), equip]))
+    # Every further reachable target is the same decision again: keep the nearest few (exp/candidate-structure).
+    nearest = [draft for _, draft in sorted(approaches, key=lambda pair: pair[0])]
+    kept = [*mines, *nearest[:APPROACHES_WHEN_MINEABLE if mines else APPROACHES]]
+    if kept:
+        # Having stood at an approach's end without the target coming into reach (it is above, below or out of sight
+        # from there), that walk alone is the same move for ever: the cuts are offered next to it (T iron slots 4, 8).
+        return search(kept) if repeated and not mines else allocate(build(kept))
+    # Seen but beyond every observed 16-step route: the walk that ends nearest to it, next to the search choices
+    # (ores and stone can be cut toward; a log needs walking).
+    return search(toward_walks(targets, "exposed"))

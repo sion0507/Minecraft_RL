@@ -1,0 +1,12 @@
+# exp/candidate-structure P3: a later link of the diamond chain, independent of the stone stage:
+# natural G2 start with the provided stone pickaxe, 3 iron ore within 6000 of its 12000 ticks.
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G2, --budget-ticks, "6000"]
+rpc_timeout_seconds: 180.0
+max_decisions: 6000
+wall_limit_seconds: 2700.0
+pilot_signal: true
+goal: {goal_id: "pilot:iron", kind: collect, target: iron_ore, quantity: 3}
+chain:
+  - {goal_id: "pilot:iron", kind: collect, target: iron_ore, quantity: 3}
+model: {checkpoint: ../../checkpoints/nanojev, mode: sampling, seed: 11015}

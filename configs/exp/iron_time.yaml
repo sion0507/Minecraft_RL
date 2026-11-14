@@ -1,0 +1,13 @@
+# exp/candidate-structure P3 with the arm T price on time (arm M trains on it next to stone_pick_time.yaml);
+# iron.yaml keeps the PLAN 8.1 reward and is the held-out evaluation config.
+backend: rpc
+command: [node, bridge/minecraft.js, --task, G2, --budget-ticks, "6000"]
+rpc_timeout_seconds: 180.0
+max_decisions: 6000
+wall_limit_seconds: 2700.0
+pilot_signal: true
+pilot_tick_cost: 0.000833333  # 1 per 1200 active ticks, as stone_pick_time.yaml
+goal: {goal_id: "pilot:iron", kind: collect, target: iron_ore, quantity: 3}
+chain:
+  - {goal_id: "pilot:iron", kind: collect, target: iron_ore, quantity: 3}
+model: {checkpoint: ../../checkpoints/nanojev, mode: sampling, seed: 11015}

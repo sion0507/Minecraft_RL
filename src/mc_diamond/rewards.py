@@ -29,10 +29,15 @@ class Reward:
 
 
 class RewardLedger:
-    def __init__(self, initial: Observation, *, discovery_reward: float = 0., pilot_signal: bool = False) -> None:
+    def __init__(self, initial: Observation, *, discovery_reward: float = 0., pilot_signal: bool = False,
+                 tick_cost: float | None = None) -> None:
         if not math.isfinite(discovery_reward) or discovery_reward < 0:
             raise ValueError("Discovery reward must be finite and nonnegative")
         self.discovery_reward = discovery_reward
+        # exp/candidate-structure: a pilot price per active tick; None keeps PLAN 8.1 (-0.1 over the whole local budget).
+        if tick_cost is not None and (not math.isfinite(tick_cost) or tick_cost < 0):
+            raise ValueError("Tick cost must be finite and nonnegative")
+        self.tick_cost = tick_cost
         self.pilot_signal = pilot_signal and initial.objective_kind == "local"
         self.goal_stock: dict[str, int] = {}
         self.collect_paid: dict[str, int] = {}
@@ -58,6 +63,8 @@ class RewardLedger:
         eligible = self.goal_eligible.setdefault(goal.goal_id,
             goal.kind not in COMPLETION_EVENT or before.inventory.get(goal.target, 0) < goal.quantity)
         rate = -.1 / self.max_ticks if self.objective == "local" else -.001 / 20
+        if self.tick_cost is not None and self.pilot_signal:
+            rate = -self.tick_cost
         components = {"time": rate * n}
         events = []
         for event in step.events:

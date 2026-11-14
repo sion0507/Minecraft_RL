@@ -149,6 +149,7 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
     chain = [config.goal.model_copy(update={"goal_id": "pilot:logs", "target": "oak_log", "quantity": 3}),
              config.goal.model_copy(update={"goal_id": "pilot:pick", "kind": "craft", "target": "wooden_pickaxe", "quantity": 1}),
              config.goal.model_copy(update={"goal_id": "pilot:stone"})] if config.pilot_signal else []
+    chain = list(config.chain) or chain
     chain_index = 0
     active: ActiveGoal | None = None
     trigger = "episode_start"
@@ -167,7 +168,8 @@ def run_episode(config: EpisodeConfig, environment: PolicyEnvironment,
             actor_before = learning.actor_transitions
         elif config.discovery_reward or config.pilot_signal:
             from .rewards import RewardLedger
-            evaluation_rewards = RewardLedger(initial, discovery_reward=config.discovery_reward, pilot_signal=config.pilot_signal)
+            evaluation_rewards = RewardLedger(initial, discovery_reward=config.discovery_reward, pilot_signal=config.pilot_signal,
+                                              tick_cost=config.pilot_tick_cost)
         start = initial
         emit("reset", initial)
         observation = environment.observe()
